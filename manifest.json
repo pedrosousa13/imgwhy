@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "imgwhy",
+  "version": "1.0.0",
+  "description": "Explains why the browser picked a given image, and simulates other sizes, viewport and DPR against the page's real candidates.",
+  "permissions": ["scripting", "activeTab"],
+  "action": {
+    "default_title": "imgwhy — why this image?",
+    "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+  },
+  "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "background": { "service_worker": "bg.js" }
+}
