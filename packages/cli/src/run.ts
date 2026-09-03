@@ -1,5 +1,7 @@
 import type { Capture, DeviceProfile } from '@imgwhy/core';
+import { parseArgs } from './args.js';
 import { loadDeviceProfiles } from './config.js';
+import { serializeCapture, writeCapture } from './out.js';
 import { formatCapture } from './trace.js';
 import { parsePageUrl } from './url.js';
 
@@ -8,15 +10,19 @@ export type CaptureFn = (options: { url: string; profiles: DeviceProfile[] }) =>
 /** What the command writes and the status it leaves behind. */
 export type Outcome = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: imgwhy <url>';
-
 const fail = (message: string): Outcome => ({ code: 1, stdout: '', stderr: `${message}\n` });
 
 /**
  * Render one page as every device profile and trace every image on it.
  *
- * The URL and the device set are both checked before anything opens a browser,
- * so a typo in either costs no browser start.
+ * The command line, the URL and the device set are all checked before anything
+ * opens a browser, so a typo in any of them costs no browser start.
+ *
+ * The Capture goes wherever the line asked and nowhere else. `--out` writes a
+ * file before anything is printed, because a run that could not produce the
+ * file it was told to produce has failed, and printing a trace first would say
+ * otherwise. A page with no image is that same kind of failure, so it writes
+ * no file either.
  */
 export async function run(
   argv: string[],
@@ -30,10 +36,10 @@ export async function run(
    */
   cwd: string = '.',
 ): Promise<Outcome> {
-  const [raw, ...rest] = argv;
-  if (raw === undefined || rest.length > 0) return fail(USAGE);
+  const args = parseArgs(argv);
+  if (!args.ok) return fail(args.message);
 
-  const target = parsePageUrl(raw);
+  const target = parsePageUrl(args.url);
   if (!target.ok) return fail(target.message);
 
   const devices = loadDeviceProfiles(cwd);
@@ -50,5 +56,11 @@ export async function run(
     return fail(`${captured.url} carries no <img> element, so there is nothing to explain.`);
   }
 
-  return { code: 0, stdout: `${formatCapture(captured)}\n`, stderr: '' };
+  if (args.out !== null) {
+    const written = writeCapture(args.out, captured);
+    if (!written.ok) return fail(written.message);
+  }
+
+  const stdout = args.json ? serializeCapture(captured) : `${formatCapture(captured)}\n`;
+  return { code: 0, stdout, stderr: '' };
 }
