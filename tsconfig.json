@@ -1,0 +1,23 @@
+{
+  // The editor's fallback project. Each package's own tsconfig is what
+  // `npm run typecheck` runs, and tsserver prefers those for `src`; this file
+  // exists so the `test` directories, which no package tsconfig.json includes,
+  // resolve their imports instead of falling back to compiler defaults.
+  //
+  // `packages/core` is deliberately outside it. This project declares DOM and
+  // Node types, because `runner` drives a page and the tests are Node
+  // programs, and core's whole contract is that it sees neither. A project has
+  // one global scope, so covering core here would hand core's source the very
+  // globals it must not have — and core's tests import `../src`, so excluding
+  // only `packages/core/src` would still pull those files in. Core carries its
+  // own two projects instead: `packages/core/tsconfig.json` for `src` and
+  // `packages/core/test/tsconfig.json`, which tsserver finds without help.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["packages/*/src", "packages/*/test"],
+  "exclude": ["packages/core"]
+}

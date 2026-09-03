@@ -1,0 +1,13 @@
+{
+  // Core's tests, in their own project because the root fallback cannot cover
+  // them: it declares DOM and Node globals, and these files import `../src`,
+  // which must see neither. It sits in `test/` so tsserver finds it walking up
+  // from any file here.
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["."]
+}
