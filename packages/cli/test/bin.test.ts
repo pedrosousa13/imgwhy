@@ -15,6 +15,7 @@ import type { Capture } from '@imgwhy/core';
 import { DEFAULT_PROFILES } from '@imgwhy/runner';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type FixtureServer, startFixtureServer } from '../../runner/test/fixture-server.js';
+import { USAGE } from '../src/args.js';
 
 const run = promisify(execFile);
 const bin = fileURLToPath(new URL('../dist/bin.js', import.meta.url));
@@ -232,9 +233,7 @@ describe('the imgwhy command', () => {
 
     expect(ran.code).toBe(1);
     expect(ran.stdout).toBe('');
-    expect(ran.stderr).toBe(
-      '--out needs a file path after it\nusage: imgwhy [--json] [--out <file>] <url>\n',
-    );
+    expect(ran.stderr).toBe(`--out needs a file path after it\n${USAGE}\n`);
   });
 });
 
@@ -266,10 +265,28 @@ describe('the imgwhy command, asked for the capture itself', () => {
     expect(ran.stderr).toBe('');
     expect(ran.code).toBe(0);
     expect(readdirSync(dir)).toEqual(['capture.json']);
-    // The same Capture reached both sinks, byte for byte.
+    // The same Capture reached both sinks, byte for byte. Whether a written
+    // Capture parses back unchanged is `run.test.ts`'s to check, where the
+    // original is in hand to compare against.
     expect(readFileSync(out, 'utf8')).toBe(ran.stdout);
-    const readBack: Capture = JSON.parse(readFileSync(out, 'utf8'));
-    expect(readBack).toEqual(JSON.parse(ran.stdout));
+  }, 120_000);
+
+  it('writes the capture of a page carrying no image, and calls the run done', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'imgwhy-bin-empty-'));
+    const out = join(dir, 'capture.json');
+    const url = `${server.url}/no-images.html`;
+
+    const ran = await imgwhy(dir, '--out', out, url);
+
+    // The file was asked for and written, so the run worked. Only the trace
+    // had nothing to say, and it says so on the other stream.
+    expect(ran.code).toBe(0);
+    expect(ran.stdout).toBe('');
+    expect(ran.stderr).toContain('carries no <img> element');
+    expect(readdirSync(dir)).toEqual(['capture.json']);
+    const capture: Capture = JSON.parse(readFileSync(out, 'utf8'));
+    expect(capture.url).toBe(url);
+    expect(capture.runs.map((deviceRun) => deviceRun.images.length)).toEqual([0, 0, 0, 0, 0]);
   }, 120_000);
 
   it('writes where --out points even when the URL reads like a path', async () => {

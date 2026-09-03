@@ -5,6 +5,7 @@ import type { Capture, CapturedImage, DeviceRun } from '@imgwhy/core';
 import { parseSrcset } from '@imgwhy/core';
 import { DEFAULT_PROFILES } from '@imgwhy/runner';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { USAGE } from '../src/args.js';
 import { type CaptureFn, run } from '../src/run.js';
 
 /** A directory with no `imgwhy.config.json`, so a run takes the defaults. */
@@ -70,6 +71,12 @@ const gallery = (): Capture => {
     runs,
   };
 };
+
+/** The same capture with every device rendering nothing at all. */
+const withNoImages = (capture: Capture): Capture => ({
+  ...capture,
+  runs: capture.runs.map((run) => ({ ...run, images: [] })),
+});
 
 /** The same capture with one device's run replaced, named by its device id. */
 const on = (capture: Capture, deviceId: string, images: CapturedImage[]): Capture => ({
@@ -246,10 +253,11 @@ describe('run', () => {
   });
 
   it('says plainly when the page carries no image at all', async () => {
-    const empty = gallery();
-    empty.runs = empty.runs.map((r) => ({ ...r, images: [] }));
-
-    const outcome = await run(['https://example.com/gallery'], returning(empty), cwd);
+    const outcome = await run(
+      ['https://example.com/gallery'],
+      returning(withNoImages(gallery())),
+      cwd,
+    );
 
     expect(outcome.code).toBe(1);
     expect(outcome.stdout).toBe('');
@@ -339,7 +347,7 @@ describe('run', () => {
     const outcome = await run([], capture, cwd);
 
     expect(outcome.code).toBe(1);
-    expect(outcome.stderr).toContain('usage: imgwhy [--json] [--out <file>] <url>');
+    expect(outcome.stderr).toContain(USAGE);
     expect(started).toBe(0);
   });
 });
@@ -410,9 +418,11 @@ describe('run, asked for the capture itself', () => {
     const readBack: Capture = JSON.parse(readFileSync(out, 'utf8'));
 
     // Through a real file, so anything JSON cannot carry is caught here.
-    expect(readBack).toEqual(original);
-    expect(readBack.runs[0].images[1].candidates).toEqual(parseSrcset(HERO_SRCSET));
-    expect(readBack.devices).toEqual(DEFAULT_PROFILES);
+    // Strictly, because `toEqual` counts a field `JSON.stringify` dropped as
+    // equal to one that was never there.
+    expect(readBack).toStrictEqual(original);
+    expect(readBack.runs[0].images[1].candidates).toStrictEqual(parseSrcset(HERO_SRCSET));
+    expect(readBack.devices).toStrictEqual(DEFAULT_PROFILES);
   });
 
   it('writes no file at all when --out is not given', async () => {
@@ -446,21 +456,30 @@ describe('run, asked for the capture itself', () => {
     expect(readdirSync(cwd)).toEqual([]);
   });
 
-  it('exits non-zero and writes nothing for a page carrying no image', async () => {
+  it('writes the capture of a page with no image, which is a capture like any other', async () => {
     const out = join(cwd, 'capture.json');
-    const empty = gallery();
-    empty.runs = empty.runs.map((r) => ({ ...r, images: [] }));
+    const empty = withNoImages(gallery());
 
-    const outcome = await run(
-      ['--json', '--out', out, 'https://example.com/gallery'],
-      returning(empty),
-      cwd,
-    );
+    const outcome = await run(['--out', out, 'https://example.com/gallery'], returning(empty), cwd);
 
-    expect(outcome.code).toBe(1);
+    // The artifact was asked for and produced, so the run worked. An image
+    // that has gone missing from a page is the diff a kept Capture is for.
+    expect(outcome.code).toBe(0);
+    expect(JSON.parse(readFileSync(out, 'utf8'))).toStrictEqual(empty);
+    expect(readdirSync(cwd)).toEqual(['capture.json']);
+    // The trace is the one output with nothing to say, and it says so.
     expect(outcome.stdout).toBe('');
     expect(outcome.stderr).toContain('carries no <img> element');
-    expect(readdirSync(cwd)).toEqual([]);
+  });
+
+  it('prints the capture of a page carrying no image', async () => {
+    const empty = withNoImages(gallery());
+
+    const outcome = await run(['--json', 'https://example.com/gallery'], returning(empty), cwd);
+
+    expect(outcome.code).toBe(0);
+    expect(JSON.parse(outcome.stdout)).toStrictEqual(empty);
+    expect(outcome.stderr).toContain('carries no <img> element');
   });
 });
 

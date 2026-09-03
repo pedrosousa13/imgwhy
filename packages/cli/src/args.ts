@@ -21,6 +21,10 @@ const fail = (message: string): ParsedArgs => ({ ok: false, message: `${message}
  * - `--out` takes the next argument, which may not be missing and may not look
  *   like another option. Consuming an option there would write a file named
  *   `--json` and leave the run looking like it worked.
+ * - `--out` is given once, and a second one is refused by name. A line naming
+ *   two paths asks for two files; keeping the last of them would drop a file
+ *   the person asked for and say nothing, which is the one thing this parser
+ *   does nowhere else.
  * - An unrecognised `-` argument is refused by name. It is a typo far more
  *   often than it is a URL, and guessing would open a browser on it.
  *
@@ -39,6 +43,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       continue;
     }
     if (arg === '--out') {
+      if (out !== null) return fail('--out was given twice, and a run writes one file');
       const path = argv[i + 1];
       if (path === undefined || path.startsWith('-')) {
         return fail('--out needs a file path after it');

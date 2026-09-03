@@ -82,6 +82,12 @@ describe('parseArgs', () => {
     );
   });
 
+  it('refuses a second --out by name, rather than keeping one path and dropping the other', () => {
+    expect(rejected(['--out', 'first.json', '--out', 'second.json', 'https://example.com'])).toBe(
+      `--out was given twice, and a run writes one file\n${USAGE}`,
+    );
+  });
+
   it('refuses to treat the next option as the --out path', () => {
     // Without this, `imgwhy --out --json <url>` would quietly write a file
     // named `--json` and print no JSON at all. A real path starting with a

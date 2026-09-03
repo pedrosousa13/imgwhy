@@ -1,7 +1,8 @@
 import { writeFileSync } from 'node:fs';
 import type { Capture } from '@imgwhy/core';
+import { messageOf } from './message.js';
 
-export type Written = { ok: true } | { ok: false; message: string };
+export type WrittenCapture = { ok: true } | { ok: false; message: string };
 
 /**
  * The Capture as the file and the stream both carry it.
@@ -30,19 +31,19 @@ export const serializeCapture = (capture: Capture): string =>
  * URL a redirect chose, which a hostile host controls — from a response, or
  * from the Capture may reach this function. `path` arrives from `parseArgs`
  * and goes to `writeFileSync` unchanged: not joined, not resolved, not
- * defaulted from anything. That is why there is no second parameter here, and
- * why adding one that derives a name would be the bug to watch for.
+ * defaulted from anything. The name comes from `path` and from nowhere else:
+ * no other parameter here feeds it, and adding one that derived a name from
+ * the page would be the bug to watch for.
  *
  * A path that cannot be written is a message, not a throw. The caller has a
  * trace to suppress: a run that failed to produce the file it was asked for
  * should not also print as if it had worked.
  */
-export function writeCapture(path: string, capture: Capture): Written {
+export function writeCapture(path: string, capture: Capture): WrittenCapture {
   try {
     writeFileSync(path, serializeCapture(capture), 'utf8');
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { ok: false, message: `${path} could not be written: ${message}` };
+    return { ok: false, message: `${path} could not be written: ${messageOf(error)}` };
   }
   return { ok: true };
 }
