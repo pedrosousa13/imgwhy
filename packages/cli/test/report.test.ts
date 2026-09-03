@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { type FixtureServer, startFixtureServer } from '../../runner/test/fixture-server.js';
+import { type FixtureServer, startFixtureServer } from '../../../test/fixture-server.js';
 
 const execFileAsync = promisify(execFile);
 const bin = fileURLToPath(new URL('../dist/bin.js', import.meta.url));
@@ -105,12 +105,24 @@ describe('imgwhy --report', () => {
       '1080w',
     ]);
 
-    // The logo had nothing to choose, and says so — while still reporting the
-    // bytes it cost, because a file nothing selected still crossed the wire.
+    // The logo had nothing to choose, and says so.
     const logo = page.locator('tbody tr').nth(0);
     expect(await logo.locator('td .picked').allTextContents()).toEqual(['—', '—', '—', '—', '—']);
-    for (const bytes of await logo.locator('td .bytes').allTextContents()) {
-      expect(bytes).toMatch(/^\d+ bytes$/);
+
+    // What every response cost, on every device — for the two images the load
+    // event waited for. The logo is the third, and it is `loading=lazy`: the
+    // load event does not wait for one of those, so a render can finish with
+    // it still in flight and no transfer size recorded for it, which reads as
+    // a genuine unknown rather than as a zero. So the strong claim is scoped
+    // to the eager images, the way `bin.test.ts` scopes the same claim, and a
+    // no-srcset image whose bytes *were* recorded is checked in the report
+    // package, where a Capture is written rather than measured.
+    for (const eager of [1, 2]) {
+      const row = page.locator('tbody tr').nth(eager);
+      const bytes = await row.locator('td .bytes').allTextContents();
+
+      expect(bytes).toHaveLength(5);
+      for (const cell of bytes) expect(cell).toMatch(/^\d+ bytes$/);
     }
 
     // A system font, resolved by the browser rather than fetched.

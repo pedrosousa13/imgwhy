@@ -1,9 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
-import { parse, read, sources } from '../../../test/source.js';
+import { REFUSED_IMPORT, leaving, reaches, read, sources } from '../../../test/source.js';
 
 const src = fileURLToPath(new URL('../src', import.meta.url));
 const manifest = fileURLToPath(new URL('../package.json', import.meta.url));
@@ -23,95 +22,13 @@ const manifest = fileURLToPath(new URL('../package.json', import.meta.url));
  */
 const ALLOWED = new Set(['@imgwhy/core', 'playwright']);
 
-/** What one module reaches for, split by whether the reach can be checked. */
-type Reaches = {
-  /** The specifiers it names, in the order they are written. */
-  specifiers: string[];
-  /** The routes out that carry no specifier to check, one line each. */
-  refused: string[];
-};
-
-const REFUSED_IMPORT = 'reaches a module through an import() it computes at run time';
-
 /**
- * Read what a module reaches for out of TypeScript's own syntax tree.
+ * Every way one module leaves this package, one line each. Empty is clean.
  *
- * `parse` says why a syntax tree and not a regex over the text. Both of these
- * left the package while a regex was doing the reading:
- *
- * ```ts
- * createRequire(import.meta.url)('@imgwhy/report');
- * await import(name);
- * ```
- *
- * A tree holds every form a module can arrive by. Two of those forms carry
- * nothing to check against the allowlist, so they are refused outright instead
- * of read:
- *
- * - `require`, under any name, including `createRequire`. This package is ESM
- *   throughout; the only thing `createRequire` does here is hand a specifier
- *   to a resolver that no static check can follow.
- * - A dynamic `import()` whose specifier is not a literal. `import(name)` has
- *   no name until it runs.
- *
- * What still gets past: a specifier assembled and run through `eval`, or a
- * module pulled in by something that is neither `import` nor `require` — a
- * loader hook, say. No check over source text can answer for those. The
- * manifest test below is the backstop, and only a partial one, because a
- * workspace hoists packages `runner` never declared and Node resolves them
- * anyway.
+ * `node:` is exempt here and is not in the report's mirror of this check. The
+ * runner opens browsers and reads files, so a Node built-in in it is the job.
  */
-function reaches(text: string): Reaches {
-  const specifiers: string[] = [];
-  const refused: string[] = [];
-
-  /** A specifier position: either a literal to check, or a refusal. */
-  const readSpecifier = (node: ts.Node | undefined): void => {
-    if (node && ts.isStringLiteralLike(node)) specifiers.push(node.text);
-    else refused.push(REFUSED_IMPORT);
-  };
-
-  const visit = (node: ts.Node): void => {
-    // `import …`, `import type …`, `export … from`, `export * from`.
-    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
-      readSpecifier(node.moduleSpecifier);
-    }
-    // `type X = import('…').Y`, which imports a module for its types alone.
-    else if (ts.isImportTypeNode(node)) {
-      readSpecifier(ts.isLiteralTypeNode(node.argument) ? node.argument.literal : node.argument);
-    }
-    // `import('…')`, whether awaited or not.
-    else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
-      readSpecifier(node.arguments[0]);
-    }
-    // `require`, `createRequire`, `module.require` — named anywhere at all,
-    // because a name is all it takes to reach a resolver this cannot read.
-    else if (ts.isIdentifier(node) && (node.text === 'require' || node.text === 'createRequire')) {
-      refused.push(`reaches a module through ${node.text}`);
-    }
-
-    ts.forEachChild(node, visit);
-  };
-
-  visit(parse(text));
-  return { specifiers, refused: [...new Set(refused)] };
-}
-
-/** The package a bare specifier belongs to, so a deep import cannot slip past. */
-const packageOf = (specifier: string): string =>
-  specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0];
-
-/** Every way one module leaves the package, one line each. Empty is clean. */
-function leaves(name: string, text: string): string[] {
-  const { specifiers, refused } = reaches(text);
-  return [
-    ...refused.map((why) => `${name} ${why}`),
-    ...specifiers
-      .filter((specifier) => !specifier.startsWith('.') && !specifier.startsWith('node:'))
-      .filter((specifier) => !ALLOWED.has(packageOf(specifier)))
-      .map((specifier) => `${name} imports ${specifier}`),
-  ];
-}
+const leaves = leaving(ALLOWED, true);
 
 describe('the runner package boundary', () => {
   const files = sources(src);

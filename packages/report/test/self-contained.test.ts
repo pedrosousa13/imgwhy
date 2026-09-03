@@ -54,7 +54,7 @@ const ATTRIBUTES = new Set(['lang', 'charset', 'name', 'content', 'class', 'scop
  * contributor, who adds a name to the allowlist because one link seemed
  * harmless: a `style` attribute carries `url()`, and every other name here
  * carries a URL a browser goes and gets. Both lists have to be edited to
- * introduce one, and this one says why it is refused.
+ * introduce one, and `refused` below says which of them stopped it.
  */
 const FETCHING = new Set([
   'src',
@@ -76,6 +76,21 @@ const FETCHING = new Set([
   'http-equiv',
   'xlink:href',
 ]);
+
+/**
+ * Why one attribute is refused, or null where the report may write it.
+ *
+ * Two lists in one answer, and the order matters: a name in `FETCHING` is
+ * refused whatever `allowed` says, and the line it produces says so. That is
+ * the whole of what `FETCHING` buys, so `allowed` is a parameter rather than
+ * the constant above — a check that could not be asked about a loosened
+ * allowlist could not show that the second list holds on its own.
+ */
+const refused = (name: string, allowed: Set<string>): string | null => {
+  if (FETCHING.has(name)) return `writes a ${name} attribute, which fetches`;
+  if (!allowed.has(name)) return `writes a ${name} attribute`;
+  return null;
+};
 
 /** A URL that names a host: an absolute one, or a protocol-relative one. */
 const REMOTE = /(?:https?:)?\/\//i;
@@ -109,8 +124,8 @@ function reaching(document: string): string[] {
   }
 
   for (const attribute of attributes(document)) {
-    if (FETCHING.has(attribute.name)) found.push(`writes a ${attribute.name} attribute`);
-    else if (!ATTRIBUTES.has(attribute.name)) found.push(`writes a ${attribute.name} attribute`);
+    const why = refused(attribute.name, ATTRIBUTES);
+    if (why !== null) found.push(why);
     if (REMOTE.test(attribute.value)) {
       found.push(`names a host in ${attribute.name}="${attribute.value}"`);
     }
@@ -189,7 +204,7 @@ describe('the self-containment check, given a report that fetches anyway', () =>
       [
         'opens <link>',
         'writes a rel attribute',
-        'writes a href attribute',
+        'writes a href attribute, which fetches',
         'names a host in href="https://fonts.googleapis.com/css2?family=Inter"',
       ],
     ],
@@ -198,14 +213,18 @@ describe('the self-containment check, given a report that fetches anyway', () =>
       '<td><img class="thumb" src="https://cdn.example/i/1080.png"></td>',
       [
         'opens <img>',
-        'writes a src attribute',
+        'writes a src attribute, which fetches',
         'names a host in src="https://cdn.example/i/1080.png"',
       ],
     ],
     [
       'a hosted script',
       '<body><script src="https://cdn.example/chart.js"></script></body>',
-      ['opens <script>', 'writes a src attribute', 'names a host in src="https://cdn.example/chart.js"'],
+      [
+        'opens <script>',
+        'writes a src attribute, which fetches',
+        'names a host in src="https://cdn.example/chart.js"',
+      ],
     ],
     [
       'an @font-face, which the design refuses whatever it points at',
@@ -227,10 +246,19 @@ describe('the self-containment check, given a report that fetches anyway', () =>
       ],
     ],
     [
+      'an @import inside an uppercase STYLE, which HTML treats as the same element',
+      '<STYLE>@import url(https://evil.example/a.css)</STYLE>',
+      [
+        'has a url() in its stylesheet',
+        'has an @import in its stylesheet',
+        'has a host named in its stylesheet',
+      ],
+    ],
+    [
       'a background in an inline style, which no element allowlist would catch',
       '<div class="hero" style="background: url(https://cdn.example/i.png)">x</div>',
       [
-        'writes a style attribute',
+        'writes a style attribute, which fetches',
         'names a host in style="background: url(https://cdn.example/i.png)"',
       ],
     ],
@@ -247,7 +275,7 @@ describe('the self-containment check, given a report that fetches anyway', () =>
       '<p><a href="https://example.com/gallery">the page</a></p>',
       [
         'opens <a>',
-        'writes a href attribute',
+        'writes a href attribute, which fetches',
         'names a host in href="https://example.com/gallery"',
       ],
     ],
@@ -263,7 +291,7 @@ describe('the self-containment check, given a report that fetches anyway', () =>
       'a meta refresh, which navigates with no element out of the allowlist',
       '<meta http-equiv="refresh" content="0; url=https://example.com/">',
       [
-        'writes a http-equiv attribute',
+        'writes a http-equiv attribute, which fetches',
         'names a host in content="0; url=https://example.com/"',
       ],
     ],
@@ -271,6 +299,21 @@ describe('the self-containment check, given a report that fetches anyway', () =>
 
   it.each(attacks)('catches %s', (_route, document, expected) => {
     expect(reaching(document)).toEqual(expected);
+  });
+
+  it('refuses a fetching attribute even where the allowlist has been loosened', () => {
+    // What `FETCHING` is for, and the only way to show it: the shipped
+    // document reaches neither list, so nothing about the arrangement above
+    // would change if `FETCHING` were deleted. The edit it exists for is one
+    // to `ATTRIBUTES` — a contributor who let a link through because the one
+    // in front of them seemed harmless — and this is the list that does not
+    // move with it. The message differs too, so the reason reaches them.
+    const loosened = new Set([...ATTRIBUTES, 'href', 'style']);
+
+    expect(refused('href', loosened)).toBe('writes a href attribute, which fetches');
+    expect(refused('style', loosened)).toBe('writes a style attribute, which fetches');
+    expect(refused('class', loosened)).toBeNull();
+    expect(refused('data-of', loosened)).toBe('writes a data-of attribute');
   });
 
   it('is quiet about the markup a report actually writes', () => {

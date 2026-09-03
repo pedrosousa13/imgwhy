@@ -2,8 +2,8 @@ import type { DeviceProfile } from '@imgwhy/core';
 import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_PROFILES, capturePage } from '../src/index.js';
-import { type FixtureServer, startFixtureServer } from './fixture-server.js';
-import { encodePng } from './png.js';
+import { type FixtureServer, startFixtureServer } from '../../../test/fixture-server.js';
+import { encodePng } from '../../../test/png.js';
 
 /** The case from the design: 640 CSS px at DPR 1.5 needs 960, so 1080w wins. */
 const canonical: DeviceProfile = {

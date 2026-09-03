@@ -36,11 +36,26 @@ export type Html = Markup;
 export type Value = string | number | Html | readonly Value[];
 
 /**
- * The five characters that can leave text and start markup.
+ * The five characters that can leave element text, or a quoted attribute
+ * value, and start markup.
  *
  * `&` goes first, so nothing this replaces can be read back as an escape of
- * its own. Both quotes are included, so an attribute value is as safe as
- * element text and neither quoting style is the weaker one.
+ * its own. Both quotes are included, so a double-quoted attribute value and a
+ * single-quoted one are equally safe — neither quoting style is the weaker
+ * one, which is the guarantee, and it is a guarantee about quoted values.
+ *
+ * An *unquoted* attribute value ends at a space, so covering one would mean
+ * escaping space, `=` and the backtick as well. That is not done, for a
+ * reason and not by oversight: this list also escapes every string that
+ * reaches element text, and a report's text is full of spaces — the `sizes`
+ * string, a selector, a URL. `&#32;` in every gap would make the emitted
+ * document unreadable to buy safety at a site that does not exist. No
+ * attribute in the report carries an interpolation at all; `escaping.test.ts`
+ * proves it, by reading back every attribute value the document holds and
+ * refusing any that is not one of this package's own words.
+ *
+ * So: write attribute values quoted. An unquoted one is the case this list
+ * does not answer for, and the check above is what keeps it from arriving.
  */
 const ESCAPES: [RegExp, string][] = [
   [/&/g, '&amp;'],
@@ -80,6 +95,10 @@ const render = (value: Value): string => {
  * HTML escaping is right for element text and for a quoted attribute value,
  * and it is not enough anywhere else:
  *
+ * - **An unquoted attribute value.** `<div class=${x}>` ends the value at the
+ *   first space, which `escape` leaves alone. `ESCAPES` says why it is left
+ *   alone; no template here writes one, and no page string reaches an
+ *   attribute at all.
  * - **Inside `<style>` or `<script>`.** Those parse their own grammar, where
  *   `&lt;` is not a `<` and `</script` ends the element whatever escaped it.
  *   So no value is interpolated into either: the report's stylesheet is a

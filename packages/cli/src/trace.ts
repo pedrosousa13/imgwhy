@@ -1,4 +1,4 @@
-import type { Candidate, Capture, CapturedImage, DeviceProfile } from '@imgwhy/core';
+import type { Candidate, Capture, CapturedImage, DeviceProfile, Selection } from '@imgwhy/core';
 import { explainSelection } from '@imgwhy/core';
 
 /** One image as one device saw it. */
@@ -216,24 +216,42 @@ function imageBlock(
 }
 
 /**
+ * The width column: a measurement, the word for a clause that would not read,
+ * or nothing to say.
+ *
+ * One case per kind of Selection, so a fourth kind in core would fail to
+ * compile here rather than print a blank cell.
+ */
+function cssPxCell(selection: Selection): string {
+  switch (selection.kind) {
+    case 'density':
+      return '—';
+    case 'unreadable':
+      return 'unreadable';
+    case 'width':
+      return `${Math.round(selection.cssPx)}px`;
+  }
+}
+
+/**
  * One device's arithmetic, as columns.
  *
  * The arithmetic itself is `explainSelection` in core, not this function. A
- * null resolution is core saying `sizes` never entered — nothing carries a `w`
- * descriptor — which is the case this table has three columns with nothing to
- * put in them.
+ * `density` selection is core saying `sizes` never entered — nothing carries a
+ * `w` descriptor — which is the case this table has three columns with nothing
+ * to put in them.
  */
 function row(base: string, { device, image }: Sighting): Row {
-  const { resolution, cssPx, neededPx, picked } = explainSelection(image, device);
+  const selection = explainSelection(image, device);
   return {
     device: device.name,
     viewport: `${device.viewport.width}×${device.viewport.height}`,
     DPR: String(device.dpr),
-    'clause used': resolution === null ? 'x descriptors only' : resolution.clause,
-    'css px':
-      resolution === null ? '—' : cssPx === null ? 'unreadable' : `${Math.round(cssPx)}px`,
-    needed: neededPx === null ? '—' : `${Math.round(neededPx)}px`,
-    ...chosen(base, image, picked),
+    'clause used':
+      selection.kind === 'density' ? 'x descriptors only' : selection.resolution.clause,
+    'css px': cssPxCell(selection),
+    needed: selection.kind === 'width' ? `${Math.round(selection.neededPx)}px` : '—',
+    ...chosen(base, image, selection.picked),
   };
 }
 

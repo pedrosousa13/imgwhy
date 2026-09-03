@@ -71,6 +71,16 @@ export const unread = (document: string): string[] =>
     .slice(1)
     .map((rest) => `<${rest.slice(0, 60)}`);
 
-/** The text inside every `<style>` element, which is CSS and not markup. */
+/**
+ * The text inside every `<style>` element, which is CSS and not markup.
+ *
+ * Case-insensitive, because HTML is: `<STYLE>` opens the same element, and a
+ * scan that read past it would hand back no stylesheet at all and so bypass
+ * every CSS rule the self-containment check holds. `elements` above lowercases
+ * every tag name for the same reason, and the uppercase case is in that
+ * check's attack table so it stays covered.
+ */
+const STYLE = /<style[^>]*>([\s\S]*?)<\/style>/gi;
+
 export const stylesheets = (document: string): string[] =>
-  [...document.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((found) => found[1]);
+  [...document.matchAll(STYLE)].map((found) => found[1]);

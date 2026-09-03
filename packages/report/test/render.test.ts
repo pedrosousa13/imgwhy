@@ -72,6 +72,24 @@ describe('renderReport', () => {
     }
   });
 
+  it('reports the bytes of an image nothing selected, because they still arrived', () => {
+    // A file no candidate list chose still crossed the wire, and a 1×1
+    // tracking pixel weighs what it weighs. The command's browser test cannot
+    // hold this claim: the only image on its fixture page with nothing to
+    // choose is `loading=lazy`, and nothing waits for one of those, so the
+    // weight it reports is not the same on every run. A Capture written here
+    // is, which is what makes this the place for it.
+    const weighed = on(gallery(), 'desktop', [
+      { ...logo(), transferBytes: 3204 },
+      hero(720, '1080.png', 118_231),
+      badge('200.png', 4102),
+    ]);
+
+    expect(cellsOf(renderReport(weighed), 'header &gt; img')[4]).toBe(
+      '<td><span class="picked">—</span><span class="bytes">3204 bytes</span></td>',
+    );
+  });
+
   it('says nothing was selected for an image with no srcset', () => {
     const report = renderReport(gallery());
 

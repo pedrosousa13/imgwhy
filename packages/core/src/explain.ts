@@ -5,25 +5,57 @@ import { resolveSizes } from './sizes.js';
 /**
  * What one device decided about one image, in the order the arithmetic runs.
  *
+ * A union rather than four independently nullable fields, and for the reason
+ * `Resolution` is one: the three answers below are the only three, and every
+ * other combination of those fields is a state nothing can produce. Written as
+ * nullable fields, a reader had to know that a null resolution meant the other
+ * three were null too — an invariant nothing stated, which the one consumer
+ * paid for by asking about it twice. A reader asks `kind` once instead.
+ *
  * Every field is exact. Rounding is presentation, so it belongs to whatever is
  * doing the presenting.
  */
-export type Selection = {
+export type Selection =
   /**
-   * What `sizes` resolved to, or null where no candidate carries a `w`
-   * descriptor — a browser reads past `sizes` there, however the tag was
-   * written, so there is no resolution to report rather than an empty one.
+   * No candidate carries a `w` descriptor, so the ratio decided alone. A
+   * browser reads past `sizes` here however the tag was written, which is why
+   * there is no resolution to report rather than an empty one.
    */
-  resolution: Resolution | null;
+  | { kind: 'density'; picked: Candidate | null }
+  /** `sizes` resolved to a width, and selection ran against it. */
+  | {
+      kind: 'width';
+      resolution: Resolution;
+      /** The CSS width selection ran against. */
+      cssPx: number;
+      /** Physical pixels the device needed: `cssPx` times the ratio. */
+      neededPx: number;
+      /** The candidate a browser downloads, or null where none could win. */
+      picked: Candidate | null;
+    }
   /**
-   * The CSS width selection ran against, or null where nothing resolved,
-   * which is the one case selection cannot run at all.
+   * A clause applied and its length could not be read, which is the one case
+   * selection has no width to run against. `resolution.clause` still names the
+   * clause at fault, and an `x` candidate on the same tag can still win.
    */
-  cssPx: number | null;
-  /** Physical pixels the device needed: `cssPx` times the ratio. */
-  neededPx: number | null;
-  /** The candidate a browser downloads, or null where none could win. */
-  picked: Candidate | null;
+  | { kind: 'unreadable'; resolution: Resolution; picked: Candidate | null };
+
+/**
+ * The CSS width selection ran against.
+ *
+ * Null where nothing resolved, which is the one case selection cannot run at
+ * all. `auto` defers to layout, so the width the element ended up at is the
+ * honest answer there.
+ */
+const resolvedPx = (resolution: Resolution, renderedWidth: number): number | null => {
+  switch (resolution.kind) {
+    case 'auto':
+      return renderedWidth;
+    case 'error':
+      return null;
+    default:
+      return resolution.px;
+  }
 };
 
 /**
@@ -47,26 +79,13 @@ export type Selection = {
 export function explainSelection(image: CapturedImage, device: DeviceProfile): Selection {
   const byWidth = image.candidates.some((candidate) => candidate.w != null);
   if (!byWidth) {
-    return {
-      resolution: null,
-      cssPx: null,
-      neededPx: null,
-      picked: selectCandidate(image.candidates, null, device.dpr),
-    };
+    return { kind: 'density', picked: selectCandidate(image.candidates, null, device.dpr) };
   }
 
   const resolution = resolveSizes(image.sizes, device.viewport.width);
-  const cssPx =
-    resolution.kind === 'auto'
-      ? image.renderedWidth
-      : resolution.kind === 'error'
-        ? null
-        : resolution.px;
+  const cssPx = resolvedPx(resolution, image.renderedWidth);
+  const picked = selectCandidate(image.candidates, cssPx, device.dpr);
 
-  return {
-    resolution,
-    cssPx,
-    neededPx: cssPx === null ? null : cssPx * device.dpr,
-    picked: selectCandidate(image.candidates, cssPx, device.dpr),
-  };
+  if (cssPx === null) return { kind: 'unreadable', resolution, picked };
+  return { kind: 'width', resolution, cssPx, neededPx: cssPx * device.dpr, picked };
 }

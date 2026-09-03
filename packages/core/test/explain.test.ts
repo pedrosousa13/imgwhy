@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CapturedImage, DeviceProfile } from '../src/index.js';
+import type { CapturedImage, DeviceProfile, Selection } from '../src/index.js';
 import { explainSelection, parseSrcset } from '../src/index.js';
 
 const HERO_SRCSET = '/i/640.png 640w, /i/1080.png 1080w, /i/1920.png 1920w';
@@ -26,9 +26,25 @@ const image = (over: Partial<CapturedImage> = {}): CapturedImage => ({
   ...over,
 });
 
+/**
+ * The `width` selection, or a failure naming what came back instead.
+ *
+ * A Selection carries the arithmetic `sizes` set off in one of its three kinds
+ * only, so a check about that arithmetic has to say which kind it expected.
+ * Asking through this rather than through a cast means a wrong kind fails the
+ * check that asked for it, and says which kind arrived.
+ */
+function width(selection: Selection): Extract<Selection, { kind: 'width' }> {
+  if (selection.kind !== 'width') {
+    throw new Error(`expected a width selection, got ${selection.kind}`);
+  }
+  return selection;
+}
+
 describe('explainSelection', () => {
   it('resolves sizes, multiplies by the ratio and names the candidate that wins', () => {
     expect(explainSelection(image(), canonical)).toEqual({
+      kind: 'width',
       resolution: { kind: 'length', px: 640, clause: '100vw', cond: null },
       cssPx: 640,
       neededPx: 960,
@@ -37,9 +53,8 @@ describe('explainSelection', () => {
   });
 
   it('takes the clause a media condition selected, not the first one written', () => {
-    const selection = explainSelection(
-      image({ sizes: '(min-width: 1000px) 50vw, 100vw' }),
-      canonical,
+    const selection = width(
+      explainSelection(image({ sizes: '(min-width: 1000px) 50vw, 100vw' }), canonical),
     );
 
     expect(selection.resolution).toEqual({
@@ -52,7 +67,7 @@ describe('explainSelection', () => {
   });
 
   it('falls back to the 100vw default when sizes is absent', () => {
-    const selection = explainSelection(image({ sizes: null }), canonical);
+    const selection = width(explainSelection(image({ sizes: null }), canonical));
 
     expect(selection.resolution).toEqual({
       kind: 'default',
@@ -67,7 +82,9 @@ describe('explainSelection', () => {
     // `auto` asks layout, and layout is the one thing a Capture already
     // measured. 620 × 1.5 is 930, so 1080w still wins — from a different
     // number, which is what makes the two paths distinguishable.
-    const selection = explainSelection(image({ sizes: 'auto', renderedWidth: 620 }), canonical);
+    const selection = width(
+      explainSelection(image({ sizes: 'auto', renderedWidth: 620 }), canonical),
+    );
 
     expect(selection.resolution).toEqual({ kind: 'auto', clause: 'auto', cond: null });
     expect(selection.cssPx).toBe(620);
@@ -76,26 +93,26 @@ describe('explainSelection', () => {
   });
 
   it('selects nothing when the clause that applied could not be read', () => {
-    const selection = explainSelection(image({ sizes: 'fifty percent' }), canonical);
-
-    expect(selection.resolution).toEqual({ kind: 'error', clause: 'fifty percent' });
-    expect(selection.cssPx).toBeNull();
-    expect(selection.neededPx).toBeNull();
-    expect(selection.picked).toBeNull();
+    // `unreadable` is the whole answer: there is no width to report, so the
+    // Selection carries no field to report one in, and no reader has to know
+    // that a null resolution meant three more nulls behind it.
+    expect(explainSelection(image({ sizes: 'fifty percent' }), canonical)).toEqual({
+      kind: 'unreadable',
+      resolution: { kind: 'error', clause: 'fifty percent' },
+      picked: null,
+    });
   });
 
   it('reads past sizes where no candidate carries a w descriptor', () => {
     // A page may write `sizes` on a tag whose srcset is densities only. A
-    // browser ignores it, so no resolution is reported: there was none.
-    const selection = explainSelection(
-      image({ candidates: parseSrcset('/i/640.png 1x, /i/1080.png 2x'), sizes: '100vw' }),
-      canonical,
-    );
-
-    expect(selection.resolution).toBeNull();
-    expect(selection.cssPx).toBeNull();
-    expect(selection.neededPx).toBeNull();
-    expect(selection.picked?.raw).toBe('2x');
+    // browser ignores it, so no resolution is reported: there was none, and a
+    // `density` selection has nowhere to put one.
+    expect(
+      explainSelection(
+        image({ candidates: parseSrcset('/i/640.png 1x, /i/1080.png 2x'), sizes: '100vw' }),
+        canonical,
+      ),
+    ).toEqual({ kind: 'density', picked: { url: '/i/1080.png', w: null, x: 2, raw: '2x' } });
   });
 
   it('consults sizes when a list mixes w and x descriptors, because one w is enough', () => {
@@ -103,26 +120,22 @@ describe('explainSelection', () => {
     // 1.5 the device asked for and undercuts the 4x. Without the resolved
     // width the w candidate would carry no density at all and the 4x would
     // win by default, so this row says the resolution reached selection.
-    const selection = explainSelection(
-      image({ candidates: parseSrcset('/i/1080.png 1080w, /i/2000.png 4x') }),
-      canonical,
-    );
+    const mixed = image({ candidates: parseSrcset('/i/1080.png 1080w, /i/2000.png 4x') });
+    const selection = width(explainSelection(mixed, canonical));
 
-    expect(selection.resolution?.kind).toBe('length');
+    expect(selection.resolution.kind).toBe('length');
     expect(selection.picked?.raw).toBe('1080w');
   });
 
   it('selects nothing for an image with no srcset at all', () => {
     const selection = explainSelection(image({ candidates: [], sizes: null }), canonical);
 
-    expect(selection).toEqual({ resolution: null, cssPx: null, neededPx: null, picked: null });
+    expect(selection).toEqual({ kind: 'density', picked: null });
   });
 
   it('takes the largest candidate when none reaches the ratio', () => {
-    const selection = explainSelection(
-      image({ candidates: parseSrcset('/i/320.png 320w, /i/640.png 640w') }),
-      canonical,
-    );
+    const small = image({ candidates: parseSrcset('/i/320.png 320w, /i/640.png 640w') });
+    const selection = width(explainSelection(small, canonical));
 
     expect(selection.neededPx).toBe(960);
     expect(selection.picked?.raw).toBe('640w');
