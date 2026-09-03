@@ -1,11 +1,21 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import type { Capture } from '@imgwhy/core';
+import { DEFAULT_PROFILES } from '@imgwhy/runner';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type FixtureServer, startFixtureServer } from '../../runner/test/fixture-server.js';
+import { USAGE } from '../src/args.js';
 
 const run = promisify(execFile);
 const bin = fileURLToPath(new URL('../dist/bin.js', import.meta.url));
@@ -217,4 +227,77 @@ describe('the imgwhy command', () => {
       'imgwhy opens http: and https: pages only, and "file:///etc/passwd" is file:\n',
     );
   });
+
+  it('refuses --out with no path after it', async () => {
+    const ran = await imgwhy(plain, `${server.url}/gallery.html`, '--out');
+
+    expect(ran.code).toBe(1);
+    expect(ran.stdout).toBe('');
+    expect(ran.stderr).toBe(`--out needs a file path after it\n${USAGE}\n`);
+  });
+});
+
+describe('the imgwhy command, asked for the capture itself', () => {
+  it('prints a capture that parses straight off stdout, with nothing around it', async () => {
+    const url = `${server.url}/gallery.html`;
+
+    const ran = await imgwhy(plain, '--json', url);
+
+    expect(ran.stderr).toBe('');
+    expect(ran.code).toBe(0);
+    // No banner and no trailing note, so a pipe into a parser needs no help.
+    const capture: Capture = JSON.parse(ran.stdout);
+    expect(capture.url).toBe(url);
+    expect(capture.devices.map((device) => device.id)).toEqual(DEFAULT_PROFILES.map((d) => d.id));
+    expect(capture.runs.map((deviceRun) => deviceRun.images.length)).toEqual([3, 3, 3, 3, 3]);
+    expect(new Date(capture.capturedAt).toISOString()).toBe(capture.capturedAt);
+    // #3 wires real transfer bytes. Until then unknown is reported as unknown.
+    expect(capture.runs.flatMap((r) => r.images).every((i) => i.transferBytes === null)).toBe(true);
+  }, 120_000);
+
+  it('writes the capture to the file --out names, and writes no other file', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'imgwhy-bin-out-'));
+    const out = join(dir, 'capture.json');
+    expect(readdirSync(dir)).toEqual([]);
+
+    const ran = await imgwhy(dir, '--json', '--out', out, `${server.url}/gallery.html`);
+
+    expect(ran.stderr).toBe('');
+    expect(ran.code).toBe(0);
+    expect(readdirSync(dir)).toEqual(['capture.json']);
+    // The same Capture reached both sinks, byte for byte. Whether a written
+    // Capture parses back unchanged is `run.test.ts`'s to check, where the
+    // original is in hand to compare against.
+    expect(readFileSync(out, 'utf8')).toBe(ran.stdout);
+  }, 120_000);
+
+  it('writes the capture of a page carrying no image, and calls the run done', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'imgwhy-bin-empty-'));
+    const out = join(dir, 'capture.json');
+    const url = `${server.url}/no-images.html`;
+
+    const ran = await imgwhy(dir, '--out', out, url);
+
+    // The file was asked for and written, so the run worked. Only the trace
+    // had nothing to say, and it says so on the other stream.
+    expect(ran.code).toBe(0);
+    expect(ran.stdout).toBe('');
+    expect(ran.stderr).toContain('carries no <img> element');
+    expect(readdirSync(dir)).toEqual(['capture.json']);
+    const capture: Capture = JSON.parse(readFileSync(out, 'utf8'));
+    expect(capture.url).toBe(url);
+    expect(capture.runs.map((deviceRun) => deviceRun.images.length)).toEqual([0, 0, 0, 0, 0]);
+  }, 120_000);
+
+  it('writes where --out points even when the URL reads like a path', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'imgwhy-bin-traversal-'));
+    const out = join(dir, 'capture.json');
+
+    const ran = await imgwhy(dir, '--out', out, `${server.url}/nested/../gallery.html`);
+
+    expect(ran.code).toBe(0);
+    expect(readdirSync(dir)).toEqual(['capture.json']);
+    const capture: Capture = JSON.parse(readFileSync(out, 'utf8'));
+    expect(capture.url).toBe(`${server.url}/gallery.html`);
+  }, 120_000);
 });

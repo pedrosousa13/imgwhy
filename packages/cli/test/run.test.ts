@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Capture, CapturedImage, DeviceRun } from '@imgwhy/core';
 import { parseSrcset } from '@imgwhy/core';
 import { DEFAULT_PROFILES } from '@imgwhy/runner';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { USAGE } from '../src/args.js';
 import { type CaptureFn, run } from '../src/run.js';
 
 /** A directory with no `imgwhy.config.json`, so a run takes the defaults. */
@@ -70,6 +71,12 @@ const gallery = (): Capture => {
     runs,
   };
 };
+
+/** The same capture with every device rendering nothing at all. */
+const withNoImages = (capture: Capture): Capture => ({
+  ...capture,
+  runs: capture.runs.map((run) => ({ ...run, images: [] })),
+});
 
 /** The same capture with one device's run replaced, named by its device id. */
 const on = (capture: Capture, deviceId: string, images: CapturedImage[]): Capture => ({
@@ -246,10 +253,11 @@ describe('run', () => {
   });
 
   it('says plainly when the page carries no image at all', async () => {
-    const empty = gallery();
-    empty.runs = empty.runs.map((r) => ({ ...r, images: [] }));
-
-    const outcome = await run(['https://example.com/gallery'], returning(empty), cwd);
+    const outcome = await run(
+      ['https://example.com/gallery'],
+      returning(withNoImages(gallery())),
+      cwd,
+    );
 
     expect(outcome.code).toBe(1);
     expect(outcome.stdout).toBe('');
@@ -339,8 +347,168 @@ describe('run', () => {
     const outcome = await run([], capture, cwd);
 
     expect(outcome.code).toBe(1);
-    expect(outcome.stderr).toContain('usage: imgwhy <url>');
+    expect(outcome.stderr).toContain(USAGE);
     expect(started).toBe(0);
+  });
+});
+
+describe('run, asked for the capture itself', () => {
+  it('prints the capture as JSON, and nothing else on that stream', async () => {
+    const outcome = await run(
+      ['--json', 'https://example.com/gallery'],
+      returning(gallery()),
+      cwd,
+    );
+
+    expect(outcome.stderr).toBe('');
+    expect(outcome.code).toBe(0);
+    // No banner, no trailing note: the whole stream is the document.
+    expect(JSON.parse(outcome.stdout)).toEqual(gallery());
+  });
+
+  it('keeps human text the default when no format is asked for', async () => {
+    const outcome = await run(['https://example.com/gallery'], returning(gallery()), cwd);
+
+    expect(outcome.stdout.startsWith('url      ')).toBe(true);
+  });
+
+  it('writes the capture to the path --out names', async () => {
+    const out = join(cwd, 'capture.json');
+
+    const outcome = await run(
+      ['--out', out, 'https://example.com/gallery'],
+      returning(gallery()),
+      cwd,
+    );
+
+    expect(outcome.code).toBe(0);
+    expect(JSON.parse(readFileSync(out, 'utf8'))).toEqual(gallery());
+  });
+
+  it('still prints the trace when --out is given without --json', async () => {
+    const out = join(cwd, 'capture.json');
+
+    const outcome = await run(
+      ['--out', out, 'https://example.com/gallery'],
+      returning(gallery()),
+      cwd,
+    );
+
+    expect(outcome.stdout.startsWith('url      ')).toBe(true);
+    expect(outcome.stdout).toContain('image 2 of 3');
+  });
+
+  it('writes the same bytes to the file and to stdout when both are asked', async () => {
+    const out = join(cwd, 'capture.json');
+
+    const outcome = await run(
+      ['--json', '--out', out, 'https://example.com/gallery'],
+      returning(gallery()),
+      cwd,
+    );
+
+    expect(readFileSync(out, 'utf8')).toBe(outcome.stdout);
+  });
+
+  it('parses a written capture back to structurally identical data', async () => {
+    const out = join(cwd, 'capture.json');
+    const original = gallery();
+
+    await run(['--out', out, 'https://example.com/gallery'], returning(original), cwd);
+    const readBack: Capture = JSON.parse(readFileSync(out, 'utf8'));
+
+    // Through a real file, so anything JSON cannot carry is caught here.
+    // Strictly, because `toEqual` counts a field `JSON.stringify` dropped as
+    // equal to one that was never there.
+    expect(readBack).toStrictEqual(original);
+    expect(readBack.runs[0].images[1].candidates).toStrictEqual(parseSrcset(HERO_SRCSET));
+    expect(readBack.devices).toStrictEqual(DEFAULT_PROFILES);
+  });
+
+  it('writes no file at all when --out is not given', async () => {
+    const before = readdirSync(cwd);
+
+    await run(['--json', 'https://example.com/gallery'], returning(gallery()), cwd);
+
+    expect(readdirSync(cwd)).toEqual(before);
+  });
+
+  it('writes the one file --out names and no other', async () => {
+    const out = join(cwd, 'capture.json');
+
+    await run(['--out', out, 'https://example.com/gallery'], returning(gallery()), cwd);
+
+    expect(readdirSync(cwd)).toEqual(['capture.json']);
+  });
+
+  it('reports a path it could not write to, rather than printing the trace', async () => {
+    const out = join(cwd, 'no-such-directory', 'capture.json');
+
+    const outcome = await run(
+      ['--out', out, 'https://example.com/gallery'],
+      returning(gallery()),
+      cwd,
+    );
+
+    expect(outcome.code).toBe(1);
+    expect(outcome.stdout).toBe('');
+    expect(outcome.stderr).toContain(out);
+    expect(readdirSync(cwd)).toEqual([]);
+  });
+
+  it('writes the capture of a page with no image, which is a capture like any other', async () => {
+    const out = join(cwd, 'capture.json');
+    const empty = withNoImages(gallery());
+
+    const outcome = await run(['--out', out, 'https://example.com/gallery'], returning(empty), cwd);
+
+    // The artifact was asked for and produced, so the run worked. An image
+    // that has gone missing from a page is the diff a kept Capture is for.
+    expect(outcome.code).toBe(0);
+    expect(JSON.parse(readFileSync(out, 'utf8'))).toStrictEqual(empty);
+    expect(readdirSync(cwd)).toEqual(['capture.json']);
+    // The trace is the one output with nothing to say, and it says so.
+    expect(outcome.stdout).toBe('');
+    expect(outcome.stderr).toContain('carries no <img> element');
+  });
+
+  it('prints the capture of a page carrying no image', async () => {
+    const empty = withNoImages(gallery());
+
+    const outcome = await run(['--json', 'https://example.com/gallery'], returning(empty), cwd);
+
+    expect(outcome.code).toBe(0);
+    expect(JSON.parse(outcome.stdout)).toStrictEqual(empty);
+    expect(outcome.stderr).toContain('carries no <img> element');
+  });
+});
+
+/**
+ * The path `--out` names is the only thing that decides where a file lands.
+ *
+ * The page is the untrusted half of a run: the URL is typed by whoever asked,
+ * and `Capture.url` is worse than that — it is the URL a redirect chose, so a
+ * hostile host names it. Neither may reach the filesystem. These runs give the
+ * page every path-shaped string that could be mistaken for one and check that
+ * the file lands where it was told to and the directory holds nothing else.
+ */
+describe('run, given a URL that reads like a path', () => {
+  const traversal = [
+    'https://example.com/../../etc/passwd',
+    'https://../x',
+    'https://example.com/%2e%2e%2f%2e%2e%2fetc%2fpasswd',
+  ];
+
+  it.each(traversal)('writes to the path --out names, not one derived from %s', async (raw) => {
+    const out = join(cwd, 'capture.json');
+    // The capture reports the URL the page ended on, which a redirect chooses.
+    const landed: Capture = { ...gallery(), url: '../../../../etc/passwd' };
+
+    const outcome = await run(['--out', out, raw], returning(landed), cwd);
+
+    expect(outcome.code).toBe(0);
+    expect(readdirSync(cwd)).toEqual(['capture.json']);
+    expect(JSON.parse(readFileSync(out, 'utf8'))).toEqual(landed);
   });
 });
 

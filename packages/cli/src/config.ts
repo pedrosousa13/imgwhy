@@ -2,6 +2,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import type { DeviceProfile } from '@imgwhy/core';
 import { DEFAULT_PROFILES } from '@imgwhy/runner';
+import { messageOf } from './message.js';
 
 export const CONFIG_FILE = 'imgwhy.config.json';
 
@@ -96,9 +97,6 @@ export function loadDeviceProfiles(dir: string): LoadedProfiles {
 
   return readDevices(parsed);
 }
-
-const messageOf = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
