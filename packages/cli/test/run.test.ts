@@ -16,6 +16,10 @@ beforeEach(() => {
 
 const HERO_SRCSET = '/i/640.png 640w, /i/1080.png 1080w, /i/1920.png 1920w';
 
+/**
+ * The logo weighs whatever it weighs: no transfer was recorded for it, which
+ * is the case the trace has to report as unknown rather than as a number.
+ */
 const logo = (): CapturedImage => ({
   id: 'html > body > header > img',
   selector: 'html > body > header > img',
@@ -29,7 +33,11 @@ const logo = (): CapturedImage => ({
   loading: 'lazy',
 });
 
-const hero = (renderedWidth: number, file: string): CapturedImage => ({
+const hero = (
+  renderedWidth: number,
+  file: string,
+  transferBytes: number | null,
+): CapturedImage => ({
   id: 'html > body > main > img:nth-of-type(1)',
   selector: 'html > body > main > img:nth-of-type(1)',
   candidates: parseSrcset(HERO_SRCSET),
@@ -38,11 +46,11 @@ const hero = (renderedWidth: number, file: string): CapturedImage => ({
   renderedWidth,
   currentSrc: `https://example.com/i/${file}`,
   naturalWidth: renderedWidth,
-  transferBytes: null,
+  transferBytes,
   loading: null,
 });
 
-const badge = (file: string): CapturedImage => ({
+const badge = (file: string, transferBytes: number): CapturedImage => ({
   id: 'html > body > main > img:nth-of-type(2)',
   selector: 'html > body > main > img:nth-of-type(2)',
   candidates: parseSrcset('/i/200.png 1x, /i/300.png 2x'),
@@ -51,18 +59,21 @@ const badge = (file: string): CapturedImage => ({
   renderedWidth: 200,
   currentSrc: `https://example.com/i/${file}`,
   naturalWidth: 200,
-  transferBytes: null,
+  transferBytes,
   loading: null,
 });
 
 /** The gallery as the five default profiles would have recorded it. */
 const gallery = (): Capture => {
   const runs: DeviceRun[] = [
-    { deviceId: 'iphone-se', images: [logo(), hero(187, '1080.png'), badge('300.png')] },
-    { deviceId: 'iphone-15-pro', images: [logo(), hero(196, '1920.png'), badge('300.png')] },
-    { deviceId: 'pixel-8', images: [logo(), hero(206, '1920.png'), badge('300.png')] },
-    { deviceId: 'ipad', images: [logo(), hero(410, '1920.png'), badge('300.png')] },
-    { deviceId: 'desktop', images: [logo(), hero(720, '1080.png'), badge('200.png')] },
+    { deviceId: 'iphone-se', images: [logo(), hero(187, '1080.png', 118231), badge('300.png', 8210)] },
+    {
+      deviceId: 'iphone-15-pro',
+      images: [logo(), hero(196, '1920.png', 342016), badge('300.png', 8210)],
+    },
+    { deviceId: 'pixel-8', images: [logo(), hero(206, '1920.png', 342016), badge('300.png', 8210)] },
+    { deviceId: 'ipad', images: [logo(), hero(410, '1920.png', 342016), badge('300.png', 8210)] },
+    { deviceId: 'desktop', images: [logo(), hero(720, '1080.png', 118231), badge('200.png', 4102)] },
   ];
   return {
     url: 'https://example.com/gallery',
@@ -127,13 +138,23 @@ describe('run', () => {
     const outcome = await run(['https://example.com/gallery'], returning(gallery()), cwd);
 
     expect(tableUnder(outcome.stdout, 'image 2 of 3').map(cells)).toEqual([
-      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'file'],
-      ['iPhone SE', '375×667', '2', '100vw', '375px', '750px', '1080w', '1080.png'],
-      ['iPhone 15 Pro', '393×852', '3', '100vw', '393px', '1179px', '1920w', '1920.png'],
+      [
+        'device',
+        'viewport',
+        'DPR',
+        'clause used',
+        'css px',
+        'needed',
+        'picked',
+        'file',
+        'bytes arrived',
+      ],
+      ['iPhone SE', '375×667', '2', '100vw', '375px', '750px', '1080w', '1080.png', '118231'],
+      ['iPhone 15 Pro', '393×852', '3', '100vw', '393px', '1179px', '1920w', '1920.png', '342016'],
       // 1080/412 is 2.621, just under this device's 2.625, so the 1920 file it
       // is — the case a rounded DPR would get wrong.
-      ['Pixel 8', '412×915', '2.625', '100vw', '412px', '1082px', '1920w', '1920.png'],
-      ['iPad', '820×1180', '2', '100vw', '820px', '1640px', '1920w', '1920.png'],
+      ['Pixel 8', '412×915', '2.625', '100vw', '412px', '1082px', '1920w', '1920.png', '342016'],
+      ['iPad', '820×1180', '2', '100vw', '820px', '1640px', '1920w', '1920.png', '342016'],
       [
         'Desktop',
         '1440×900',
@@ -143,6 +164,7 @@ describe('run', () => {
         '720px',
         '1080w',
         '1080.png',
+        '118231',
       ],
     ]);
   });
@@ -179,26 +201,73 @@ describe('run', () => {
     const outcome = await run(['https://example.com/gallery'], returning(gallery()), cwd);
 
     expect(tableUnder(outcome.stdout, 'image 3 of 3').map(cells)).toEqual([
-      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'file'],
-      ['iPhone SE', '375×667', '2', 'x descriptors only', '—', '—', '2x', '300.png'],
-      ['iPhone 15 Pro', '393×852', '3', 'x descriptors only', '—', '—', '2x', '300.png'],
-      ['Pixel 8', '412×915', '2.625', 'x descriptors only', '—', '—', '2x', '300.png'],
-      ['iPad', '820×1180', '2', 'x descriptors only', '—', '—', '2x', '300.png'],
-      ['Desktop', '1440×900', '1', 'x descriptors only', '—', '—', '1x', '200.png'],
+      [
+        'device',
+        'viewport',
+        'DPR',
+        'clause used',
+        'css px',
+        'needed',
+        'picked',
+        'file',
+        'bytes arrived',
+      ],
+      ['iPhone SE', '375×667', '2', 'x descriptors only', '—', '—', '2x', '300.png', '8210'],
+      ['iPhone 15 Pro', '393×852', '3', 'x descriptors only', '—', '—', '2x', '300.png', '8210'],
+      ['Pixel 8', '412×915', '2.625', 'x descriptors only', '—', '—', '2x', '300.png', '8210'],
+      ['iPad', '820×1180', '2', 'x descriptors only', '—', '—', '2x', '300.png', '8210'],
+      ['Desktop', '1440×900', '1', 'x descriptors only', '—', '—', '1x', '200.png', '4102'],
     ]);
   });
 
   it('flags the row where the file that loaded is not the one picked', async () => {
-    const capture = on(gallery(), 'desktop', [logo(), hero(720, '1920.png'), badge('200.png')]);
+    const capture = on(gallery(), 'desktop', [
+      logo(),
+      hero(720, '1920.png', 342016),
+      badge('200.png', 4102),
+    ]);
 
     const outcome = await run(['https://example.com/gallery'], returning(capture), cwd);
 
     const desktop = tableUnder(outcome.stdout, 'image 2 of 3')[5];
-    expect(cells(desktop).at(-1)).toBe('1920.png ← differs');
+    expect(cells(desktop).at(-2)).toBe('1920.png ← differs');
+  });
+
+  it('prints unknown in the bytes column where no transfer was recorded', async () => {
+    const capture = on(gallery(), 'desktop', [
+      logo(),
+      hero(720, '1080.png', null),
+      badge('200.png', 4102),
+    ]);
+
+    const outcome = await run(['https://example.com/gallery'], returning(capture), cwd);
+
+    // 720 rendered pixels and a 1080 pixel file, and the column still says
+    // unknown: nothing in the trace turns a dimension into a weight.
+    const desktop = tableUnder(outcome.stdout, 'image 2 of 3')[5];
+    expect(cells(desktop).at(-1)).toBe('unknown');
+  });
+
+  it('gives the bytes of an image that had nothing to choose from', async () => {
+    const capture = on(gallery(), 'iphone-se', [
+      { ...logo(), transferBytes: 3120 },
+      hero(187, '1080.png', 118231),
+      badge('300.png', 8210),
+    ]);
+
+    const outcome = await run(['https://example.com/gallery'], returning(capture), cwd);
+
+    // One line rather than a table, because there is nothing to explain — but
+    // the bytes still arrived, so they are still reported. The four remaining
+    // devices recorded none, and say so.
+    expect(outcome.stdout).toContain('  no srcset, so nothing was selected — file  logo.png');
+    expect(outcome.stdout).toContain('  bytes       3120, unknown');
   });
 
   it('names the absent sizes attribute and the 100vw default that stood in', async () => {
-    const desktopOnly = on(gallery(), 'desktop', [{ ...hero(1440, '1920.png'), sizes: null }]);
+    const desktopOnly = on(gallery(), 'desktop', [
+      { ...hero(1440, '1920.png', 342016), sizes: null },
+    ]);
     const capture: Capture = {
       ...desktopOnly,
       devices: DEFAULT_PROFILES.filter((profile) => profile.id === 'desktop'),
@@ -209,7 +278,17 @@ describe('run', () => {
 
     expect(outcome.stdout).toContain('  sizes       (absent)');
     expect(tableUnder(outcome.stdout, 'image 1 of 1').map(cells)).toEqual([
-      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'file'],
+      [
+        'device',
+        'viewport',
+        'DPR',
+        'clause used',
+        'css px',
+        'needed',
+        'picked',
+        'file',
+        'bytes arrived',
+      ],
       [
         'Desktop',
         '1440×900',
@@ -219,15 +298,16 @@ describe('run', () => {
         '1440px',
         '1920w',
         '1920.png',
+        '342016',
       ],
     ]);
   });
 
   it('reports where an image sat when a render moved it', async () => {
-    const moved = { ...hero(187, '1080.png'), selector: 'html > body > main > div > img' };
+    const moved = { ...hero(187, '1080.png', 118231), selector: 'html > body > main > div > img' };
     let capture = gallery();
     for (const deviceId of ['iphone-se', 'iphone-15-pro', 'pixel-8']) {
-      capture = on(capture, deviceId, [logo(), moved, badge('300.png')]);
+      capture = on(capture, deviceId, [logo(), moved, badge('300.png', 8210)]);
     }
 
     const outcome = await run(['https://example.com/gallery'], returning(capture), cwd);

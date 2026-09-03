@@ -37,6 +37,12 @@ ${body}
 `;
 
 /**
+ * A 1920 pixel image inlined into the markup, so it reaches the page without
+ * a transfer of its own.
+ */
+const DATA_URL = `data:image/png;base64,${encodePng(1920, 2).toString('base64')}`;
+
+/**
  * Deterministic pages with known `srcset` values. Every asset is served from
  * this server, so no test makes an external request.
  */
@@ -114,6 +120,24 @@ const PAGES: Record<string, string> = {
 </script>`,
   ),
 
+  // Two elements asking for one URL. Blink's per-render memory cache answers
+  // the second from the first, so one response has to account for both rows.
+  '/shared-url.html': shell(
+    'shared url',
+    `<main><img class="half" src="/img/640.png" alt="one">
+<img class="third" src="/img/640.png" alt="two"></main>`,
+  ),
+
+  // Two images whose weight no protocol event can report. The first carries
+  // its bytes inside the document, so it makes no transfer of its own; the
+  // second names a port Chromium refuses, so its request never finishes.
+  // Both have pixels to be tempted by, and the first has 1920 of them.
+  '/unknown-bytes.html': shell(
+    'unknown bytes',
+    `<main><img class="logo" src="${DATA_URL}" alt="inline">
+<img class="logo" src="http://127.0.0.1:1/img/640.png" alt="refused"></main>`,
+  ),
+
   // Three images with three different reasons to pick a file: `w` descriptors
   // under a media clause, `x` descriptors, and no choice at all.
   '/gallery.html': shell(
@@ -132,12 +156,44 @@ const REDIRECTS: Record<string, string> = {
   '/nested': '/nested/',
 };
 
+/**
+ * A page whose image comes from somewhere else, which is what an image CDN is.
+ *
+ * The other origin is a second fixture server on its own ephemeral port —
+ * `127.0.0.1:A` and `127.0.0.1:B` are different origins — and no port is known
+ * until that server listens. So this page is generated per request from the
+ * `origin` query parameter rather than held in `PAGES`.
+ *
+ * The image server sends no `Timing-Allow-Origin`, exactly as an image CDN
+ * does not, which is what makes the in-page timing API report zero for it.
+ */
+const crossOriginPage = (origin: string): string =>
+  shell(
+    'cross origin',
+    `<main><img class="hero" sizes="100vw"
+  srcset="${origin}/img/640.png 640w, ${origin}/img/1080.png 1080w, ${origin}/img/1920.png 1920w"
+  src="${origin}/img/640.png" alt="hero"></main>`,
+  );
+
+/** Another loopback fixture server, and nothing else, may name the origin. */
+const PEER_ORIGIN = /^http:\/\/127\.0\.0\.1:\d{1,5}$/;
+
 export async function startFixtureServer(): Promise<FixtureServer> {
   const requests: FixtureRequest[] = [];
 
   const server = createServer((req, res) => {
-    const path = new URL(req.url ?? '/', 'http://fixture.invalid').pathname;
+    const requested = new URL(req.url ?? '/', 'http://fixture.invalid');
+    const path = requested.pathname;
     requests.push({ path, cacheControl: req.headers['cache-control'] });
+
+    if (path === '/cross-origin.html') {
+      const origin = requested.searchParams.get('origin') ?? '';
+      if (PEER_ORIGIN.test(origin)) {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        res.end(crossOriginPage(origin));
+        return;
+      }
+    }
 
     const redirect = REDIRECTS[path];
     if (redirect !== undefined) {
@@ -161,6 +217,10 @@ export async function startFixtureServer(): Promise<FixtureServer> {
       const body = encodePng(width, 2);
       // The header a real image CDN sends. It is what makes a browser hold a
       // copy, so a run that still fetches has genuinely bypassed its cache.
+      //
+      // What is deliberately absent is `Timing-Allow-Origin`, which an image
+      // CDN also does not send. Served to another origin, this response is one
+      // the in-page timing API reports as zero bytes.
       res.writeHead(200, {
         'content-type': 'image/png',
         'content-length': String(body.length),

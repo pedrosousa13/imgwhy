@@ -40,6 +40,16 @@ const resolvedPx = (resolution: Resolution, renderedWidth: number): number | nul
   }
 };
 
+/**
+ * The weight of the response that arrived, as the runner recorded it.
+ *
+ * Unknown stays unknown. Nothing here turns a dimension into a weight: a
+ * guess would read exactly like a measurement in this column, which is the
+ * design's non-goal — "where `transferBytes` is null, report it as unknown".
+ */
+const bytesArrived = (transferBytes: number | null): string =>
+  transferBytes === null ? 'unknown' : String(transferBytes);
+
 /** `label` and value, on the label column every image block shares. */
 const field = (label: string, value: string): string => `  ${label.padEnd(10)}  ${value}`;
 
@@ -59,6 +69,7 @@ type Row = {
   needed: string;
   picked: string;
   file: string;
+  'bytes arrived': string;
 };
 
 /** The columns, left to right. */
@@ -71,6 +82,7 @@ const COLUMNS: (keyof Row)[] = [
   'needed',
   'picked',
   'file',
+  'bytes arrived',
 ];
 
 /**
@@ -153,6 +165,15 @@ function imageBlock(
     const files = [...new Set(sightings.map((s) => fileOf(s.image.currentSrc, base)))].join(', ');
     const why = candidates.length === 0 ? 'no srcset' : 'one candidate only';
     lines.push(`  ${why}, so nothing was selected — file  ${files}`);
+    // Bytes still arrived for it, so they are still reported. A 1×1 tracking
+    // pixel weighs what it weighs whether or not anything chose it.
+    //
+    // Collapsed across the devices, the way the file above already is, because
+    // a table of near-identical rows is what this branch exists to avoid. So a
+    // lazy image still in flight when one render finished loading reads as a
+    // size and an unknown side by side; `--json` says which device was which.
+    const weights = [...new Set(sightings.map((s) => bytesArrived(s.image.transferBytes)))];
+    lines.push(field('bytes', weights.join(', ')));
     return lines;
   }
 
@@ -215,16 +236,23 @@ function row(base: string, { device, image }: Sighting, byWidth: boolean): Row {
   };
 }
 
-/** The picked descriptor and the file the browser went and got, which should agree. */
+/**
+ * The picked descriptor, the file the browser went and got — which should
+ * agree — and what that file cost on the wire.
+ */
 function chosen(
   base: string,
   image: CapturedImage,
   picked: Candidate | null,
-): Pick<Row, 'picked' | 'file'> {
+): Pick<Row, 'picked' | 'file' | 'bytes arrived'> {
   const file = image.currentSrc ? fileOf(image.currentSrc, base) : '(none)';
   // The cache is disabled for every render, so a disagreement is not a held
   // copy standing in. It is the prediction to question.
   const differs =
     picked !== null && image.currentSrc !== '' && absolute(picked.url, base) !== image.currentSrc;
-  return { picked: picked ? picked.raw : '—', file: differs ? `${file} ← differs` : file };
+  return {
+    picked: picked ? picked.raw : '—',
+    file: differs ? `${file} ← differs` : file,
+    'bytes arrived': bytesArrived(image.transferBytes),
+  };
 }
