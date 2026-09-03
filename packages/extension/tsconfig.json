@@ -1,0 +1,18 @@
+{
+  // DOM here and no `types`, which is the opposite way round from the command
+  // and the runner. Neither half of this package runs on Node: the worker runs
+  // in a service worker and the panel runs in a page, so a Node built-in would
+  // be a module that fails to load in Chrome. `boundary.test.ts` refuses one,
+  // and this is what makes the refusal a type error first.
+  //
+  // `chrome` is not in `lib` and is not a types package either. `src/chrome.d.ts`
+  // declares the two calls this package uses and says why.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src"]
+}
