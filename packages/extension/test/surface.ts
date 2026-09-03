@@ -282,6 +282,76 @@ export function surfaceOf(text: string): Surface {
   };
 }
 
+/** One value given to a property: where it was written, and its shape. */
+export type Given = { wrote: string; whole: boolean };
+
+/**
+ * Whether one expression is a whole value read off something, rather than one
+ * the code built.
+ *
+ * An identifier or a chain of property reads. Nothing else: a concatenation, a
+ * template literal, a call, a conditional and a `??` are all expressions that
+ * compute, and a URL with a fact about the page stitched into it is always one
+ * of those. `privacy.test.ts` says why that is the property worth checking and
+ * what it does not cover.
+ */
+function isWhole(node: ts.Expression): boolean {
+  if (ts.isIdentifier(node)) return true;
+  if (ts.isPropertyAccessExpression(node)) return isWhole(node.expression);
+  if (ts.isParenthesizedExpression(node)) return isWhole(node.expression);
+  if (node.kind === ts.SyntaxKind.ThisKeyword) return true;
+  return false;
+}
+
+/**
+ * Every value one module gives to a property of this name, however it gives
+ * it, with the shape of the value it gave.
+ *
+ * Four forms give a property a value and all four are read, because a check
+ * that read one of them is a check the next contributor writes around:
+ *
+ * ```ts
+ * element.src = url          // an assignment
+ * element['src'] = url       // the same thing, spelled around a dot
+ * { src: url }               // a property of an object literal
+ * { src }                    // the same thing, shorthand
+ * ```
+ *
+ * The last is whole by construction — a shorthand is a name and nothing else.
+ * A compound assignment is never whole, whatever is on its right, because the
+ * value it produces is built out of what was already there.
+ */
+export function givenTo(text: string, name: string): Given[] {
+  const found: Given[] = [];
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isBinaryExpression(node)) {
+      const { kind } = node.operatorToken;
+      const assigns = kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
+      const named =
+        (ts.isPropertyAccessExpression(node.left) && node.left.name.text === name) ||
+        (ts.isElementAccessExpression(node.left) &&
+          ts.isStringLiteralLike(node.left.argumentExpression) &&
+          node.left.argumentExpression.text === name);
+      if (assigns && named) {
+        found.push({
+          wrote: node.right.getText(),
+          whole: kind === ts.SyntaxKind.EqualsToken && isWhole(node.right),
+        });
+      }
+    } else if (ts.isPropertyAssignment(node) && node.name.getText() === name) {
+      found.push({ wrote: node.initializer.getText(), whole: isWhole(node.initializer) });
+    } else if (ts.isShorthandPropertyAssignment(node) && node.name.text === name) {
+      found.push({ wrote: node.name.text, whole: true });
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(parse(text));
+  return found;
+}
+
 /**
  * Whether one initialiser can be evaluated without anything happening.
  *

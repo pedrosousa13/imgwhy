@@ -26,6 +26,34 @@
 
 /** One image as the page reported it, before core parses the `srcset`. */
 export type RawImage = {
+  /**
+   * Where this image sat in `document.images`, which is the panel's handle
+   * back to the element.
+   *
+   * A number rather than the selector below, and the choice is deliberate. The
+   * panel has to point at an element to mark it, and it has two ways to find
+   * one: run the DOM path back through `querySelector`, or index the same
+   * collection this walk indexed. The path is the weaker of the two — it is
+   * built out of tag names and `nth-of-type` positions, so a page that
+   * re-orders siblings between the read and the hover resolves it to a
+   * different element with no error anywhere, and a path is also a string this
+   * package would then have to hand to a selector engine, which is a parse of
+   * page content. An index is one number, minted by the walk that read the
+   * element, and `document.images` is the same live collection in both
+   * functions.
+   *
+   * What it costs is a page that mutates. An `<img>` inserted or removed
+   * between the read and the hover shifts the collection, so the mark can land
+   * on the neighbour of the row a reader pointed at, and a row past the new end
+   * marks nothing at all — which is the case `renderPanel` guards. Neither is
+   * corrected, because the panel is one render's answer: it reports the page as
+   * the click found it, and the honest fix for a page that has moved on is to
+   * close it and click again. Verifying the handle against the row's own
+   * `currentSrc` was considered and rejected — a lazy image that finished
+   * loading in between would fail that check while the handle was right, and
+   * refusing to mark the correct image is worse than marking its neighbour.
+   */
+  at: number;
   selector: string;
   srcset: string;
   sizes: string | null;
@@ -39,6 +67,35 @@ export type RawImage = {
    */
   sizesSource: 'img' | 'source';
   renderedWidth: number;
+  /**
+   * The other half of the box this render laid the image out at.
+   *
+   * The arithmetic has no use for it — `explainSelection` reads a width and
+   * never a height — and it is read anyway, because a reader recognising an
+   * image on a page recognises a shape. A row that says `1200×80` is a banner
+   * and one that says `24×24` is an icon, and neither is a thing a DOM path
+   * tells you.
+   *
+   * A laid-out height is not the dimension `non-goals.test.ts` refuses.
+   * `naturalWidth` is refused because it is the ingredient of a guessed weight
+   * — pixels in a file, times pixels in a file, times a bytes-per-pixel
+   * figure someone invented — and this is a CSS box, which says how large the
+   * page drew the image and nothing about what arrived. The package performs
+   * no multiplication anywhere either, which `through-core.test.ts` holds, so
+   * there is no arithmetic here for a dimension to feed.
+   */
+  renderedHeight: number;
+  /**
+   * The `alt` attribute as the page wrote it, or null where it wrote none.
+   *
+   * Three states rather than two, and the third is the reason this is not a
+   * plain string. An absent attribute is a page that said nothing about the
+   * image; `alt=""` is a page that said the image carries no meaning of its
+   * own, which is a deliberate and different statement. A reader looking for
+   * an accessibility problem needs the two apart, and `img.alt` collapses them
+   * — it reads `''` for both — so the attribute is read instead.
+   */
+  alt: string | null;
   currentSrc: string;
   loading: 'lazy' | 'eager' | null;
   /**
@@ -194,15 +251,27 @@ export function readPage(): Reading | null {
   // a reader this slice did not ask for. Written down because a reader looking
   // at an empty panel on a page full of images should not have to find this
   // out from the source.
-  const images = [...document.images].map((img): RawImage => {
+  const images = [...document.images].map((img, at): RawImage => {
     const loading = img.getAttribute('loading');
     const offered = active(img);
+    // One reading of the box rather than two, because two are two layouts: a
+    // rect is measured when it is asked for, and a page that moves between the
+    // two calls answers a width from one frame and a height from another.
+    const box = img.getBoundingClientRect();
     return {
+      // The index into the collection this walk is over, which is the panel's
+      // handle back to this element. Nothing is filtered out of the walk, so
+      // the row's position and the element's position are the same number, and
+      // the field says so rather than leaving the panel to infer it from an
+      // array index two modules away.
+      at,
       selector: domPath(img),
       srcset: offered.srcset,
       sizes: offered.sizes,
       sizesSource: offered.sizesSource,
-      renderedWidth: img.getBoundingClientRect().width || img.width || 0,
+      renderedWidth: box.width || img.width || 0,
+      renderedHeight: box.height || img.height || 0,
+      alt: img.getAttribute('alt'),
       currentSrc: img.currentSrc || img.src,
       loading: loading === 'lazy' ? 'lazy' : loading === 'eager' ? 'eager' : null,
       baseURI: img.baseURI,

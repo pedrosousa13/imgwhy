@@ -57,7 +57,12 @@ const hostile = () =>
         // handed the browser either.
         srcset: 'javascript:alert(1) 2000w, /i/300.png"onmouseover="alert(2) 300w',
         sizes: '100vw" onload="alert(\'sizes\')</script><!--<script>alert(\'break out\')</script>',
+        // `alt` is page content like every other field here, and it reaches
+        // the panel twice: as a line of the grid, and as the thumbnail's own
+        // `alt` wherever the page wrote one.
+        alt: '</dd><img src=x onerror=alert(\'alt\')>',
         renderedWidth: 640,
+        renderedHeight: 360,
         currentSrc: 'data:text/html,<script>alert(\'current src\')</script>',
         loading: 'lazy',
         baseURI: 'https://evil.example/"><script>alert(\'base\')</script>/',
@@ -83,8 +88,8 @@ const hostile = () =>
 /**
  * Properties refused by name, whatever an allowlist elsewhere says.
  *
- * `privacy.test.ts` already allows this package two written properties — an
- * id and the words it says — so `innerHTML` is refused there by absence. This
+ * `privacy.test.ts` allows this package six written properties, none of which
+ * parses anything — so `innerHTML` is refused there by absence. This
  * is the second reading of the same claim, and it exists for the edit that
  * widens that list: a contributor who allowed one name because the markup in
  * front of them was their own. Every route below turns a string into markup,
@@ -128,24 +133,33 @@ function rendered(): { nodes: El[]; host: Page } {
  * somewhere it should not have; the panel names no tag from page content, so
  * anything else found as an element is a tag the page talked it into making.
  *
- * Eleven names is the whole panel. `mark` is the cache flag and the rest are
- * the shape of the thing: a card, a title, a head line, a list, an item, a
- * heading, a grid of terms and values, a note, and a footer.
+ * Nineteen names is the whole panel. `mark` is the cache flag, `div` is the box
+ * drawn over an image, the two `style` elements are the stylesheet and the one
+ * rule that positions that box, and the rest are the shape of the thing: a
+ * card, a disclosure and its summary, a title, a head line, a list, an item, a
+ * row header, a thumbnail, a name button, a grid of terms and values, a note,
+ * and a footer.
  */
 const TAGS = [
   '#shadow-root',
+  'button',
   'dd',
+  'details',
+  'div',
   'dl',
   'dt',
   'footer',
   'h1',
   'h2',
+  'header',
+  'img',
   'li',
   'mark',
   'ol',
   'p',
   'section',
   'style',
+  'summary',
 ];
 
 /**
@@ -184,42 +198,74 @@ describe('the panel, given a page written to break out of it', () => {
     const words = nodes.map((node) => node.textContent);
     const live = hostile().images;
 
-    expect(words).toContain(`${live[0].selector}   loading=lazy`);
+    expect(words).toContain(live[0].selector);
     expect(words).toContain(live[0].sizes);
+    expect(words).toContain(live[0].alt);
     expect(words).toContain(live[1].selector);
     expect(words).toContain(`${live[1].sizes} from a matching <source>`);
   });
 
   it('writes a javascript: candidate URL as a word and never as a target', () => {
     // The 2000w candidate is the one the arithmetic picks at this viewport, so
-    // it is the one the panel names — as the text of a `dd`, which is the only
-    // place any URL in this panel ever lands. A URL written to a property is
-    // a request made by assignment, and this package writes two properties: an
-    // id, and the words it says.
+    // it is the one the panel names — as the text of a `dd`, which is where
+    // every candidate URL in this panel lands. A candidate is never assigned
+    // to anything: the one property this package gives a URL to is the
+    // thumbnail's `src`, and the only URL it may have is the file the browser
+    // already loaded.
     const { nodes } = rendered();
     const words = nodes.map((node) => node.textContent);
+    const targets = nodes.filter((node) => node.src !== '' || node.srcset !== '');
 
     expect(words.some((word) => word.includes('2000w  javascript:alert(1)'))).toBe(true);
-    expect(nodes.filter((node) => node.src !== '' || node.srcset !== '')).toEqual([]);
+    expect(targets.map((node) => node.src)).toEqual(
+      hostile()
+        .images.filter((one) => one.currentSrc !== '')
+        .map((one) => one.currentSrc),
+    );
+    expect(nodes.filter((node) => node.srcset !== '')).toEqual([]);
+  });
+
+  it('hands a hostile currentSrc to a thumbnail whole, and it stays a broken image', () => {
+    // The narrowed rule, read against a page written to abuse it. The first
+    // image's `currentSrc` is `data:text/html,<script>…`, which is not a URL a
+    // browser would ever report for an `<img>` and is exactly the string a
+    // page would try. It arrives byte for byte, because the value the panel
+    // may assign is the whole value the reading handed over and nothing else —
+    // and byte for byte is the safe answer here: an `<img>` fetches its `src`,
+    // it never navigates to it and never parses the response as markup, so a
+    // `data:text/html` payload and a `javascript:` URL are both a picture that
+    // will not draw. The `alt` beside it is what says which image failed.
+    const { nodes } = rendered();
+    const thumbs = nodes.filter((node) => node.name === 'img');
+    const live = hostile().images;
+
+    expect(thumbs.map((node) => node.src)).toEqual([live[0].currentSrc, live[1].currentSrc, '']);
+    expect(thumbs[2]?.alt).toBe('nothing loaded');
   });
 
   it('writes a descriptor the page invented as a word, forged mark and all', () => {
     // The descriptor is the field with no validation behind it at all —
     // `parseSrcset` keeps whatever text stood where a `640w` should have — and
     // it lands on two lines of the grid. The count of marks is what says the
-    // forgery made no element: three rows, three `loaded` lines, three marks,
-    // and the fourth `<mark>` the page asked for is a word in a `dd`.
+    // forgery made no element: three rows, each with a chip on its compact
+    // line and a chip on its `loaded` figure, and the `<mark>` the page asked
+    // for is a word in a `dd`.
     const { nodes } = rendered();
     const words = nodes.map((node) => node.textContent);
 
     expect(words).toContain(`400w, ${DESCRIPTOR}`);
     expect(words).toContain(`${DESCRIPTOR}  /i/800.png`);
-    expect(nodes.filter((node) => node.name === 'mark')).toHaveLength(3);
+    expect(nodes.filter((node) => node.name === 'mark')).toHaveLength(6);
   });
 
   it('says why the prediction and a hostile loaded URL disagree, and says only that', () => {
+    // The notes live inside the row's own disclosure now rather than standing
+    // in the row, so a `p` whose parent is a `details` inside an `li` is a
+    // note and a `p` in the row's `header` is the compact line.
     const { nodes } = rendered();
-    const notes = nodes.filter((node) => node.parent?.name === 'li' && node.name === 'p');
+    const notes = nodes.filter(
+      (node) => node.name === 'p' && node.parent?.name === 'details' && node.parent.parent?.name === 'li',
+    );
 
     expect(notes.map((node) => node.textContent.slice(0, 25))).toEqual([
       'picked and loaded disagre',

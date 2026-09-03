@@ -6,7 +6,7 @@ import { refuseStaleBuild } from '../../../test/built.js';
 import type { Reading } from '../src/read.js';
 import { readPage } from '../src/read.js';
 import type { El, Page, World } from './dom.js';
-import { globals, page } from './dom.js';
+import { box, globals, page } from './dom.js';
 
 /** The id the panel gives its host, which is how a second click finds it. */
 const HOST_ID = '__imgwhy_host__';
@@ -68,9 +68,11 @@ type Fields = Partial<
     | 'currentSrc'
     | 'src'
     | 'width'
+    | 'height'
     | 'rect'
     | 'baseURI'
     | 'loading'
+    | 'alt'
     | 'background'
   >
 >;
@@ -134,8 +136,8 @@ describe('the reader a click sends into the page', () => {
     // downstream can reach, and deciding what is worth a reader's attention
     // belongs to whatever displays the reading.
     const host = page();
-    img(host, body(host), { rect: 640 });
-    img(host, body(host), { rect: 1, width: 1 });
+    img(host, body(host), { rect: box({ width: 640 }) });
+    img(host, body(host), { rect: box({ width: 1, height: 1 }), width: 1 });
 
     expect(read(host).images).toHaveLength(2);
   });
@@ -159,7 +161,7 @@ describe('the reader a click sends into the page', () => {
       srcset: '/i/640.png 640w, /i/1080.png 1080w',
       sizes: '33vw',
       currentSrc: 'https://example.com/i/640.png',
-      rect: 475,
+      rect: box({ width: 475, height: 317 }),
     });
 
     expect(read(host).images[0]).toMatchObject({
@@ -167,16 +169,52 @@ describe('the reader a click sends into the page', () => {
       sizes: '33vw',
       sizesSource: 'img',
       renderedWidth: 475,
+      renderedHeight: 317,
       currentSrc: 'https://example.com/i/640.png',
       baseURI: 'https://example.com/',
     });
   });
 
-  it('falls back to the width attribute where the element has no box', () => {
+  it('reads the whole box, because a shape is what a reader recognises', () => {
+    // The arithmetic reads a width and never a height. The height is read for
+    // the reader instead: a row saying `1200×80` is a banner and one saying
+    // `24×24` is an icon, and a DOM path says neither.
     const host = page();
-    img(host, body(host), { rect: 0, width: 300 });
+    img(host, body(host), { rect: box({ width: 1200, height: 80 }) });
 
-    expect(read(host).images[0].renderedWidth).toBe(300);
+    expect(read(host).images[0]).toMatchObject({ renderedWidth: 1200, renderedHeight: 80 });
+  });
+
+  it('falls back to the width and height attributes where the element has no box', () => {
+    const host = page();
+    img(host, body(host), { rect: box(), width: 300, height: 200 });
+
+    expect(read(host).images[0]).toMatchObject({ renderedWidth: 300, renderedHeight: 200 });
+  });
+
+  it('hands each image its index into the collection, which is the panel’s handle', () => {
+    // The panel has to point at an element to mark it, and this is what it
+    // points with. `read.ts` argues why an index beats running the DOM path
+    // back through a selector, and what it costs on a page that mutates.
+    const host = page();
+    img(host, body(host));
+    img(host, el(host, body(host), 'figure'));
+    img(host, body(host));
+
+    expect(read(host).images.map((one) => one.at)).toEqual([0, 1, 2]);
+  });
+
+  it('reads alt as three states, because an empty one is a statement', () => {
+    // No attribute is a page that said nothing about the image. `alt=""` is a
+    // page that said the image carries no meaning of its own, which is right
+    // for a spacer and a bug on a hero. `img.alt` reads `''` for both, so the
+    // attribute is what gets read.
+    const host = page();
+    img(host, body(host), { alt: 'A person at a desk' });
+    img(host, body(host), { alt: '' });
+    img(host, body(host));
+
+    expect(read(host).images.map((one) => one.alt)).toEqual(['A person at a desk', '', null]);
   });
 
   it('reads src where nothing has been chosen, and reports no file where neither is set', () => {
@@ -351,7 +389,7 @@ describe('the reader as the built module ships it, which is the copy a page gets
     const host = page();
     const picture = el(host, body(host), 'picture');
     el(host, picture, 'source', { media: '(min-width: 1000px)', srcset: '/i/mid.png 1200w' });
-    img(host, picture, { srcset: '/i/fallback.png 400w', sizes: '120px', rect: 475 });
+    img(host, picture, { srcset: '/i/fallback.png 400w', sizes: '120px', rect: box({ width: 475, height: 317 }) });
     el(host, body(host), 'div', { background: 'url("https://example.com/hero.jpg")' });
 
     // The whole reading rather than one field of it, because a name the module
@@ -363,11 +401,14 @@ describe('the reader as the built module ships it, which is the copy a page gets
       dpr: 1,
       images: [
         {
+          at: 0,
           selector: 'html > body > picture > img',
           srcset: '/i/mid.png 1200w',
           sizes: null,
           sizesSource: 'source',
           renderedWidth: 475,
+          renderedHeight: 317,
+          alt: null,
           currentSrc: '',
           loading: null,
           baseURI: 'https://example.com/',
