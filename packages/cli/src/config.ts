@@ -10,7 +10,7 @@ export type LoadedProfiles =
   | { ok: false; message: string };
 
 /**
- * Resolve a config file name against the working directory, or refuse it.
+ * Resolve imgwhy's one config file against the working directory, or refuse it.
  *
  * imgwhy reads one file from the directory it was run in, and nothing else.
  * The check is here rather than left implicit because the name is not the only
@@ -18,15 +18,26 @@ export type LoadedProfiles =
  * repository you cloned can carry one that points at your home directory. The
  * error message quotes the file, so reading the wrong file leaks it.
  *
- * Both the joined path and what it really points at have to land inside the
- * directory, which is what rules out `../`, an absolute path, and a symlink
- * that leaves. Null means refused.
+ * The name is `CONFIG_FILE` and nothing else — there is no parameter for it,
+ * so no caller can hand this an untrusted name. Both the joined path and what
+ * it really points at still have to land inside the directory, which is what
+ * rules out `../`, an absolute path, and a symlink that leaves. The absent
+ * branch returns `target` unresolved, and that is safe only because `target`
+ * was already checked to be inside; keep the check above it. Null means
+ * refused.
+ *
+ * One escape remains that no path check can see: a hard link inside the
+ * directory to a file outside it, which `realpathSync` reports as the path
+ * inside.
+ *
+ * Throws when `dir` itself cannot be resolved, which is a deleted or
+ * unreadable working directory. The caller turns that into a message.
  */
-export function configPathInside(dir: string, name: string): string | null {
+export function configPathInside(dir: string): string | null {
   const root = realpathSync(dir);
   const inside = (path: string): boolean => path === root || path.startsWith(root + sep);
 
-  const target = resolve(root, name);
+  const target = resolve(root, CONFIG_FILE);
   if (!inside(target)) return null;
 
   let real: string;
@@ -48,10 +59,17 @@ export function configPathInside(dir: string, name: string): string | null {
  *
  * A file that is there but unreadable is an error, never a quiet fall back to
  * the defaults: a run that silently ignored the config would report the wrong
- * devices and look right doing it.
+ * devices and look right doing it. So is a working directory that is not
+ * there: every failure here leaves the command with something to print.
  */
 export function loadDeviceProfiles(dir: string): LoadedProfiles {
-  const path = configPathInside(dir, CONFIG_FILE);
+  let path: string | null;
+  try {
+    path = configPathInside(dir);
+  } catch (error) {
+    return { ok: false, message: `the working directory could not be read: ${messageOf(error)}` };
+  }
+
   if (path === null) {
     return {
       ok: false,

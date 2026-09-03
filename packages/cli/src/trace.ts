@@ -44,24 +44,52 @@ const resolvedPx = (resolution: Resolution, renderedWidth: number): number | nul
 const field = (label: string, value: string): string => `  ${label.padEnd(10)}  ${value}`;
 
 /**
+ * One device's line of the arithmetic, keyed by the column each value prints
+ * under.
+ *
+ * The keys are the headings, so a row cannot line its values up against the
+ * wrong columns and the compiler says so when one is missing.
+ */
+type Row = {
+  device: string;
+  viewport: string;
+  DPR: string;
+  'clause used': string;
+  'css px': string;
+  needed: string;
+  picked: string;
+  file: string;
+};
+
+/** The columns, left to right. */
+const COLUMNS: (keyof Row)[] = [
+  'device',
+  'viewport',
+  'DPR',
+  'clause used',
+  'css px',
+  'needed',
+  'picked',
+  'file',
+];
+
+/**
  * One row per line, columns padded to the widest cell.
  *
  * Every column is left aligned, so a reader can run an eye straight down one
  * of them and every row breaks in the same place.
  */
-function table(heads: string[], rows: string[][]): string[] {
-  const widths = heads.map((head, i) =>
-    Math.max(head.length, ...rows.map((row) => (row[i] ?? '').length)),
+function table(rows: Row[]): string[] {
+  const widths = COLUMNS.map((column) =>
+    Math.max(column.length, ...rows.map((row) => row[column].length)),
   );
   const line = (cells: string[]): string =>
     cells
-      .map((cell, i) => cell.padEnd(widths[i] ?? 0))
+      .map((cell, i) => cell.padEnd(widths[i]))
       .join('  ')
       .trimEnd();
-  return [line(heads), ...rows.map(line)];
+  return [line(COLUMNS), ...rows.map((row) => line(COLUMNS.map((column) => row[column])))];
 }
-
-const HEADS = ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'arrived'];
 
 /**
  * Explain every image on a page across every device, as arithmetic a reader
@@ -80,7 +108,7 @@ export function formatCapture(capture: Capture): string {
   ];
   const blocks = groups.flatMap(([id, sightings], index) => [
     '',
-    ...imageBlock(capture, id, sightings, index + 1, groups.length),
+    ...imageBlock(capture.url, capture.devices, id, sightings, index + 1, groups.length),
   ]);
   return [...head, ...blocks].join('\n');
 }
@@ -104,25 +132,27 @@ function groupById(capture: Capture): [string, Sighting[]][] {
 }
 
 function imageBlock(
-  capture: Capture,
+  base: string,
+  devices: DeviceProfile[],
   id: string,
   sightings: Sighting[],
   index: number,
   total: number,
 ): string[] {
-  const [first] = sightings as [Sighting, ...Sighting[]];
+  const first = sightings[0];
+  if (!first) throw new Error(`the capture groups image "${id}" with no sighting to explain`);
   const { candidates, sizes } = first.image;
   const lazy = sightings.some((s) => s.image.loading === 'lazy');
   const lines = [`image ${index} of ${total}  ${id}${lazy ? '   loading=lazy' : ''}`];
 
   // Nothing to select means nothing to explain, and a table of five identical
-  // rows would only bury the images that do choose.
+  // rows would only bury the images that do choose. This is also what keeps a
+  // 1×1 tracking pixel to one line: the runner records every image, and the
+  // ones with no choice to make say so and stop.
   if (candidates.length < 2) {
-    const arrived = [
-      ...new Set(sightings.map((s) => fileOf(s.image.currentSrc, capture.url))),
-    ].join(', ');
+    const files = [...new Set(sightings.map((s) => fileOf(s.image.currentSrc, base)))].join(', ');
     const why = candidates.length === 0 ? 'no srcset' : 'one candidate only';
-    lines.push(`  ${why}, so nothing was selected — arrived  ${arrived}`);
+    lines.push(`  ${why}, so nothing was selected — file  ${files}`);
     return lines;
   }
 
@@ -147,43 +177,54 @@ function imageBlock(
     lines.push(field('also at', `${selector} on ${names.join(', ')}`));
   }
 
-  const absent = capture.devices.filter((d) => !sightings.some((s) => s.device.id === d.id));
+  const absent = devices.filter((d) => !sightings.some((s) => s.device.id === d.id));
   if (absent.length) lines.push(field('not on', absent.map((d) => d.name).join(', ')));
 
   lines.push('');
-  lines.push(...table(HEADS, sightings.map((s) => row(capture, s, byWidth))).map((l) => `  ${l}`));
+  lines.push(...table(sightings.map((s) => row(base, s, byWidth))).map((l) => `  ${l}`));
   return lines;
 }
 
-function row(capture: Capture, { device, image }: Sighting, byWidth: boolean): string[] {
-  const viewport = `${device.viewport.width}×${device.viewport.height}`;
-  const head = [device.name, viewport, String(device.dpr)];
+function row(base: string, { device, image }: Sighting, byWidth: boolean): Row {
+  const head = {
+    device: device.name,
+    viewport: `${device.viewport.width}×${device.viewport.height}`,
+    DPR: String(device.dpr),
+  };
 
   if (!byWidth) {
     const picked = selectCandidate(image.candidates, null, device.dpr);
-    return [...head, 'x descriptors only', '—', '—', ...tail(capture, image, picked)];
+    return {
+      ...head,
+      'clause used': 'x descriptors only',
+      'css px': '—',
+      needed: '—',
+      ...chosen(base, image, picked),
+    };
   }
 
   const resolution = resolveSizes(image.sizes, device.viewport.width);
   const px = resolvedPx(resolution, image.renderedWidth);
   const picked = selectCandidate(image.candidates, px, device.dpr);
-  return [
+  return {
     ...head,
-    resolution.clause,
-    px === null ? 'unreadable' : `${Math.round(px)}px`,
-    px === null ? '—' : `${Math.round(px * device.dpr)}px`,
-    ...tail(capture, image, picked),
-  ];
+    'clause used': resolution.clause,
+    'css px': px === null ? 'unreadable' : `${Math.round(px)}px`,
+    needed: px === null ? '—' : `${Math.round(px * device.dpr)}px`,
+    ...chosen(base, image, picked),
+  };
 }
 
-/** The picked descriptor and the file that arrived, which should agree. */
-function tail(capture: Capture, image: CapturedImage, picked: Candidate | null): string[] {
-  const arrived = image.currentSrc ? fileOf(image.currentSrc, capture.url) : '(none)';
+/** The picked descriptor and the file the browser went and got, which should agree. */
+function chosen(
+  base: string,
+  image: CapturedImage,
+  picked: Candidate | null,
+): Pick<Row, 'picked' | 'file'> {
+  const file = image.currentSrc ? fileOf(image.currentSrc, base) : '(none)';
   // The cache is disabled for every render, so a disagreement is not a held
   // copy standing in. It is the prediction to question.
   const differs =
-    picked !== null &&
-    image.currentSrc !== '' &&
-    absolute(picked.url, capture.url) !== image.currentSrc;
-  return [picked ? picked.raw : '—', differs ? `${arrived} ← differs` : arrived];
+    picked !== null && image.currentSrc !== '' && absolute(picked.url, base) !== image.currentSrc;
+  return { picked: picked ? picked.raw : '—', file: differs ? `${file} ← differs` : file };
 }

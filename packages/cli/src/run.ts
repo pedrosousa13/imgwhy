@@ -21,7 +21,14 @@ const fail = (message: string): Outcome => ({ code: 1, stdout: '', stderr: `${me
 export async function run(
   argv: string[],
   capture: CaptureFn,
-  cwd: string = process.cwd(),
+  /**
+   * The directory the command was run in, defaulted as a relative path rather
+   * than through `process.cwd()`. That call throws where the directory has
+   * been deleted under the command, and a throw in a default parameter leaves
+   * `run` with no Outcome to return; `loadDeviceProfiles` resolves this inside
+   * its own try, so the same failure comes back as a message.
+   */
+  cwd: string = '.',
 ): Promise<Outcome> {
   const [raw, ...rest] = argv;
   if (raw === undefined || rest.length > 0) return fail(USAGE);
@@ -40,9 +47,7 @@ export async function run(
   }
 
   if (!captured.runs.some((deviceRun) => deviceRun.images.length > 0)) {
-    return fail(
-      `${captured.url} carries no image big enough to have been chosen, so there is nothing to explain.`,
-    );
+    return fail(`${captured.url} carries no <img> element, so there is nothing to explain.`);
   }
 
   return { code: 0, stdout: `${formatCapture(captured)}\n`, stderr: '' };

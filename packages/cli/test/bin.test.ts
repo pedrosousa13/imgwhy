@@ -68,13 +68,13 @@ describe('the imgwhy command', () => {
 
     // The plain `src` logo. Nothing chose it, and no table pretends otherwise.
     expect(ran.stdout).toContain('image 1 of 3  html > body > header > img   loading=lazy');
-    expect(ran.stdout).toContain('  no srcset, so nothing was selected — arrived  640.png');
+    expect(ran.stdout).toContain('  no srcset, so nothing was selected — file  640.png');
 
     // The hero, under a media clause only the desktop viewport matches.
     expect(ran.stdout).toContain('  candidates  640w, 1080w, 1920w');
     expect(ran.stdout).toContain('  sizes       (min-width: 1000px) 50vw, 100vw');
     expect(tableUnder(ran.stdout, 'image 2 of 3')).toEqual([
-      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'arrived'],
+      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'file'],
       ['iPhone SE', '375×667', '2', '100vw', '375px', '750px', '1080w', '1080.png'],
       ['iPhone 15 Pro', '393×852', '3', '100vw', '393px', '1179px', '1920w', '1920.png'],
       // 1080/412 is 2.621, a hair under this device's 2.625.
@@ -94,7 +94,7 @@ describe('the imgwhy command', () => {
 
     // The badge, where `sizes` plays no part at all.
     expect(tableUnder(ran.stdout, 'image 3 of 3')).toEqual([
-      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'arrived'],
+      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'file'],
       ['iPhone SE', '375×667', '2', 'x descriptors only', '—', '—', '2x', '300.png'],
       ['iPhone 15 Pro', '393×852', '3', 'x descriptors only', '—', '—', '2x', '300.png'],
       ['Pixel 8', '412×915', '2.625', 'x descriptors only', '—', '—', '2x', '300.png'],
@@ -113,7 +113,7 @@ describe('the imgwhy command', () => {
     expect(lines(ran.stdout)[0]).toBe(`url      ${server.url}/nested/`);
     expect(ran.stdout).not.toContain('differs');
     expect(tableUnder(ran.stdout, 'image 1 of 1')).toEqual([
-      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'arrived'],
+      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'file'],
       ['iPhone SE', '375×667', '2', '100vw', '375px', '750px', '1080w', '1080.png'],
       ['iPhone 15 Pro', '393×852', '3', '100vw', '393px', '1179px', '1920w', '1920.png'],
       ['Pixel 8', '412×915', '2.625', '100vw', '412px', '1082px', '1920w', '1920.png'],
@@ -139,7 +139,7 @@ describe('the imgwhy command', () => {
 
     expect(ran.code).toBe(0);
     expect(ran.stdout).toContain('images   1 on 5 devices');
-    expect(ran.stdout).toContain('  no srcset, so nothing was selected — arrived  1080.png');
+    expect(ran.stdout).toContain('  no srcset, so nothing was selected — file  1080.png');
   }, 120_000);
 
   it('exits non-zero on a page carrying no image at all', async () => {
@@ -147,7 +147,7 @@ describe('the imgwhy command', () => {
 
     expect(ran.code).toBe(1);
     expect(ran.stdout).toBe('');
-    expect(ran.stderr).toContain('carries no image big enough to have been chosen');
+    expect(ran.stderr).toContain('carries no <img> element');
   }, 120_000);
 
   it('renders the device set imgwhy.config.json names, and only that set', async () => {
@@ -166,7 +166,7 @@ describe('the imgwhy command', () => {
     expect(ran.code).toBe(0);
     expect(ran.stdout).toContain('images   3 on 1 devices');
     expect(tableUnder(ran.stdout, 'image 2 of 3')).toEqual([
-      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'arrived'],
+      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'file'],
       // 1024 matches the media clause, so half of it at DPR 1 needs 512.
       ['Kiosk', '1024×1280', '1', '(min-width: 1000px) 50vw', '512px', '512px', '640w', '640.png'],
     ]);

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_PROFILES } from '@imgwhy/runner';
@@ -116,6 +116,18 @@ describe('loadDeviceProfiles', () => {
     );
   });
 
+  it('reports a working directory that cannot be read, rather than throwing', () => {
+    const gone = mkdtempSync(join(tmpdir(), 'imgwhy-gone-'));
+    rmSync(gone, { recursive: true });
+
+    const result = loadDeviceProfiles(gone);
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.message).toContain(
+      'the working directory could not be read',
+    );
+  });
+
   it('rejects a config that is a symlink to a file outside the working directory', () => {
     const outside = mkdtempSync(join(tmpdir(), 'imgwhy-outside-'));
     writeFileSync(join(outside, 'secrets.json'), '{"devices":[]}', 'utf8');
@@ -148,14 +160,40 @@ describe('loadDeviceProfiles', () => {
 });
 
 describe('configPathInside', () => {
-  it('accepts a plain name in the working directory', () => {
-    expect(configPathInside(dir, 'imgwhy.config.json')).not.toBeNull();
+  it('lands on the config file in the working directory, whether or not it exists', () => {
+    // The temporary directory is itself reached through a symlink on macOS,
+    // so the resolved root is what the path is built on.
+    const expected = join(realpathSync(dir), 'imgwhy.config.json');
+
+    expect(configPathInside(dir)).toBe(expected);
+
+    write('{"devices":[]}');
+
+    expect(configPathInside(dir)).toBe(expected);
   });
 
-  it.each(['../imgwhy.config.json', 'a/../../imgwhy.config.json', '/etc/passwd'])(
-    'refuses %s',
-    (name) => {
-      expect(configPathInside(dir, name)).toBeNull();
-    },
-  );
+  it('refuses a symlink that leads out of the working directory', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'imgwhy-outside-'));
+    writeFileSync(join(outside, 'secrets.json'), '{}', 'utf8');
+    symlinkSync(join(outside, 'secrets.json'), join(dir, 'imgwhy.config.json'));
+
+    expect(configPathInside(dir)).toBeNull();
+  });
+
+  it('refuses a symlink chain whose last hop leaves the working directory', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'imgwhy-outside-'));
+    writeFileSync(join(outside, 'secrets.json'), '{}', 'utf8');
+    mkdirSync(join(dir, 'config'));
+    symlinkSync(join(outside, 'secrets.json'), join(dir, 'config', 'devices.json'));
+    symlinkSync(join(dir, 'config', 'devices.json'), join(dir, 'imgwhy.config.json'));
+
+    expect(configPathInside(dir)).toBeNull();
+  });
+
+  it('throws where the working directory itself is gone, for the caller to report', () => {
+    const gone = mkdtempSync(join(tmpdir(), 'imgwhy-gone-'));
+    rmSync(gone, { recursive: true });
+
+    expect(() => configPathInside(gone)).toThrow();
+  });
 });

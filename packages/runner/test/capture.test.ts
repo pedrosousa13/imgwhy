@@ -12,7 +12,8 @@ const canonical: DeviceProfile = {
   dpr: 1.5,
 };
 
-const desktop = DEFAULT_PROFILES[4] as DeviceProfile;
+/** The widest of the default profiles, which is the last of them. */
+const desktop = DEFAULT_PROFILES[4];
 
 let server: FixtureServer;
 beforeAll(async () => {
@@ -48,20 +49,26 @@ describe('capturePage', () => {
     expect(hero?.transferBytes).toBeNull();
   });
 
-  it('skips images too small to have been chosen, and reads loading', async () => {
+  it('captures every image, including ones no one can see, and reads loading', async () => {
     const capture = await capturePage({
       url: `${server.url}/w-descriptors.html`,
       profiles: [canonical],
     });
 
     const images = capture.runs[0]?.images ?? [];
-    // The 1x1 pixel is gone; the logo and the hero remain, in document order.
+    // A 1×1 tracking pixel and a `display: none` image are bytes the page
+    // asked for, so the runner records them beside the logo and the hero, in
+    // document order.
     expect(images.map((i) => i.selector)).toEqual([
+      'html > body > img:nth-of-type(1)',
+      'html > body > img:nth-of-type(2)',
       'html > body > header > img',
       'html > body > main > img',
     ]);
-    expect(images[0]?.loading).toBe('lazy');
-    expect(images[0]?.candidates).toEqual([]);
+    expect(images[0]?.currentSrc).toBe(`${server.url}/img/1.png`);
+    expect(images[1]?.currentSrc).toBe(`${server.url}/img/100.png`);
+    expect(images[2]?.loading).toBe('lazy');
+    expect(images[2]?.candidates).toEqual([]);
   });
 
   it('runs every profile in its own context, each with its own deviceScaleFactor', async () => {

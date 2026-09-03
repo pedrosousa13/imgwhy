@@ -26,6 +26,7 @@ const shell = (title: string, body: string): string =>
   .half { width: 50%; height: auto }
   .logo { width: 120px; height: auto }
   .pixel { width: 1px; height: 1px }
+  .hidden { display: none }
   .third { width: 33.33%; height: auto }
 </style>
 </head>
@@ -40,9 +41,13 @@ ${body}
  * this server, so no test makes an external request.
  */
 const PAGES: Record<string, string> = {
+  // The two images at the top are the ones a visual tool would drop: a 1×1
+  // tracking pixel and an image the page never shows. Both were still asked
+  // for, so both are still bytes on the wire.
   '/w-descriptors.html': shell(
     'w descriptors',
     `<img class="pixel" src="/img/1.png" alt="">
+<img class="hidden" src="/img/100.png" alt="">
 <header><img class="logo" src="/img/640.png" loading="lazy" alt="logo"></header>
 <main><img class="hero" sizes="100vw"
   srcset="/img/640.png 640w, /img/1080.png 1080w, /img/1920.png 1920w"

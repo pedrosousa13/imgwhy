@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Capture, CapturedImage, DeviceRun } from '@imgwhy/core';
@@ -28,27 +28,27 @@ const logo = (): CapturedImage => ({
   loading: 'lazy',
 });
 
-const hero = (renderedWidth: number, arrived: string): CapturedImage => ({
+const hero = (renderedWidth: number, file: string): CapturedImage => ({
   id: 'html > body > main > img:nth-of-type(1)',
   selector: 'html > body > main > img:nth-of-type(1)',
   candidates: parseSrcset(HERO_SRCSET),
   sizes: '(min-width: 1000px) 50vw, 100vw',
   sizesSource: 'img',
   renderedWidth,
-  currentSrc: `https://example.com/i/${arrived}`,
+  currentSrc: `https://example.com/i/${file}`,
   naturalWidth: renderedWidth,
   transferBytes: null,
   loading: null,
 });
 
-const badge = (arrived: string): CapturedImage => ({
+const badge = (file: string): CapturedImage => ({
   id: 'html > body > main > img:nth-of-type(2)',
   selector: 'html > body > main > img:nth-of-type(2)',
   candidates: parseSrcset('/i/200.png 1x, /i/300.png 2x'),
   sizes: null,
   sizesSource: 'img',
   renderedWidth: 200,
-  currentSrc: `https://example.com/i/${arrived}`,
+  currentSrc: `https://example.com/i/${file}`,
   naturalWidth: 200,
   transferBytes: null,
   loading: null,
@@ -70,6 +70,12 @@ const gallery = (): Capture => {
     runs,
   };
 };
+
+/** The same capture with one device's run replaced, named by its device id. */
+const on = (capture: Capture, deviceId: string, images: CapturedImage[]): Capture => ({
+  ...capture,
+  runs: capture.runs.map((run) => (run.deviceId === deviceId ? { ...run, images } : run)),
+});
 
 const returning =
   (capture: Capture): CaptureFn =>
@@ -114,7 +120,7 @@ describe('run', () => {
     const outcome = await run(['https://example.com/gallery'], returning(gallery()), cwd);
 
     expect(tableUnder(outcome.stdout, 'image 2 of 3').map(cells)).toEqual([
-      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'arrived'],
+      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'file'],
       ['iPhone SE', '375×667', '2', '100vw', '375px', '750px', '1080w', '1080.png'],
       ['iPhone 15 Pro', '393×852', '3', '100vw', '393px', '1179px', '1920w', '1920.png'],
       // 1080/412 is 2.621, just under this device's 2.625, so the 1920 file it
@@ -142,8 +148,9 @@ describe('run', () => {
       [...line.matchAll(/(?<= {2}|^)\S/g)].map((m) => m.index);
 
     // Every row breaks its cells at the same offsets as the header.
-    for (const row of rows.slice(1)) {
-      expect(columnStarts(row)).toEqual(columnStarts(rows[0] as string));
+    const [header, ...rest] = rows;
+    for (const row of rest) {
+      expect(columnStarts(row)).toEqual(columnStarts(header));
     }
   });
 
@@ -158,14 +165,14 @@ describe('run', () => {
     const outcome = await run(['https://example.com/gallery'], returning(gallery()), cwd);
 
     expect(outcome.stdout).toContain('image 1 of 3  html > body > header > img   loading=lazy');
-    expect(outcome.stdout).toContain('  no srcset, so nothing was selected — arrived  logo.png');
+    expect(outcome.stdout).toContain('  no srcset, so nothing was selected — file  logo.png');
   });
 
   it('says sizes played no part when the candidates carry x descriptors', async () => {
     const outcome = await run(['https://example.com/gallery'], returning(gallery()), cwd);
 
     expect(tableUnder(outcome.stdout, 'image 3 of 3').map(cells)).toEqual([
-      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'arrived'],
+      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'file'],
       ['iPhone SE', '375×667', '2', 'x descriptors only', '—', '—', '2x', '300.png'],
       ['iPhone 15 Pro', '393×852', '3', 'x descriptors only', '—', '—', '2x', '300.png'],
       ['Pixel 8', '412×915', '2.625', 'x descriptors only', '—', '—', '2x', '300.png'],
@@ -174,30 +181,28 @@ describe('run', () => {
     ]);
   });
 
-  it('flags the row where the file that arrived is not the one picked', async () => {
-    const capture = gallery();
-    const run4 = capture.runs[4] as DeviceRun;
-    run4.images[1] = hero(720, '1920.png');
+  it('flags the row where the file that loaded is not the one picked', async () => {
+    const capture = on(gallery(), 'desktop', [logo(), hero(720, '1920.png'), badge('200.png')]);
 
     const outcome = await run(['https://example.com/gallery'], returning(capture), cwd);
 
-    const desktop = tableUnder(outcome.stdout, 'image 2 of 3')[5] as string;
+    const desktop = tableUnder(outcome.stdout, 'image 2 of 3')[5];
     expect(cells(desktop).at(-1)).toBe('1920.png ← differs');
   });
 
   it('names the absent sizes attribute and the 100vw default that stood in', async () => {
-    const capture = gallery();
-    capture.runs = [capture.runs[4] as DeviceRun];
-    capture.devices = [DEFAULT_PROFILES[4] as (typeof DEFAULT_PROFILES)[number]];
-    (capture.runs[0] as DeviceRun).images = [
-      { ...hero(1440, '1920.png'), sizes: null },
-    ];
+    const desktopOnly = on(gallery(), 'desktop', [{ ...hero(1440, '1920.png'), sizes: null }]);
+    const capture: Capture = {
+      ...desktopOnly,
+      devices: DEFAULT_PROFILES.filter((profile) => profile.id === 'desktop'),
+      runs: desktopOnly.runs.filter((run) => run.deviceId === 'desktop'),
+    };
 
     const outcome = await run(['https://example.com/gallery'], returning(capture), cwd);
 
     expect(outcome.stdout).toContain('  sizes       (absent)');
     expect(tableUnder(outcome.stdout, 'image 1 of 1').map(cells)).toEqual([
-      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'arrived'],
+      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'file'],
       [
         'Desktop',
         '1440×900',
@@ -212,10 +217,10 @@ describe('run', () => {
   });
 
   it('reports where an image sat when a render moved it', async () => {
-    const capture = gallery();
-    for (const index of [0, 1, 2]) {
-      const images = (capture.runs[index] as DeviceRun).images;
-      images[1] = { ...hero(187, '1080.png'), selector: 'html > body > main > div > img' };
+    const moved = { ...hero(187, '1080.png'), selector: 'html > body > main > div > img' };
+    let capture = gallery();
+    for (const deviceId of ['iphone-se', 'iphone-15-pro', 'pixel-8']) {
+      capture = on(capture, deviceId, [logo(), moved, badge('300.png')]);
     }
 
     const outcome = await run(['https://example.com/gallery'], returning(capture), cwd);
@@ -226,8 +231,7 @@ describe('run', () => {
   });
 
   it('leaves out the devices that never rendered an image', async () => {
-    const capture = gallery();
-    (capture.runs[0] as DeviceRun).images = [logo()];
+    const capture = on(gallery(), 'iphone-se', [logo()]);
 
     const outcome = await run(['https://example.com/gallery'], returning(capture), cwd);
 
@@ -249,7 +253,7 @@ describe('run', () => {
 
     expect(outcome.code).toBe(1);
     expect(outcome.stdout).toBe('');
-    expect(outcome.stderr).toContain('carries no image');
+    expect(outcome.stderr).toContain('carries no <img> element');
   });
 
   it('renders the page as every default profile', async () => {
@@ -281,6 +285,23 @@ describe('run', () => {
     await run(['https://example.com/gallery'], capture, cwd);
 
     expect(asked).toEqual(['kiosk']);
+  });
+
+  it('stops before the browser when the working directory is gone', async () => {
+    const gone = mkdtempSync(join(tmpdir(), 'imgwhy-gone-'));
+    rmSync(gone, { recursive: true });
+    let started = 0;
+    const capture: CaptureFn = () => {
+      started++;
+      return Promise.reject(new Error('the browser must not start'));
+    };
+
+    const outcome = await run(['https://example.com/gallery'], capture, gone);
+
+    expect(started).toBe(0);
+    expect(outcome.code).toBe(1);
+    expect(outcome.stdout).toBe('');
+    expect(outcome.stderr).toContain('the working directory could not be read');
   });
 
   it('stops before the browser when the config file is malformed', async () => {
