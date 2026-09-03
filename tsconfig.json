@@ -18,6 +18,6 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["packages/*/src", "packages/*/test"],
+  "include": ["packages/*/src", "packages/*/test", "test"],
   "exclude": ["packages/core"]
 }

@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>imgwhy — https://example.com/gallery</title>
+<style>
+  :root {
+    color-scheme: light;
+    --ink: #17181a;
+    --muted: #5c6066;
+    --paper: #ffffff;
+    --band: #f4f5f7;
+    --line: #d7dae0;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    padding: 2rem 1.25rem 4rem;
+    background: var(--paper);
+    color: var(--ink);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+      sans-serif;
+  }
+
+  main {
+    max-width: 84rem;
+    margin: 0 auto;
+  }
+
+  h1 {
+    margin: 0 0 1.25rem;
+    font-size: 1.5rem;
+    letter-spacing: -0.01em;
+  }
+
+  h2 {
+    margin: 2.5rem 0 0.75rem;
+    font-size: 1.05rem;
+  }
+
+  code,
+  .id,
+  .url,
+  .raw,
+  .sizes {
+    font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 0.85em;
+  }
+
+  .head {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.2rem 1rem;
+    margin: 0 0 1.75rem;
+  }
+
+  .head dt {
+    color: var(--muted);
+  }
+
+  .head dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .scroll {
+    overflow-x: auto;
+  }
+
+  table {
+    border-collapse: collapse;
+    min-width: 100%;
+  }
+
+  caption {
+    margin-bottom: 0.6rem;
+    color: var(--muted);
+    text-align: left;
+  }
+
+  th,
+  td {
+    border: 1px solid var(--line);
+    padding: 0.5rem 0.65rem;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  thead th {
+    background: var(--band);
+    white-space: nowrap;
+  }
+
+  th.device .name {
+    display: block;
+  }
+
+  th.device .profile {
+    display: block;
+    color: var(--muted);
+    font-size: 0.8rem;
+    font-weight: 400;
+  }
+
+  th.image {
+    max-width: 24rem;
+    font-weight: 400;
+  }
+
+  th.image .id {
+    display: block;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  th.image .flag,
+  th.image .sizes,
+  th.image .none {
+    display: block;
+    margin-top: 0.3rem;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+
+  ul.candidates {
+    margin: 0.4rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  ul.candidates li {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  ul.candidates .raw {
+    min-width: 4rem;
+    font-weight: 600;
+  }
+
+  ul.candidates .url {
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+
+  td .picked {
+    display: block;
+    font-weight: 600;
+  }
+
+  td .bytes {
+    display: block;
+    color: var(--muted);
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  td.absent {
+    color: var(--muted);
+  }
+
+  .empty {
+    padding: 1rem;
+    border: 1px solid var(--line);
+    background: var(--band);
+  }
+
+  .notes ul {
+    margin: 0;
+    padding-left: 1.2rem;
+    max-width: 60rem;
+  }
+
+  .notes li + li {
+    margin-top: 0.5rem;
+  }
+</style>
+</head>
+<body>
+<main>
+<h1>imgwhy</h1>
+<dl class="head">
+<dt>page</dt><dd class="url">https://example.com/gallery</dd>
+<dt>captured</dt><dd>2026-09-03T00:00:00.000Z</dd>
+<dt>found</dt><dd>3 images on 5 devices</dd>
+</dl>
+<div class="scroll">
+<table>
+<caption>Which candidate each device selected, and what the response cost on the wire.</caption>
+<thead>
+<tr><th scope="col">image</th><th class="device" scope="col"><span class="name">iPhone SE</span><span class="profile">375×667 · DPR 2</span></th><th class="device" scope="col"><span class="name">iPhone 15 Pro</span><span class="profile">393×852 · DPR 3</span></th><th class="device" scope="col"><span class="name">Pixel 8</span><span class="profile">412×915 · DPR 2.625</span></th><th class="device" scope="col"><span class="name">iPad</span><span class="profile">820×1180 · DPR 2</span></th><th class="device" scope="col"><span class="name">Desktop</span><span class="profile">1440×900 · DPR 1</span></th></tr>
+</thead>
+<tbody>
+<tr><th class="image" scope="row"><span class="id">html &gt; body &gt; header &gt; img</span><span class="flag">loading=lazy</span><span class="none">no srcset</span></th><td><span class="picked">—</span><span class="bytes">unknown</span></td><td><span class="picked">—</span><span class="bytes">unknown</span></td><td><span class="picked">—</span><span class="bytes">unknown</span></td><td><span class="picked">—</span><span class="bytes">unknown</span></td><td><span class="picked">—</span><span class="bytes">unknown</span></td></tr>
+<tr><th class="image" scope="row"><span class="id">html &gt; body &gt; main &gt; img:nth-of-type(1)</span><span class="sizes">sizes (min-width: 1000px) 50vw, 100vw</span><ul class="candidates"><li><span class="raw">640w</span><span class="url">/i/640.png</span></li><li><span class="raw">1080w</span><span class="url">/i/1080.png</span></li><li><span class="raw">1920w</span><span class="url">/i/1920.png</span></li></ul></th><td><span class="picked">1080w</span><span class="bytes">118231 bytes</span></td><td><span class="picked">1920w</span><span class="bytes">342016 bytes</span></td><td><span class="picked">1920w</span><span class="bytes">342016 bytes</span></td><td><span class="picked">1920w</span><span class="bytes">342016 bytes</span></td><td><span class="picked">1080w</span><span class="bytes">118231 bytes</span></td></tr>
+<tr><th class="image" scope="row"><span class="id">html &gt; body &gt; main &gt; img:nth-of-type(2)</span><span class="sizes">sizes absent</span><ul class="candidates"><li><span class="raw">1x</span><span class="url">/i/200.png</span></li><li><span class="raw">2x</span><span class="url">/i/300.png</span></li></ul></th><td><span class="picked">2x</span><span class="bytes">8210 bytes</span></td><td><span class="picked">2x</span><span class="bytes">8210 bytes</span></td><td><span class="picked">2x</span><span class="bytes">8210 bytes</span></td><td><span class="picked">2x</span><span class="bytes">8210 bytes</span></td><td><span class="picked">1x</span><span class="bytes">4102 bytes</span></td></tr>
+</tbody>
+</table>
+</div>
+<section class="notes">
+<h2>How to read this</h2>
+<ul>
+<li><strong>picked</strong> is the candidate this device downloads: <code>sizes</code> resolved against the viewport, multiplied by the device pixel ratio, then the smallest candidate at or above that many physical pixels. Where no candidate carries a <code>w</code> descriptor, the ratio decides alone and <code>sizes</code> is read past.</li>
+<li><strong>bytes</strong> is what the response cost on the wire, as the run recorded it. <strong>unknown</strong> means nothing recorded a transfer size for that response — never guessed from the pixels that arrived.</li>
+<li>imgwhy re-picks from the candidates this page shipped. It does not model what a framework would emit for a different <code>sizes</code> string: a framework reads <code>sizes</code> at build time to decide which files exist at all, so where it would also change the candidate list, a counterfactual understates the gain.</li>
+</ul>
+</section>
+</main>
+</body>
+</html>

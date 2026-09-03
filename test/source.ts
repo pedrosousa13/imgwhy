@@ -6,10 +6,16 @@ import ts from 'typescript';
  * Reading this repo's own source, for the tests that check a property of the
  * code rather than of a result.
  *
- * Two of those exist: `boundary.test.ts`, which checks what the runner package
- * may reach for, and the `no-estimate.test.ts` pair, which checks that no code
- * path turns a pixel dimension into a byte count. Both need the same three
- * things, and had them written out twice before this file held them once.
+ * Two kinds of those exist: the `boundary.test.ts` pair, which checks what the
+ * runner and the report packages may reach for, and the `no-estimate.test.ts`
+ * pair, which checks that no code path turns a pixel dimension into a byte
+ * count. All of them need the same three things, and had them written out
+ * twice before this file held them once.
+ *
+ * It sits at the root rather than inside a package because its readers are in
+ * three of them, and one of those is the report — whose whole boundary claim
+ * is that it never reaches the runner. A check on that property has no
+ * business importing from the runner's own test directory to make it.
  */
 
 /**

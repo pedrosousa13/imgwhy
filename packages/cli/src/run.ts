@@ -2,7 +2,7 @@ import type { Capture, DeviceProfile } from '@imgwhy/core';
 import { parseArgs } from './args.js';
 import { loadDeviceProfiles } from './config.js';
 import { messageOf } from './message.js';
-import { serializeCapture, writeCapture } from './out.js';
+import { serializeCapture, writeCapture, writeReport } from './out.js';
 import { formatCapture } from './trace.js';
 import { parsePageUrl } from './url.js';
 
@@ -19,10 +19,10 @@ const fail = (message: string): Outcome => ({ code: 1, stdout: '', stderr: `${me
  * The command line, the URL and the device set are all checked before anything
  * opens a browser, so a typo in any of them costs no browser start.
  *
- * The Capture goes wherever the line asked and nowhere else. `--out` writes a
- * file before anything is printed, because a run that could not produce the
- * file it was told to produce has failed, and printing a trace first would say
- * otherwise.
+ * The Capture goes wherever the line asked and nowhere else. `--out` and
+ * `--report` write their files before anything is printed, because a run that
+ * could not produce a file it was told to produce has failed, and printing a
+ * trace first would say otherwise.
  *
  * A page carrying no `<img>` is still a page, and a Capture of it is still a
  * Capture — an image that has gone missing is exactly the diff someone keeps
@@ -63,10 +63,15 @@ export async function run(
     if (!written.ok) return fail(written.message);
   }
 
+  if (args.report !== null) {
+    const written = writeReport(args.report, captured);
+    if (!written.ok) return fail(written.message);
+  }
+
   if (!captured.runs.some((deviceRun) => deviceRun.images.length > 0)) {
     // An artifact asked for and produced is a run that did its job, whatever
     // the page turned out to hold.
-    const asked = args.json || args.out !== null;
+    const asked = args.json || args.out !== null || args.report !== null;
     return {
       code: asked ? 0 : 1,
       stdout: args.json ? serializeCapture(captured) : '',

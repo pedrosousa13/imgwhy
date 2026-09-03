@@ -2,7 +2,7 @@ import { relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
-import { parse, read, sources } from '../../runner/test/source.js';
+import { parse, read, sources } from '../../../test/source.js';
 
 const src = fileURLToPath(new URL('../src', import.meta.url));
 

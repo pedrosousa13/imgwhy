@@ -14,6 +14,7 @@ describe('parseArgs', () => {
       url: 'https://example.com',
       json: false,
       out: null,
+      report: null,
     });
   });
 
@@ -23,6 +24,7 @@ describe('parseArgs', () => {
       url: 'https://example.com',
       json: true,
       out: null,
+      report: null,
     });
   });
 
@@ -32,6 +34,17 @@ describe('parseArgs', () => {
       url: 'https://example.com',
       json: false,
       out: 'capture.json',
+      report: null,
+    });
+  });
+
+  it('reads --report with the path that follows it', () => {
+    expect(parseArgs(['--report', 'report.html', 'https://example.com'])).toEqual({
+      ok: true,
+      url: 'https://example.com',
+      json: false,
+      out: null,
+      report: 'report.html',
     });
   });
 
@@ -41,6 +54,7 @@ describe('parseArgs', () => {
       url: 'https://example.com',
       json: true,
       out: 'capture.json',
+      report: null,
     });
   });
 
@@ -50,6 +64,26 @@ describe('parseArgs', () => {
       url: 'https://example.com',
       json: true,
       out: 'capture.json',
+      report: null,
+    });
+  });
+
+  it('takes all three sinks at once, because a run may be asked for all of them', () => {
+    expect(
+      parseArgs([
+        '--json',
+        '--out',
+        'capture.json',
+        '--report',
+        'report.html',
+        'https://example.com',
+      ]),
+    ).toEqual({
+      ok: true,
+      url: 'https://example.com',
+      json: true,
+      out: 'capture.json',
+      report: 'report.html',
     });
   });
 
@@ -59,6 +93,7 @@ describe('parseArgs', () => {
       url: 'https://example.com',
       json: false,
       out: 'my captures/a=b.json',
+      report: null,
     });
   });
 
@@ -95,5 +130,27 @@ describe('parseArgs', () => {
     expect(rejected(['--out', '--json', 'https://example.com'])).toBe(
       `--out needs a file path after it\n${USAGE}`,
     );
+  });
+
+  it('refuses --report with nothing after it', () => {
+    expect(rejected(['https://example.com', '--report'])).toBe(
+      `--report needs a file path after it\n${USAGE}`,
+    );
+  });
+
+  it('refuses a second --report by name, the way it refuses a second --out', () => {
+    expect(
+      rejected(['--report', 'first.html', '--report', 'second.html', 'https://example.com']),
+    ).toBe(`--report was given twice, and a run writes one file\n${USAGE}`);
+  });
+
+  it('refuses to treat the next option as the --report path', () => {
+    expect(rejected(['--report', '--out', 'capture.json', 'https://example.com'])).toBe(
+      `--report needs a file path after it\n${USAGE}`,
+    );
+  });
+
+  it('names --report in the usage line, so the option can be found', () => {
+    expect(USAGE).toContain('--report <file>');
   });
 });

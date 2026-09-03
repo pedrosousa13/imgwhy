@@ -1,7 +1,12 @@
 {
+  // DOM here and not in `tsconfig.json`, because `src` never touches one.
+  // `report.test.ts` opens the emitted file in a real browser and evaluates
+  // inside the page — which is the only way to observe that it makes no
+  // request — and that code is typed against the page's globals, the way the
+  // runner's tests are.
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2022"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"],
     "noEmit": true
   },

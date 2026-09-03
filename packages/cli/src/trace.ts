@@ -1,5 +1,5 @@
-import type { Candidate, Capture, CapturedImage, DeviceProfile, Resolution } from '@imgwhy/core';
-import { resolveSizes, selectCandidate } from '@imgwhy/core';
+import type { Candidate, Capture, CapturedImage, DeviceProfile } from '@imgwhy/core';
+import { explainSelection } from '@imgwhy/core';
 
 /** One image as one device saw it. */
 type Sighting = { device: DeviceProfile; image: CapturedImage };
@@ -19,24 +19,6 @@ const fileOf = (url: string, base: string): string => {
     return (parsed.pathname.split('/').pop() || parsed.hostname) + parsed.search.slice(0, 40);
   } catch {
     return url.slice(-40);
-  }
-};
-
-/**
- * The CSS width selection ran against.
- *
- * Null where nothing resolved, which is the one case selection cannot run at
- * all. `auto` defers to layout, so the width the element ended up at is the
- * honest answer there.
- */
-const resolvedPx = (resolution: Resolution, renderedWidth: number): number | null => {
-  switch (resolution.kind) {
-    case 'auto':
-      return renderedWidth;
-    case 'error':
-      return null;
-    default:
-      return resolution.px;
   }
 };
 
@@ -229,36 +211,28 @@ function imageBlock(
   if (absent.length) lines.push(field('not on', absent.map((d) => d.name).join(', ')));
 
   lines.push('');
-  lines.push(...table(sightings.map((s) => row(base, s, byWidth))).map((l) => `  ${l}`));
+  lines.push(...table(sightings.map((s) => row(base, s))).map((l) => `  ${l}`));
   return lines;
 }
 
-function row(base: string, { device, image }: Sighting, byWidth: boolean): Row {
-  const head = {
+/**
+ * One device's arithmetic, as columns.
+ *
+ * The arithmetic itself is `explainSelection` in core, not this function. A
+ * null resolution is core saying `sizes` never entered — nothing carries a `w`
+ * descriptor — which is the case this table has three columns with nothing to
+ * put in them.
+ */
+function row(base: string, { device, image }: Sighting): Row {
+  const { resolution, cssPx, neededPx, picked } = explainSelection(image, device);
+  return {
     device: device.name,
     viewport: `${device.viewport.width}×${device.viewport.height}`,
     DPR: String(device.dpr),
-  };
-
-  if (!byWidth) {
-    const picked = selectCandidate(image.candidates, null, device.dpr);
-    return {
-      ...head,
-      'clause used': 'x descriptors only',
-      'css px': '—',
-      needed: '—',
-      ...chosen(base, image, picked),
-    };
-  }
-
-  const resolution = resolveSizes(image.sizes, device.viewport.width);
-  const px = resolvedPx(resolution, image.renderedWidth);
-  const picked = selectCandidate(image.candidates, px, device.dpr);
-  return {
-    ...head,
-    'clause used': resolution.clause,
-    'css px': px === null ? 'unreadable' : `${Math.round(px)}px`,
-    needed: px === null ? '—' : `${Math.round(px * device.dpr)}px`,
+    'clause used': resolution === null ? 'x descriptors only' : resolution.clause,
+    'css px':
+      resolution === null ? '—' : cssPx === null ? 'unreadable' : `${Math.round(cssPx)}px`,
+    needed: neededPx === null ? '—' : `${Math.round(neededPx)}px`,
     ...chosen(base, image, picked),
   };
 }
