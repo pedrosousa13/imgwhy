@@ -53,7 +53,10 @@ export async function capturePage({
       }));
 
       return {
-        url,
+        // The URL the page ended on. A redirect makes it differ from the one
+        // that was requested, and it is the base every relative candidate
+        // resolves against, so the requested URL would misplace them all.
+        url: page.url(),
         capturedAt: new Date().toISOString(),
         devices: [profile],
         runs: [{ deviceId: profile.id, images }],

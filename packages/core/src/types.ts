@@ -60,6 +60,10 @@ export type DeviceRun = {
  * runner writes one, the report reads one, and neither knows about the other.
  */
 export type Capture = {
+  /**
+   * The page that was measured, as it ended up: the URL after every redirect.
+   * Every relative candidate URL resolves against it.
+   */
   url: string;
   capturedAt: string;
   devices: DeviceProfile[];

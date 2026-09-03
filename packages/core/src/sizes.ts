@@ -29,8 +29,8 @@ function evalCond(cond: string, vw: number): boolean {
   return cond.split(/\s+and\s+/i).every((p) => {
     const m = p.match(/\(\s*(min|max)-width\s*:\s*([\d.]+)(px|em|rem)?\s*\)/i);
     if (!m) return false;
-    const v = toPx(parseFloat(m[2] as string), (m[3] || 'px').toLowerCase(), vw);
-    return (m[1] as string).toLowerCase() === 'max' ? vw <= v : vw >= v;
+    const v = toPx(parseFloat(m[2]), (m[3] || 'px').toLowerCase(), vw);
+    return m[1].toLowerCase() === 'max' ? vw <= v : vw >= v;
   });
 }
 
@@ -38,13 +38,13 @@ function evalLen(str: string, vw: number): Length | null {
   const s = str.trim();
   if (/^auto$/i.test(s)) return { auto: true };
   const calc = s.match(/^calc\(([\s\S]*)\)$/i);
-  const toks = (calc ? (calc[1] as string) : s).match(/[+-]?\s*[\d.]+(?:vw|px|em|rem)/gi);
+  const toks = (calc ? calc[1] : s).match(/[+-]?\s*[\d.]+(?:vw|px|em|rem)/gi);
   if (!toks) return null;
   let t = 0;
   for (const tok of toks) {
     const m = tok.replace(/\s+/g, '').match(/^([+-]?)([\d.]+)(vw|px|em|rem)$/i);
     if (!m) return null;
-    t += (m[1] === '-' ? -1 : 1) * toPx(parseFloat(m[2] as string), (m[3] as string).toLowerCase(), vw);
+    t += (m[1] === '-' ? -1 : 1) * toPx(parseFloat(m[2]), m[3].toLowerCase(), vw);
   }
   return { px: t };
 }
@@ -65,9 +65,9 @@ export function resolveSizes(sizesString: string | null, viewportWidth: number):
   for (const clause of splitTop(sizesString)) {
     const mm = clause.match(/^(\(.*\))\s+(.+)$/);
     if (mm) {
-      const cond = mm[1] as string;
+      const cond = mm[1];
       if (!evalCond(cond, viewportWidth)) continue;
-      const len = evalLen(mm[2] as string, viewportWidth);
+      const len = evalLen(mm[2], viewportWidth);
       return len ? asResolution(len, clause, cond) : { kind: 'error', clause };
     }
     const len = evalLen(clause, viewportWidth);

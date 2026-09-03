@@ -60,6 +60,32 @@ describe('the imgwhy command', () => {
     );
   }, 60_000);
 
+  it('claims no cache mismatch when a redirect moved the page', async () => {
+    const ran = await imgwhy(`${server.url}/nested`);
+
+    expect(ran.stderr).toBe('');
+    expect(ran.code).toBe(0);
+    expect(ran.stdout).not.toContain('differs');
+    expect(ran.stdout).toBe(
+      [
+        `url        ${server.url}/nested/`,
+        'device     Desktop — 1440×900 at DPR 1',
+        'element    html > body > main > img',
+        'candidates 640w, 1080w, 1920w',
+        'rendered   1440 css px',
+        '',
+        'sizes 100vw',
+        '  clause used  100vw',
+        '  resolves to  1440px at viewport 1440',
+        '  × DPR 1  =  1440 physical pixels needed',
+        '  smallest candidate ≥ that  →  1920w',
+        'predicted  1920.png',
+        'actual     1920.png',
+        '',
+      ].join('\n'),
+    );
+  }, 60_000);
+
   it('exits non-zero on a page where nothing selects a file', async () => {
     const ran = await imgwhy(`${server.url}/no-srcset.html`);
 

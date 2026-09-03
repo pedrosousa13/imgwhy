@@ -74,24 +74,28 @@ describe('capturePage', () => {
     expect(desktop.runs[0]?.images.at(-1)?.renderedWidth).toBe(1440);
   });
 
-  it('reads the srcset of the <source> whose media matches', async () => {
-    const capture = await capturePage({ url: `${server.url}/picture.html`, profile: canonical });
-
-    const hero = capture.runs[0]?.images[0];
-    expect(hero?.sizesSource).toBe('source');
-    expect(hero?.candidates.map((c) => c.raw)).toEqual(['640w', '1080w']);
-    expect(hero?.currentSrc).toBe(`${server.url}/img/1080.png`);
-  });
-
-  it('falls back to the <img> when no <source> media matches', async () => {
+  it('lets DPR alone decide when the candidates carry x descriptors', async () => {
     const capture = await capturePage({
-      url: `${server.url}/picture.html`,
-      profile: DESKTOP_PROFILE,
+      url: `${server.url}/x-descriptors.html`,
+      profile: canonical,
     });
 
-    const hero = capture.runs[0]?.images[0];
-    expect(hero?.sizesSource).toBe('img');
-    expect(hero?.candidates.map((c) => c.raw)).toEqual(['1920w']);
+    const logo = capture.runs[0]?.images[0];
+    expect(logo?.candidates.map((c) => c.raw)).toEqual(['1x', '2x']);
+    // The tag carries `sizes`, and the browser read past it: a 120 CSS px logo
+    // needs 180 physical pixels, so a resolved `sizes` would have taken the
+    // 640 pixel file. DPR 1.5 took the 2x one instead.
+    expect(logo?.sizes).toBe('100vw');
+    expect(logo?.renderedWidth).toBe(120);
+    expect(logo?.currentSrc).toBe(`${server.url}/img/1080.png`);
+  });
+
+  it('records the URL the page ended on, not the one that was requested', async () => {
+    const capture = await capturePage({ url: `${server.url}/nested`, profile: DESKTOP_PROFILE });
+
+    // A relative candidate resolves against this, so the requested URL would
+    // send every one of them to the wrong directory.
+    expect(capture.url).toBe(`${server.url}/nested/`);
   });
 
   it('closes the browser when the page fails to load', async () => {

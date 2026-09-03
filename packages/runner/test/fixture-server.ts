@@ -50,14 +50,13 @@ const PAGES: Record<string, string> = {
   src="/img/640.png" alt="hero"></main>`,
   ),
 
-  '/picture.html': shell(
-    'picture',
-    `<main><picture>
-  <source media="(max-width: 800px)" sizes="100vw"
-    srcset="/img/640.png 640w, /img/1080.png 1080w">
-  <img class="hero" sizes="100vw" srcset="/img/1920.png 1920w"
-    src="/img/1920.png" alt="hero">
-</picture></main>`,
+  // Candidates written relative to the page, so the base a trace resolves them
+  // against decides whether they land. Reached through the redirect below.
+  '/nested/': shell(
+    'relative candidates',
+    `<main><img class="hero" sizes="100vw"
+  srcset="img/640.png 640w, img/1080.png 1080w, img/1920.png 1920w"
+  src="img/640.png" alt="hero"></main>`,
   ),
 
   '/no-srcset.html': shell(
@@ -65,16 +64,30 @@ const PAGES: Record<string, string> = {
     `<main><img class="hero" src="/img/1080.png" alt="hero"></main>`,
   ),
 
+  // `sizes` is on the tag and the browser must ignore it, because nothing here
+  // carries a `w` descriptor.
   '/x-descriptors.html': shell(
     'x descriptors',
-    `<main><img class="logo" srcset="/img/640.png 1x, /img/1080.png 2x"
+    `<main><img class="logo" sizes="100vw" srcset="/img/640.png 1x, /img/1080.png 2x"
   src="/img/640.png" alt="logo"></main>`,
   ),
+};
+
+/** A missing trailing slash, the plainest redirect a real host performs. */
+const REDIRECTS: Record<string, string> = {
+  '/nested': '/nested/',
 };
 
 export async function startFixtureServer(): Promise<FixtureServer> {
   const server = createServer((req, res) => {
     const path = new URL(req.url ?? '/', 'http://fixture.invalid').pathname;
+
+    const redirect = REDIRECTS[path];
+    if (redirect !== undefined) {
+      res.writeHead(302, { location: redirect });
+      res.end();
+      return;
+    }
 
     const page = PAGES[path];
     if (page !== undefined) {
@@ -83,7 +96,9 @@ export async function startFixtureServer(): Promise<FixtureServer> {
       return;
     }
 
-    const image = /^\/img\/(\d+)\.png$/.exec(path);
+    // Every page's images sit in an `img/` directory beside it, so a nested
+    // page can name them relatively.
+    const image = /\/img\/(\d+)\.png$/.exec(path);
     if (image) {
       const width = Number(image[1]);
       const body = encodePng(width, 2);

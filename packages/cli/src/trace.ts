@@ -19,26 +19,23 @@ const fileOf = (url: string, base: string): string => {
   }
 };
 
-const describe = (resolution: Resolution, renderedWidth: number): string => {
+/**
+ * The CSS width selection runs against, and the wording a trace shows for it.
+ *
+ * `px` is null where nothing resolved, which is the one case selection cannot
+ * run at all.
+ */
+const sizesWidthOf = (
+  resolution: Resolution,
+  renderedWidth: number,
+): { px: number | null; text: string } => {
   switch (resolution.kind) {
     case 'auto':
-      return `${Math.round(renderedWidth)}px (real layout width)`;
+      return { px: renderedWidth, text: `${Math.round(renderedWidth)}px (real layout width)` };
     case 'error':
-      return 'a length nothing could read';
+      return { px: null, text: 'a length nothing could read' };
     default:
-      return `${Math.round(resolution.px)}px`;
-  }
-};
-
-/** The CSS width selection runs against, or null where nothing resolved. */
-const sizesPxOf = (resolution: Resolution, renderedWidth: number): number | null => {
-  switch (resolution.kind) {
-    case 'auto':
-      return renderedWidth;
-    case 'error':
-      return null;
-    default:
-      return resolution.px;
+      return { px: resolution.px, text: `${Math.round(resolution.px)}px` };
   }
 };
 
@@ -56,7 +53,7 @@ export function formatTrace(capture: Capture, image: CapturedImage): string {
   const lines = [
     `url        ${capture.url}`,
     `device     ${device.name} — ${viewportWidth}×${device.viewport.height} at DPR ${dpr}`,
-    `element    ${image.selector}${image.sizesSource === 'source' ? ' (srcset from <source>)' : ''}`,
+    `element    ${image.selector}`,
     `candidates ${image.candidates.map((c) => c.raw).join(', ')}`,
     `rendered   ${Math.round(image.renderedWidth)} css px${image.loading === 'lazy' ? ' · loading=lazy' : ''}`,
     '',
@@ -65,16 +62,14 @@ export function formatTrace(capture: Capture, image: CapturedImage): string {
   let picked: Candidate | null;
   if (image.candidates.some((c) => c.w != null)) {
     const resolution = resolveSizes(image.sizes, viewportWidth);
-    const sizesPx = sizesPxOf(resolution, image.renderedWidth);
-    picked = selectCandidate(image.candidates, sizesPx, dpr);
+    const width = sizesWidthOf(resolution, image.renderedWidth);
+    picked = selectCandidate(image.candidates, width.px, dpr);
 
     lines.push(`sizes ${image.sizes ?? '(absent)'}`);
     lines.push(`  clause used  ${resolution.clause}`);
-    lines.push(
-      `  resolves to  ${describe(resolution, image.renderedWidth)} at viewport ${viewportWidth}`,
-    );
-    if (sizesPx !== null) {
-      lines.push(`  × DPR ${dpr}  =  ${Math.round(sizesPx * dpr)} physical pixels needed`);
+    lines.push(`  resolves to  ${width.text} at viewport ${viewportWidth}`);
+    if (width.px !== null) {
+      lines.push(`  × DPR ${dpr}  =  ${Math.round(width.px * dpr)} physical pixels needed`);
     }
     lines.push(`  smallest candidate ≥ that  →  ${picked ? picked.raw : '—'}`);
   } else {

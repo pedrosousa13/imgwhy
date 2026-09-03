@@ -35,37 +35,19 @@ export function collectImages(): RawImage[] {
     return parts.join(' > ');
   };
 
-  /**
-   * The `srcset` the browser actually read. Inside a `<picture>` the first
-   * `<source>` whose `media` matches wins. Type negotiation is a non-goal.
-   */
-  const activeSrcset = (
-    img: HTMLImageElement,
-  ): { srcset: string; sizes: string; fromSource: boolean } => {
-    const picture = img.closest('picture');
-    if (picture) {
-      for (const source of Array.from(picture.querySelectorAll('source'))) {
-        if (source.media && !matchMedia(source.media).matches) continue;
-        if (source.srcset) {
-          return { srcset: source.srcset, sizes: source.sizes || img.sizes, fromSource: true };
-        }
-      }
-    }
-    return { srcset: img.srcset, sizes: img.sizes, fromSource: false };
-  };
-
   return Array.from(document.images)
     .filter((img) => img.getBoundingClientRect().width > 8 || img.naturalWidth > 8)
     .map((img): RawImage => {
-      const active = activeSrcset(img);
       const path = domPath(img);
       const loading = img.getAttribute('loading');
       return {
         id: path,
         selector: path,
-        srcset: active.srcset,
-        sizes: active.sizes || null,
-        sizesSource: active.fromSource ? 'source' : 'img',
+        srcset: img.srcset,
+        sizes: img.sizes || null,
+        // The `<img>` is the only source this slice reads. Issue #5 resolves a
+        // `<picture>` to the `<source>` whose `media` matched.
+        sizesSource: 'img',
         renderedWidth: img.getBoundingClientRect().width || img.width || 0,
         currentSrc: img.currentSrc || img.src,
         // The intrinsic width in CSS pixels. The browser has already divided

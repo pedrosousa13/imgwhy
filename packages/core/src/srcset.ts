@@ -13,10 +13,10 @@ export function parseSrcset(raw: string): Candidate[] {
   const s = raw || '';
   let i = 0;
   while (i < s.length) {
-    while (i < s.length && (isWhitespace(s[i] as string) || s[i] === ',')) i++;
+    while (i < s.length && (isWhitespace(s[i]) || s[i] === ',')) i++;
     if (i >= s.length) break;
     let url = '';
-    while (i < s.length && !isWhitespace(s[i] as string)) {
+    while (i < s.length && !isWhitespace(s[i])) {
       url += s[i];
       i++;
     }
@@ -26,7 +26,7 @@ export function parseSrcset(raw: string): Candidate[] {
     } else {
       let depth = 0;
       while (i < s.length) {
-        const c = s[i] as string;
+        const c = s[i];
         if (c === '(') depth++;
         if (c === ')') depth--;
         if (c === ',' && depth === 0) {
@@ -41,8 +41,8 @@ export function parseSrcset(raw: string): Candidate[] {
     const m = desc.match(/^([\d.]+)([wx])$/);
     out.push({
       url,
-      w: m && m[2] === 'w' ? parseFloat(m[1] as string) : null,
-      x: m && m[2] === 'x' ? parseFloat(m[1] as string) : m ? null : 1,
+      w: m && m[2] === 'w' ? parseFloat(m[1]) : null,
+      x: m && m[2] === 'x' ? parseFloat(m[1]) : m ? null : 1,
       raw: desc || '1x',
     });
   }
