@@ -163,6 +163,14 @@ export class El {
   alt: string | null = null;
   /** The tooltip the panel writes on the cache mark. */
   title = '';
+  /**
+   * The one class the panel writes: the verdict's tone, on its `output`.
+   *
+   * A string property, the way the platform's is, so a test can read back
+   * exactly the word the panel gave it and nothing about how it was styled —
+   * the stylesheet is checked separately, as text.
+   */
+  className = '';
   /** Whether a `details` is open, which the panel writes once. */
   open = false;
   /** The computed `background-image`, which is a string and often `none`. */

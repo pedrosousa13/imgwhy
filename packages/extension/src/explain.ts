@@ -1,4 +1,4 @@
-import type { Candidate, CapturedImage, DeviceProfile, Selection } from '@imgwhy/core';
+import type { Candidate, CapturedImage, DeviceProfile, Resolution, Selection } from '@imgwhy/core';
 import { explainSelection, parseSrcset } from '@imgwhy/core';
 import type { RawImage, Reading } from './read.js';
 
@@ -21,12 +21,14 @@ import type { RawImage, Reading } from './read.js';
  * > them reimplements the algorithm, so none of them can disagree with the
  * > others.
  *
- * So nothing below decides anything. `explainSelection` is the whole of the
- * decision and this module is the wording around it — which is why
- * `through-core.test.ts` refuses a multiplication or a division anywhere in
+ * So nothing below decides anything about selection. `explainSelection` is the
+ * whole of the decision and this module is the wording around it — which is
+ * why `through-core.test.ts` refuses a multiplication or a division anywhere in
  * this package: a density is a division and physical pixels are a
  * multiplication, and neither has any other use in a package that reads a DOM
- * and lays out text.
+ * and lays out text. The one thing this module does decide is the verdict, and
+ * it decides that by comparison alone: whether the file that loaded is the file
+ * core picked, and whether the pick covers the pixels core says are needed.
  *
  * The vocabulary is the command line's wherever the command line has a word
  * for the same thing. `clause used`, `css px`, `needed`, `picked` and
@@ -54,36 +56,64 @@ import type { RawImage, Reading } from './read.js';
 export type Line = { label: string; value: string; held: boolean };
 
 /**
- * One file this image involved, named by its whole URL.
+ * How a verdict reads before its word is read.
  *
- * Whole and uncut, which is the difference between this and the `picked` and
- * `loaded` lines above it. Those are one line of a grid and have to fit on one,
- * so `fileOf` shortens them — and a shortened URL is a URL two files can share.
- * The issue puts it as a criterion: two images whose URLs differ only by
- * directory must be distinguishable, and the only reading that always is, is
- * the whole string. So the row carries both: a line a reader compares at a
- * glance, and the address underneath it that settles an argument.
+ * Three tones for six words, because the words say what happened and the tone
+ * says whether that is a problem. `good` is the file that should have loaded,
+ * and it is quiet on purpose: the panel exists to find the rows that are not.
+ * `warn` is bytes wasted or pixels stretched, and every sentence under one
+ * carries a clause saying what to do about it, because a warning with no
+ * action is noise. `quiet` is a row the device had no say in.
  *
- * Absolute, because a candidate is written relative and `currentSrc` is not,
- * and two URLs a reader is meant to compare have to be the same kind of thing.
+ * A closed set of three words the extension owns, and the one property the
+ * renderer writes as a class. No page string can reach it.
  */
-export type Source = { label: string; url: string };
+export type Tone = 'good' | 'warn' | 'quiet';
+
+/**
+ * What the browser did, in one word a reader takes in before any other.
+ *
+ * The maintainer's question, verbatim: "at a glance, I need to know if it's
+ * correct or not." So the row leads with a word that answers it, and the word
+ * is derived by comparison from core's `Selection` and the file that loaded —
+ * no arithmetic, only `===`, `<` and `>=` on descriptors and on the pixel
+ * figures core already worked out.
+ *
+ * - `fit` — the loaded file is the one the arithmetic picks, and it covers the
+ *   pixels needed.
+ * - `oversized` — the loaded file is a larger candidate than the pick. Wasted
+ *   bytes; a held copy the browser reused is the first thing to rule out.
+ * - `undersized` — the loaded file does not cover the pixels needed, so the
+ *   image is stretched. Either no candidate covers them and the largest stood
+ *   in, or the browser loaded something smaller than the pick.
+ * - `no choice` — one candidate, no `srcset`, or every candidate naming one
+ *   file. The device made no difference.
+ * - `not loaded` — nothing has loaded yet, so there is no file to judge. A lazy
+ *   image below the fold, most often.
+ * - `unknown` — the comparison cannot settle it: nothing was picked because a
+ *   `sizes` clause would not read, or the loaded file is not one the `srcset`
+ *   offers. Unknown is the honest word, and the sentence says which it was.
+ *
+ * The brief named four. `not loaded` and `unknown` are here because the four
+ * do not cover a lazy image or a broken `sizes`, and forcing either into a
+ * category it does not belong to would be a verdict that lies at a glance.
+ */
+export type Verdict = { word: string; tone: Tone };
 
 /**
  * One image, said.
  *
- * The order of the fields is the order the panel reads them: what this image is
- * (`at`, `name`, `alt`, `file`), the one line that says what happened (`gist`,
- * `mark`), and then the arithmetic a reader opens (`lines`, `sources`,
- * `notes`).
+ * The order of the fields is the order the panel reads them, and the three
+ * levels the issue asks for. First what a reader sees without opening
+ * anything: the verdict, the descriptor of the file that loaded, the name of
+ * that file, and one sentence that says why. Then `steps`, the arithmetic as
+ * aligned lines, opened once. Then `details`, the whole URLs and where the
+ * image sat, opened again.
  *
- * That split is the issue's, and it is a split of one flat list into a
- * headline and a detail. Twenty-three images on a photo page produced
- * twenty-three blocks of eight figures and four paragraphs of prose, which is
- * a panel taller than any screen and a reader who can see one row of it. So
- * every row now says who it is and what happened in two short lines, and holds
- * the rest until it is asked. Nothing was cut: `lines`, `sources` and `notes`
- * are the whole of what was standing in the row before.
+ * The headline is the descriptor and not the file name, and that is the
+ * maintainer's own words: "need to know the size that loaded like was it
+ * 640vw? which one? simple stuff." The `srcset` token is the answer to that
+ * question; the file name is how a reader confirms which image it was.
  */
 export type Row = {
   /**
@@ -91,7 +121,14 @@ export type Row = {
    * the element to mark. `read.ts` says why it is an index and what it costs.
    */
   at: number;
-  /** The headline: which file this row is about, short enough to scan. */
+  verdict: Verdict;
+  /**
+   * The `srcset` descriptor of the file that loaded — `640w`, `2x` — which is
+   * the headline of the row. `src` where the file came from the `src`
+   * attribute rather than a candidate, and `—` where nothing has loaded.
+   */
+  loaded: string;
+  /** The file-name segment of the loaded URL, beside the headline and smaller. */
   name: string;
   /** What the thumbnail says where it has nothing to show. */
   alt: string;
@@ -102,15 +139,36 @@ export type Row = {
    * and `privacy.test.ts` holds that it is never anything else.
    */
   file: string;
-  /** The one line under the name: what was picked, and what loaded. */
-  gist: string;
-  /** What the cache mark means on this row, said where the mark is. */
-  mark: string;
-  lines: Line[];
-  sources: Source[];
-  /** Prose the arithmetic needs, shown where a reader opens the row. */
+  /**
+   * The rendered size, where the image is too small for a thumbnail to show
+   * anything and the panel says the size in its place. Null where a thumbnail
+   * is drawn.
+   */
+  tiny: string | null;
+  /** The one sentence: what loaded and why, naming the reader's device. */
+  why: string;
+  /**
+   * What the cache mark means on this row, said where the mark is. Null where
+   * nothing loaded, because there is then nothing a held copy could have
+   * supplied.
+   */
+  mark: string | null;
+  /** The arithmetic as steps, opened once. */
+  steps: Line[];
+  /** Every file whole, and where the image sat, opened again. */
+  details: Line[];
+  /** Prose the arithmetic needs, shown with the steps. */
   notes: string[];
 };
+
+/**
+ * The two inputs every row's sentence names, and the count.
+ *
+ * Separate fields rather than one line, because the viewport width and the
+ * ratio are the two numbers that explain every row below them, and the panel
+ * lays them out as inputs rather than as a line of metadata.
+ */
+export type Head = { width: string; dpr: string; images: string };
 
 /**
  * The whole panel as plain data, which is what crosses into the page.
@@ -120,10 +178,20 @@ export type Row = {
  * nothing — and a renderer that took a `Selection` would be a renderer asking
  * core questions in a place core cannot go.
  */
-export type Panel = { head: string; rows: Row[]; footer: string[] };
+export type Panel = { head: Head; rows: Row[]; footer: string[] };
 
 /** The word for a figure nothing measured. Never a guess in its place. */
 const UNKNOWN = 'unknown';
+
+const FIT: Verdict = { word: 'fit', tone: 'good' };
+const OVERSIZED: Verdict = { word: 'oversized', tone: 'warn' };
+const UNDERSIZED: Verdict = { word: 'undersized', tone: 'warn' };
+const NO_CHOICE: Verdict = { word: 'no choice', tone: 'quiet' };
+const NOT_LOADED: Verdict = { word: 'not loaded', tone: 'quiet' };
+// A literal rather than `UNKNOWN`, because `dormant.test.ts` reads a constant
+// initialised from another name as something that runs at load, and the word
+// is the same word either way.
+const UNSETTLED: Verdict = { word: 'unknown', tone: 'quiet' };
 
 /**
  * What the footer says about the two things the extension cannot do.
@@ -153,12 +221,6 @@ const footerOf = (): string[] => [
     'response without Timing-Allow-Origin, so a page cannot weigh most of the images on it — ' +
     'and imgwhy never guesses a weight from pixels. Run the command line for measured bytes.',
 ];
-
-/** The sentence a disagreement between the prediction and the page needs. */
-const disagrees = (): string =>
-  'picked and loaded disagree. A browser holding a larger variant reuses it and never runs ' +
-  'selection at all, so a disagreement here is not necessarily a bug — it is the first thing ' +
-  'to rule out. An empty cache is the only way to tell.';
 
 /**
  * The sentence an `auto` width needs, which is the mark's meaning spelled out
@@ -195,12 +257,15 @@ const absolute = (url: string, base: string): string => {
   }
 };
 
+/** One sentence's first letter, where a clause built to follow a dash opens it. */
+const capital = (text: string): string => `${text.slice(0, 1).toUpperCase()}${text.slice(1)}`;
+
 /**
- * How much of a URL fits on one line of the panel's grid.
+ * How much of a name fits beside the headline.
  *
- * A shortened URL is a URL two files can share, which is why every row also
- * carries its `sources` — the whole address, uncut, under the arithmetic. This
- * figure is about a line a reader compares at a glance and nothing more.
+ * A shortened name is a name two files can share, which is why every row also
+ * carries its whole URLs in `details`. This figure is about the token a
+ * reader glances at and nothing more.
  */
 const WIDTH = 56;
 
@@ -220,37 +285,27 @@ const cut = (text: string, keep: 'head' | 'tail'): string =>
       ? `${text.slice(0, WIDTH - 1)}…`
       : `…${text.slice(1 - WIDTH)}`;
 
-/** The page's own origin, or nothing where its base is not a URL at all. */
-const originOf = (base: string): string => {
-  try {
-    return new URL(base).origin;
-  } catch {
-    return '';
-  }
-};
-
 /**
- * One URL as a line that tells two candidates apart at a glance.
+ * The segment of a URL that looks like a file name, which is what a reader
+ * recognises a file by.
  *
- * Everything the URL does not already share with the page: the path and the
- * query always, and the host as well where the file came from somewhere else.
- * Which is what makes the line distinguishing rather than decorative — a last
- * path segment alone renders `/a/1.png` and `/b/1.png` identically, and on the
- * row whose own note says `picked` and `loaded` disagree that reads as
- * nonsense. Within one page's base this mapping is one-to-one: a same-origin
- * URL renders its path, which opens with a slash, and a cross-origin one opens
- * with a host, which does not.
+ * The last path segment is the wrong rule, and a Storyblok URL is why:
+ * `…/f31865bb07/card-1.webp/m/640x506/filters:quality(70)` ends in a filter
+ * and puts the file name three segments in. So the rule is the last segment
+ * that carries an extension — a dot followed by one to five letters or digits
+ * at its end — which is `card-1.webp` there and `640.png` on a plain path.
+ * Where no segment does, the last one stands in, and where there is no path
+ * at all the host does. A resizing CDN that puts the width in the query
+ * renders every candidate as one name here, and that is accepted: the
+ * headline beside this is the descriptor, and the whole URL is two openings
+ * away.
  *
- * Two ends, because the two kinds of URL keep what matters at opposite ones. A
- * path holds its file name last, so a long one is cut from the front. A scheme
- * that carries its own content holds the part a reader needs first — that it is
- * a `data:` or a `javascript:` URL at all — so those are cut from the back.
- * Which is also the answer to a URL whose path is not a path: the last segment
- * of `data:text/html,<p>…` is an arbitrary tail of the page's own text, and a
- * path always opens with a slash, so the slash is what says whether there is a
- * file name in there to take.
+ * A URL whose path is not a path — `data:`, `javascript:` — has no file name
+ * to take, and the scheme is the part a reader can act on, so it is cut from
+ * the back instead. A path always opens with a slash, which is what tells the
+ * two apart.
  */
-const fileOf = (url: string, base: string): string => {
+const nameOf = (url: string, base: string): string => {
   let parsed: URL;
   try {
     parsed = new URL(url, base);
@@ -260,9 +315,23 @@ const fileOf = (url: string, base: string): string => {
 
   if (!parsed.pathname.startsWith('/')) return cut(parsed.href, 'head');
 
-  const elsewhere = parsed.origin === originOf(base) ? '' : parsed.host;
-  return cut(`${elsewhere}${parsed.pathname}${parsed.search}`, 'tail');
+  const segments = parsed.pathname.split('/').filter((segment) => segment !== '');
+  const named = segments.filter((segment) => /\.[a-z0-9]{1,5}$/i.test(segment));
+  const last = named[named.length - 1] ?? segments[segments.length - 1] ?? parsed.host;
+  return cut(last, 'tail');
 };
+
+/**
+ * The ratio, in the reader's words as well as the platform's.
+ *
+ * "Was it retina?" is the question, so the answer says the word. Two and
+ * above is retina — that is the ratio Apple coined the word for, and every
+ * phone and most laptops sit at 2 or 3. Exactly one is a standard display.
+ * The fractions in between — 1.25, 1.5, the Windows scaling steps — are
+ * neither, and get no word rather than a wrong one.
+ */
+const dprWord = (dpr: number): string =>
+  dpr >= 2 ? `DPR ${dpr} (retina)` : dpr === 1 ? `DPR ${dpr} (standard)` : `DPR ${dpr}`;
 
 /**
  * The browser the page is being looked at in, as a device profile.
@@ -319,28 +388,6 @@ const offered = (image: CapturedImage): string => {
 };
 
 /**
- * The width column: a measurement, the word for a clause that would not read,
- * or nothing to say.
- *
- * One case per kind of Selection, so a fourth kind in core would fail to
- * compile here rather than leave a blank line in the panel.
- */
-function cssPxCell(selection: Selection): string {
-  switch (selection.kind) {
-    case 'density':
-      return '—';
-    case 'unreadable':
-      return 'unreadable';
-    case 'width':
-      return `${Math.round(selection.cssPx)}px`;
-  }
-}
-
-/** The descriptor a browser picks, and the file that descriptor names. */
-const picked = (candidate: Candidate | null, base: string): string =>
-  candidate === null ? '—' : `${candidate.raw}  ${fileOf(candidate.url, base)}`;
-
-/**
  * What the page wrote in `alt`, or the word for it having written none.
  *
  * Three answers, because the attribute has three states and two of them are
@@ -378,6 +425,27 @@ const altFor = (raw: RawImage, name: string): string =>
       : raw.alt;
 
 /**
+ * The size, where the image is too small for a thumbnail to show anything.
+ *
+ * A 1×1 tracking pixel drawn into a 44px box is a 44px square of one colour,
+ * and a transparent one is a 44px square of the checked ground behind it —
+ * either of which a reader takes for a thumbnail that failed. Saying `1×1`
+ * in the box's place is the honest picture: the reader knows the size, and
+ * knows the box is not broken.
+ *
+ * Eight CSS pixels on both sides is the threshold, because nothing that small
+ * carries a picture a reader could recognise at 44px, and a favicon-sized
+ * image at 16 does. A box of zero is not tiny: it is an image this render did
+ * not draw, and its file is still worth a thumbnail.
+ */
+const tinyOf = (raw: RawImage): string | null => {
+  const width = Math.round(raw.renderedWidth);
+  const height = Math.round(raw.renderedHeight);
+  const drawn = width > 0 && height > 0;
+  return drawn && width < 8 && height < 8 ? `${width}×${height}` : null;
+};
+
+/**
  * What the cache mark means, said where the mark is rather than in a
  * paragraph under it.
  *
@@ -394,38 +462,279 @@ const markOf = (laidOut: boolean): string =>
     : 'what the browser has, not what it chose';
 
 /**
+ * How `sizes` gave this image its width, as a clause of the sentence.
+ *
+ * One phrasing per kind of resolution, because each is a different cause. A
+ * clause with a condition is named whole, so the reader can see which one
+ * matched at this viewport; one without is the length alone. A length already
+ * written in pixels is not followed by "which is N px", because that would say
+ * the same number twice. The two defaults are separated because they are two
+ * different findings about the page: no `sizes` at all, or a `sizes` whose
+ * every condition missed this viewport.
+ */
+function widthOf(resolution: Resolution, cssPx: number): string {
+  const px = `${Math.round(cssPx)} px`;
+  switch (resolution.kind) {
+    case 'length':
+      if (resolution.cond !== null) return `sizes matched ${resolution.clause}, which is ${px}`;
+      return resolution.clause === `${Math.round(cssPx)}px`
+        ? `sizes gives it ${resolution.clause}`
+        : `sizes gives it ${resolution.clause}, which is ${px}`;
+    case 'auto':
+      return `sizes is auto, and the width came from layout: ${px}`;
+    case 'default':
+      return resolution.clause.startsWith('absent')
+        ? `no sizes is written, and the 100vw default gives it ${px}`
+        : `no sizes clause matched, and the 100vw default gives it ${px}`;
+    case 'error':
+      return `the sizes clause ${resolution.clause} could not be read`;
+  }
+}
+
+/**
+ * The causal chain from the reader's device to the pixels needed, which every
+ * sentence below contains.
+ *
+ * The device first and `sizes` second, in that order, because the reader's
+ * question is "is it because of my device?" and the answer has to name the two
+ * numbers on the line they are looking at. The viewport width and the ratio
+ * are already in the panel head; naming them again in every sentence is
+ * deliberate.
+ *
+ * Lower case throughout, because the chain follows a dash as often as it opens
+ * a sentence, and `capital` is what opens one.
+ */
+function chainOf(selection: Selection, device: DeviceProfile): string {
+  const at = dprWord(device.dpr);
+  switch (selection.kind) {
+    case 'density':
+      return `your screen is ${at} and no candidate carries a width, so the ratio decided alone`;
+    case 'unreadable':
+      return (
+        `the sizes clause ${selection.resolution.clause} could not be read as a length, ` +
+        `so only the x candidates could be judged against ${at}`
+      );
+    case 'width':
+      return (
+        `your screen is ${device.viewport.width} px wide at ${at}; ` +
+        `${widthOf(selection.resolution, selection.cssPx)}, ` +
+        `so it needs ${Math.round(selection.neededPx)} device pixels`
+      );
+  }
+}
+
+/**
+ * Whether the pick covers what the device needs, which is the line between
+ * `fit` and `undersized`.
+ *
+ * A comparison and not a computation. Core picks the smallest density at or
+ * above the ratio and the largest where none reaches it; a `w` candidate's
+ * density reaches the ratio exactly when its width reaches `neededPx`, and an
+ * `x` candidate's density is its `x`. So the two figures core already worked
+ * out are the two this compares, and no division is needed to ask the
+ * question.
+ */
+function covers(selection: Selection, picked: Candidate, dpr: number): boolean {
+  if (selection.kind === 'width' && picked.w !== null) return picked.w >= selection.neededPx;
+  return (picked.x ?? 0) >= dpr;
+}
+
+/**
+ * Whether `loaded` is a larger file than `picked`, a smaller one, or one the
+ * two descriptors cannot rank.
+ *
+ * `w` against `w` and `x` against `x`. A page that mixes the two on one tag
+ * has written a `srcset` a browser reads as all `w`, and the panel says the
+ * two cannot be ranked rather than guessing which is bigger.
+ */
+function ranked(loaded: Candidate, picked: Candidate): 'larger' | 'smaller' | null {
+  if (loaded.w !== null && picked.w !== null) return loaded.w > picked.w ? 'larger' : 'smaller';
+  if (loaded.x !== null && picked.x !== null) return loaded.x > picked.x ? 'larger' : 'smaller';
+  return null;
+}
+
+/** The one clause that says why the pick wins, per kind of selection. */
+const winning = (selection: Selection, picked: Candidate): string =>
+  selection.kind === 'width' && picked.w !== null
+    ? `and ${picked.raw} is the smallest file that covers that`
+    : `and ${picked.raw} is the smallest density at or above it`;
+
+/** The clause for a pick that is the largest on offer and still falls short. */
+const stretched = (selection: Selection, picked: Candidate): string =>
+  selection.kind === 'width' && picked.w !== null
+    ? `no file covers that, so ${picked.raw}, the largest on offer, is stretched to fit; ` +
+      `add a candidate above ${picked.raw}`
+    : `no candidate reaches that, so ${picked.raw}, the densest on offer, is stretched to fit; ` +
+      `add a candidate above ${picked.raw}`;
+
+/**
+ * The verdict and the sentence for a row that had a real choice to make.
+ *
+ * One template per outcome, and every template has the same shape: the
+ * outcome first, then the causal chain, then — where the outcome is a warning
+ * — what to do about it. The reader who stops after the first clause has the
+ * answer; the reader who goes on has the reason.
+ */
+function judged(
+  selection: Selection,
+  device: DeviceProfile,
+  loaded: Candidate | null,
+  has: boolean,
+): { verdict: Verdict; why: string } {
+  const picked = selection.picked;
+  const chain = chainOf(selection, device);
+
+  if (picked === null) {
+    return {
+      verdict: UNSETTLED,
+      why:
+        selection.kind === 'unreadable'
+          ? `The sizes clause ${selection.resolution.clause} could not be read as a length, so ` +
+            'there is no width to select against and nothing was picked; fix the sizes attribute.'
+          : 'No candidate carries a readable descriptor, so nothing was picked; fix the srcset.',
+    };
+  }
+
+  if (!has) {
+    return {
+      verdict: NOT_LOADED,
+      why: `Nothing has loaded yet; when it does, the arithmetic picks ${picked.raw} — ${chain}.`,
+    };
+  }
+
+  const picks = `The arithmetic picks ${picked.raw} — ${chain} — but `;
+
+  if (loaded === null) {
+    return {
+      verdict: UNSETTLED,
+      why: `${picks}the loaded file is not one the srcset offers; check what set this src.`,
+    };
+  }
+
+  if (loaded === picked) {
+    return covers(selection, picked, device.dpr)
+      ? { verdict: FIT, why: `${capital(chain)} — ${winning(selection, picked)}.` }
+      : { verdict: UNDERSIZED, why: `${capital(chain)} — ${stretched(selection, picked)}.` };
+  }
+
+  switch (ranked(loaded, picked)) {
+    case 'larger':
+      return {
+        verdict: OVERSIZED,
+        why:
+          `${picks}the browser already held ${loaded.raw} and reused it rather than choosing ` +
+          'again; an empty cache is the only way to see the real pick.',
+      };
+    case 'smaller':
+      return {
+        verdict: UNDERSIZED,
+        why:
+          `${picks}the browser loaded ${loaded.raw}, which is smaller, so the image is ` +
+          'stretched to fit; check what set this src.',
+      };
+    case null:
+      return {
+        verdict: UNSETTLED,
+        why:
+          `${picks}the browser loaded ${loaded.raw}, and a w and an x descriptor cannot be ` +
+          'ranked against each other.',
+      };
+  }
+}
+
+/**
+ * The arithmetic as steps, one line each, for a row with a choice to make.
+ *
+ * Aligned and compact, no prose — this is the "because x y z" the maintainer
+ * asked for once the row is open. The multiplication to device pixels is
+ * written out as text from the figures core returned, so a reader can check it
+ * by eye; nothing here performs it.
+ *
+ * `sizes` enters the `w` case alone; a browser reads past it otherwise,
+ * however the tag was written. The line is still written where the page wrote
+ * the attribute, because a reader who can see it in DevTools would otherwise
+ * get no answer about it at all — and `clause used` says it was read past.
+ */
+function stepsOf(
+  image: CapturedImage,
+  selection: Selection,
+  device: DeviceProfile,
+  loaded: Candidate | null,
+  laidOut: boolean,
+): Line[] {
+  const picked = selection.picked;
+  const wrote = selection.kind !== 'density' || image.sizes !== null;
+
+  const candidates = image.candidates
+    .map((candidate) =>
+      candidate === picked
+        ? `${candidate.raw} (picked)`
+        : candidate === loaded && loaded !== picked
+          ? `${candidate.raw} (loaded)`
+          : candidate.raw,
+    )
+    .join(', ');
+
+  const measured: Line[] =
+    selection.kind === 'width'
+      ? [
+          { label: 'css px', value: `${Math.round(selection.cssPx)}px`, held: laidOut },
+          {
+            label: 'needed',
+            value:
+              `${Math.round(selection.cssPx)}px × DPR ${device.dpr} = ` +
+              `${Math.round(selection.neededPx)}px`,
+            held: laidOut,
+          },
+        ]
+      : selection.kind === 'unreadable'
+        ? [
+            { label: 'css px', value: 'unreadable', held: false },
+            { label: 'needed', value: '—', held: false },
+          ]
+        : [{ label: 'needed', value: dprWord(device.dpr), held: false }];
+
+  return [
+    ...(wrote ? [{ label: 'sizes', value: offered(image), held: false }] : []),
+    {
+      label: 'clause used',
+      value: selection.kind === 'density' ? 'x descriptors only' : selection.resolution.clause,
+      held: false,
+    },
+    ...measured,
+    { label: 'candidates', value: candidates, held: false },
+  ];
+}
+
+/**
  * One image's row.
  *
  * Two shapes, and the split is the same one `trace.ts` makes. An image with
  * fewer than two candidates had nothing to select between, so it says which of
- * the two reasons that was and stops — eight lines of dashes would only bury
- * the images that do choose, and this is also what keeps a 1×1 tracking pixel
- * to one line.
+ * the two reasons that was and stops — a column of dashes would only bury the
+ * images that do choose, and this is also what keeps a 1×1 tracking pixel to
+ * one line. A third case joins it here: a `srcset` whose every candidate
+ * resolves to one URL, which the maintainer's screenshot showed as nine
+ * identical addresses under a `1×1` overlay. The arithmetic ran, and the
+ * device made no difference to the bytes.
  */
 function rowOf(raw: RawImage, device: DeviceProfile): Row {
   const image = captured(raw);
   const base = raw.baseURI;
+  const has = image.currentSrc !== '';
 
-  // The headline, and the whole reason this slice exists. It used to be the DOM
-  // path — `html > body > div:nth-of-type(2) > main > … > img` — which names
-  // the one thing about an image nobody recognises it by, and which on a real
-  // page wraps across two lines and pushes everything else off the panel. The
-  // file the browser loaded is what a reader is looking for, so that is what
-  // the row is called; the path is a line in the detail below, where it is
-  // still selectable and still pasteable into DevTools.
-  const name = image.currentSrc === '' ? '(nothing loaded)' : fileOf(image.currentSrc, base);
+  // The name beside the headline, and the whole reason `nameOf` exists: the
+  // recognisable part of a URL, wherever the CDN put it. Nothing where nothing
+  // loaded, because the verdict beside it already says so.
+  const name = has ? nameOf(image.currentSrc, base) : '';
 
-  // Marked on every row, held copy or not, and that is deliberate. The mark is
-  // not a warning about this image: it says what the figure is. `currentSrc` is
-  // what the browser has, and a browser that had a larger variant already never
-  // ran selection at all — there is no reading of the page that tells the two
-  // apart, so the mark cannot be conditional on anything.
-  const loaded: Line = {
-    label: 'loaded',
-    value: image.currentSrc === '' ? '(none)' : fileOf(image.currentSrc, base),
-    held: true,
-  };
-  const bytes: Line = { label: 'bytes', value: UNKNOWN, held: false };
+  // Every candidate's URL, resolved, so a relative candidate and an absolute
+  // `currentSrc` can be compared at all. The candidates that name the loaded
+  // file are how the headline finds its descriptor.
+  const urls = image.candidates.map((candidate) => absolute(candidate.url, base));
+  const matching = image.candidates.filter((_, at) => urls[at] === image.currentSrc);
+  const sameFile =
+    urls.length > 1 && urls.filter((url) => url === urls[0]).length === urls.length;
 
   // Who this image is, above what happened to it. Three facts a reader uses to
   // recognise an image and none of which the arithmetic needs: what the page
@@ -446,54 +755,65 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
   ];
 
   // Every file this row involves, whole. The loaded one first, because it is
-  // the one a reader came to check, then every candidate in the order the page
-  // offered them. Absolute, so a relative candidate and an absolute
-  // `currentSrc` can be read against each other at all.
-  const sources: Source[] = [
-    ...(image.currentSrc === '' ? [] : [{ label: 'loaded', url: image.currentSrc }]),
-    ...image.candidates.map((candidate) => ({
-      label: candidate.raw,
-      url: absolute(candidate.url, base),
-    })),
+  // the one a reader came to check — and marked on every row a file loaded,
+  // held copy or not, because `currentSrc` is what the browser has and there
+  // is no reading of the page that says whether it chose it. Then every
+  // candidate in the order the page offered them, or one line where they all
+  // name one file: nine identical addresses say less than one sentence does.
+  const files: Line[] = [
+    ...(has ? [{ label: 'loaded', value: image.currentSrc, held: true }] : []),
+    ...(sameFile
+      ? [{ label: plural(urls.length, 'candidate'), value: `one file: ${urls[0]}`, held: false }]
+      : image.candidates.map((candidate, at) => ({
+          label: candidate.raw,
+          value: urls[at] ?? candidate.url,
+          held: false,
+        }))),
   ];
+  const details: Line[] = [...files, ...identity, { label: 'bytes', value: UNKNOWN, held: false }];
 
-  const carried = { at: raw.at, name, alt: altFor(raw, name), file: image.currentSrc, sources };
+  const carried = {
+    at: raw.at,
+    name,
+    alt: altFor(raw, name),
+    file: image.currentSrc,
+    tiny: tinyOf(raw),
+    details,
+  };
 
   if (image.candidates.length < 2) {
-    const nothing = image.candidates.length === 0;
-    const why = nothing
-      ? 'no srcset, so nothing was selected'
-      : 'one candidate only, so selection is a formality';
+    const [only] = image.candidates;
     return {
       ...carried,
-      gist:
-        `${nothing ? 'no srcset' : 'one candidate only'}, ` +
-        `${image.currentSrc === '' ? 'nothing loaded yet' : 'one file loaded'}`,
-      mark: markOf(false),
-      lines: [...identity, { label: 'selection', value: why, held: false }, loaded, bytes],
+      verdict: NO_CHOICE,
+      loaded: !has ? '—' : only !== undefined && matching.length > 0 ? only.raw : 'src',
+      why:
+        only === undefined
+          ? 'No srcset, so your device made no difference here; the src attribute is the only ' +
+            'file on offer.'
+          : 'Only one file on offer, so your device made no difference here.',
+      mark: has ? markOf(false) : null,
+      steps: [{ label: 'candidates', value: only === undefined ? '(no srcset)' : only.raw, held: false }],
       notes: [],
     };
   }
 
   const selection = explainSelection(image, device);
+  const picked = selection.picked;
 
-  // `sizes` enters the `w` case alone; a browser reads past it otherwise,
-  // however the tag was written. The line is still written where the page wrote
-  // the attribute, because a reader who can see it in DevTools would otherwise
-  // get no answer about it at all — and `clause used` says it was read past.
-  const wrote = selection.kind !== 'density' || image.sizes !== null;
+  // The candidate that loaded, as the headline names it. Where several share
+  // the loaded URL the pick is preferred, because that is the one the browser
+  // would have arrived at; the first otherwise. Null is a file the `srcset`
+  // never offered.
+  const loaded =
+    matching.length === 0
+      ? null
+      : picked !== null && matching.includes(picked)
+        ? picked
+        : (matching[0] ?? null);
 
-  // A relative candidate URL and an absolute `currentSrc` are the same file,
-  // so both are resolved before they are compared. An image that has loaded
-  // nothing yet — a lazy one below the fold — disagrees with nothing.
-  const prediction = selection.picked;
-  const differs =
-    prediction !== null &&
-    image.currentSrc !== '' &&
-    absolute(prediction.url, base) !== image.currentSrc;
-
-  // Where a clause resolved to `auto`, the three figures below it are marked
-  // and `circular` says why: the width is the width this render laid the image
+  // Where a clause resolved to `auto`, the figures under it are marked and
+  // `circular` says why: the width is the width this render laid the image
   // out at, and for an image the page gives no width of its own that is the
   // width of the file the browser already held.
   //
@@ -501,55 +821,38 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
   // came from the file, and that is deliberate rather than approximate. An
   // `auto` image the page *does* give a CSS width has a `css px` no cache could
   // have touched — but this package reads a laid-out box and not a cascade, so
-  // there is no reading of the page that tells the two apart. It is the
-  // argument the `loaded` line already makes, applied where it applies again:
-  // the mark says what a figure is, so it cannot be conditional on something
-  // nothing here can see. The alternative is a figure that is sometimes
-  // contaminated and never says so, which is criterion 2 unmet.
+  // there is no reading of the page that tells the two apart. The mark says
+  // what a figure is, so it cannot be conditional on something nothing here
+  // can see.
   const laidOut = selection.kind === 'width' && selection.resolution.kind === 'auto';
 
+  const headline = !has ? '—' : loaded === null ? 'src' : loaded.raw;
+  const steps = stepsOf(image, selection, device, loaded, laidOut);
+  const notes = laidOut ? [circular()] : [];
+
+  if (sameFile) {
+    return {
+      ...carried,
+      verdict: NO_CHOICE,
+      loaded: headline,
+      why:
+        `All ${urls.length} candidates name one file, so your device made no difference here — ` +
+        'the descriptors differ and the bytes do not.',
+      mark: has ? markOf(laidOut) : null,
+      steps,
+      notes,
+    };
+  }
+
+  const { verdict, why } = judged(selection, device, loaded, has);
   return {
     ...carried,
-    // The one line a reader reads while scanning: what the arithmetic chose,
-    // and whether the page agrees with it. `loaded a different file` is the
-    // only alarm in the panel, and it is the sentence the whole tool exists to
-    // put in front of somebody.
-    gist:
-      `picked ${prediction === null ? 'nothing' : prediction.raw}, ` +
-      `${
-        image.currentSrc === ''
-          ? 'nothing loaded yet'
-          : differs
-            ? 'loaded a different file'
-            : 'and that is what loaded'
-      }`,
-    mark: markOf(laidOut),
-    lines: [
-      ...identity,
-      {
-        label: 'candidates',
-        value: image.candidates.map((candidate) => candidate.raw).join(', '),
-        held: false,
-      },
-      ...(wrote ? [{ label: 'sizes', value: offered(image), held: false }] : []),
-      {
-        label: 'clause used',
-        value: selection.kind === 'density' ? 'x descriptors only' : selection.resolution.clause,
-        held: false,
-      },
-      { label: 'css px', value: cssPxCell(selection), held: laidOut },
-      {
-        label: 'needed',
-        value: selection.kind === 'width' ? `${Math.round(selection.neededPx)}px` : '—',
-        held: laidOut,
-      },
-      { label: 'picked', value: picked(prediction, base), held: laidOut },
-      loaded,
-      bytes,
-    ],
-    // The circularity first, because it qualifies the arithmetic a
-    // disagreement would be read against.
-    notes: [...(laidOut ? [circular()] : []), ...(differs ? [disagrees()] : [])],
+    verdict,
+    loaded: headline,
+    why,
+    mark: has ? markOf(laidOut) : null,
+    steps,
+    notes,
   };
 }
 
@@ -579,9 +882,11 @@ export function panelOf(reading: Reading): Panel {
         ];
 
   return {
-    head:
-      `viewport ${reading.viewport.width}×${reading.viewport.height} · ` +
-      `DPR ${reading.dpr} · ${plural(reading.images.length, 'image')}`,
+    head: {
+      width: `${reading.viewport.width} px`,
+      dpr: dprWord(reading.dpr),
+      images: plural(reading.images.length, 'image'),
+    },
     rows: reading.images.map((raw) => rowOf(raw, device)),
     footer: [...footerOf(), ...backgrounds],
   };

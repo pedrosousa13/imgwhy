@@ -5,25 +5,30 @@ import { panelOf } from '../src/explain.js';
 import { image, reading } from './reading.js';
 
 /**
- * One row's arithmetic as a reader sees it, one line per field.
+ * One row's lines as a reader sees them, one per field.
  *
  * `[cache]` stands in for the mark the renderer draws. It is written into the
  * string rather than asserted separately so that a figure losing its mark is a
  * diff on the line it belongs to, which is where a reader would look.
  */
-const said = (row: Row): string[] =>
-  row.lines.map((line) => `${line.label}  ${line.value}${line.held ? '  [cache]' : ''}`);
+const said = (lines: Row['steps']): string[] =>
+  lines.map((line) => `${line.label}  ${line.value}${line.held ? '  [cache]' : ''}`);
 
-/** One field of one row, by the label a reader reads it against. */
+/** One field of one row's details, by the label a reader reads it against. */
 const valueOf = (row: Row, label: string): string | undefined =>
-  row.lines.find((line) => line.label === label)?.value;
+  row.details.find((line) => line.label === label)?.value;
 
-/** The one row a single-image reading produces. */
-const rowOf = (fields: Parameters<typeof image>[0]): Row => {
-  const [row] = panelOf(reading({ images: [image(fields)] })).rows;
+/** The one row a single-image reading produces, at the default desktop. */
+const rowOf = (fields: Parameters<typeof image>[0], dpr = 1, width = 1440): Row => {
+  const [row] = panelOf(
+    reading({ viewport: { width, height: 900 }, dpr, images: [image(fields)] }),
+  ).rows;
   if (row === undefined) throw new Error('the panel explained no image');
   return row;
 };
+
+/** The two-candidate `srcset` most cases below choose between. */
+const TWO = '/i/640.png 640w, /i/1080.png 1080w';
 
 /**
  * The arithmetic the panel shows, which is core's and not the extension's.
@@ -63,36 +68,62 @@ describe('the panel the worker computes from a reading', () => {
     ]);
   });
 
-  it('heads the panel with the viewport and the ratio the arithmetic ran at', () => {
-    const panel = panelOf(reading({ viewport: { width: 393, height: 852 }, dpr: 3 }));
-
-    expect(panel.head).toBe('viewport 393×852 · DPR 3 · 0 images');
+  it('heads the panel with the two inputs every row names, and the count', () => {
+    // Width and ratio as two fields rather than one line, because they are
+    // the inputs that explain every row and the panel lays them out as such.
+    expect(panelOf(reading({ viewport: { width: 393, height: 852 }, dpr: 3 })).head).toEqual({
+      width: '393 px',
+      dpr: 'DPR 3 (retina)',
+      images: '0 images',
+    });
+    expect(panelOf(reading({ images: [image()] })).head.images).toBe('1 image');
   });
 
-  it('shows the whole arithmetic for a w descriptor: clause, width, pixels, winner', () => {
+  it('says retina where the ratio is two or more, standard at one, and nothing in between', () => {
+    // "Was it retina?" is the reader's word for it, so the panel says it. Two
+    // is where the word was coined and where every phone sits; one is a
+    // standard display; the Windows scaling steps between are neither, and
+    // get no word rather than a wrong one.
+    expect(panelOf(reading({ dpr: 1 })).head.dpr).toBe('DPR 1 (standard)');
+    expect(panelOf(reading({ dpr: 1.5 })).head.dpr).toBe('DPR 1.5');
+    expect(panelOf(reading({ dpr: 2 })).head.dpr).toBe('DPR 2 (retina)');
+    expect(panelOf(reading({ dpr: 3 })).head.dpr).toBe('DPR 3 (retina)');
+  });
+
+  it('shows the arithmetic as steps for a w descriptor: sizes, clause, width, pixels, candidates', () => {
     expect(
       said(
         rowOf({
-          srcset: '/i/640.png 640w, /i/1080.png 1080w',
+          srcset: TWO,
           sizes: '(max-width: 768px) 100vw, 33vw',
           renderedWidth: 475,
           renderedHeight: 317,
           currentSrc: 'https://example.com/i/640.png',
-        }),
+        }).steps,
       ),
     ).toEqual([
-      'alt  (no alt attribute)',
-      'rendered box  475×317',
-      'selector  html > body > img',
-      'candidates  640w, 1080w',
       'sizes  (max-width: 768px) 100vw, 33vw',
       'clause used  33vw',
       'css px  475px',
-      'needed  475px',
-      'picked  640w  /i/640.png',
-      'loaded  /i/640.png  [cache]',
-      'bytes  unknown',
+      'needed  475px × DPR 1 = 475px',
+      'candidates  640w (picked), 1080w',
     ]);
+  });
+
+  it('marks the loaded candidate on the one line where it differs from the pick', () => {
+    // The candidate list is the one line a reader compares: every descriptor
+    // on offer, the pick marked, and the loaded one marked only where it is
+    // not the pick — the headline already says what loaded.
+    expect(
+      said(
+        rowOf({
+          srcset: TWO,
+          sizes: '33vw',
+          renderedWidth: 475,
+          currentSrc: 'https://example.com/i/1080.png',
+        }).steps,
+      ),
+    ).toContain('candidates  640w (picked), 1080w (loaded)');
   });
 
   it('agrees with core on the case the design works out by hand', () => {
@@ -103,17 +134,13 @@ describe('the panel the worker computes from a reading', () => {
     // `explainSelection` called directly. The second is what says the panel
     // asked core rather than arriving at the same answer on its own — a
     // reimplementation that agreed on this case would still be a
-    // reimplementation, and `no-arithmetic.test.ts` is what refuses one.
-    const live = image({
-      srcset: '/i/640.png 640w, /i/1080.png 1080w',
-      sizes: '100vw',
-      renderedWidth: 320,
-    });
+    // reimplementation, and `through-core.test.ts` is what refuses one.
+    const live = image({ srcset: TWO, sizes: '100vw', renderedWidth: 320 });
     const row = panelOf(reading({ viewport: { width: 640, height: 960 }, dpr: 1.5, images: [live] }))
       .rows[0];
 
-    expect(said(row)).toContain('needed  960px');
-    expect(said(row)).toContain('picked  1080w  /i/1080.png');
+    expect(said(row.steps)).toContain('needed  640px × DPR 1.5 = 960px');
+    expect(said(row.steps)).toContain('candidates  640w, 1080w (picked)');
 
     const selection = explainSelection(
       {
@@ -136,18 +163,11 @@ describe('the panel the worker computes from a reading', () => {
   it('says the ratio decided alone where no candidate carries a w descriptor', () => {
     // Core's `density` selection, worded. `sizes` never entered, so there is no
     // clause to name and no width to show — and the panel says which of those
-    // it is rather than leaving three empty cells.
-    expect(said(rowOf({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: '' }))).toEqual([
-      'alt  (no alt attribute)',
-      'rendered box  0×0, so this render drew no box at all',
-      'selector  html > body > img',
-      'candidates  1x, 2x',
+    // it is rather than leaving empty cells.
+    expect(said(rowOf({ srcset: '/i/a.png 1x, /i/b.png 2x' }, 2).steps)).toEqual([
       'clause used  x descriptors only',
-      'css px  —',
-      'needed  —',
-      'picked  1x  /i/a.png',
-      'loaded  (none)  [cache]',
-      'bytes  unknown',
+      'needed  DPR 2 (retina)',
+      'candidates  1x, 2x (picked)',
     ]);
   });
 
@@ -155,7 +175,7 @@ describe('the panel the worker computes from a reading', () => {
     // A page may write `sizes` on a densities-only `srcset`, and a browser
     // ignores it. Dropping the line would leave a reader who can see the
     // attribute in DevTools with no answer about it at all.
-    expect(said(rowOf({ srcset: '/i/a.png 1x, /i/b.png 2x', sizes: '50vw' }))).toContain(
+    expect(said(rowOf({ srcset: '/i/a.png 1x, /i/b.png 2x', sizes: '50vw' }).steps)).toContain(
       'sizes  50vw',
     );
   });
@@ -167,85 +187,69 @@ describe('the panel the worker computes from a reading', () => {
           srcset: '/i/200.png 200w, /i/300.png 300w',
           sizes: '50vw',
           sizesSource: 'source',
-        }),
+        }).steps,
       ),
     ).toContain('sizes  50vw from a matching <source>');
   });
 
   it('says a sizes string is absent where no clause was written at all', () => {
-    expect(said(rowOf({ srcset: '/i/640.png 640w, /i/1080.png 1080w' }))).toEqual([
-      'alt  (no alt attribute)',
-      'rendered box  0×0, so this render drew no box at all',
-      'selector  html > body > img',
-      'candidates  640w, 1080w',
+    expect(said(rowOf({ srcset: TWO }).steps)).toEqual([
       'sizes  (absent)',
       'clause used  absent → 100vw default',
       'css px  1440px',
-      'needed  1440px',
-      'picked  1080w  /i/1080.png',
-      'loaded  (none)  [cache]',
-      'bytes  unknown',
+      'needed  1440px × DPR 1 = 1440px',
+      'candidates  640w, 1080w (picked)',
     ]);
   });
 
   it('names the clause at fault where a length could not be read, and picks nothing', () => {
-    expect(
-      said(rowOf({ srcset: '/i/640.png 640w, /i/1080.png 1080w', sizes: '(min-width: 100px) wide' })),
-    ).toEqual([
-      'alt  (no alt attribute)',
-      'rendered box  0×0, so this render drew no box at all',
-      'selector  html > body > img',
-      'candidates  640w, 1080w',
+    expect(said(rowOf({ srcset: TWO, sizes: '(min-width: 100px) wide' }).steps)).toEqual([
       'sizes  (min-width: 100px) wide',
       'clause used  (min-width: 100px) wide',
       'css px  unreadable',
       'needed  —',
-      'picked  —',
-      'loaded  (none)  [cache]',
-      'bytes  unknown',
+      'candidates  640w, 1080w',
     ]);
   });
 
-  it('stops at one line where there was nothing to select between', () => {
+  it('stops at one step where there was nothing to select between', () => {
     // A 1×1 tracking pixel and an image the page never shows are both bytes the
     // browser went and got, so neither is filtered out — but neither has a
-    // choice to explain, and eight lines of dashes would bury the images that
+    // choice to explain, and a column of dashes would bury the images that
     // do choose. `trace.ts` collapses the same case for the same reason.
-    expect(said(rowOf({ currentSrc: 'https://example.com/px.gif' }))).toEqual([
-      'alt  (no alt attribute)',
-      'rendered box  0×0, so this render drew no box at all',
-      'selector  html > body > img',
-      'selection  no srcset, so nothing was selected',
-      'loaded  /px.gif  [cache]',
-      'bytes  unknown',
+    expect(said(rowOf({ currentSrc: 'https://example.com/px.gif' }).steps)).toEqual([
+      'candidates  (no srcset)',
     ]);
-    expect(said(rowOf({ srcset: '/i/one.png 800w' }))).toEqual([
-      'alt  (no alt attribute)',
-      'rendered box  0×0, so this render drew no box at all',
-      'selector  html > body > img',
-      'selection  one candidate only, so selection is a formality',
-      'loaded  (none)  [cache]',
-      'bytes  unknown',
-    ]);
+    expect(said(rowOf({ srcset: '/i/one.png 800w' }).steps)).toEqual(['candidates  800w']);
   });
 
-  it('marks the loaded file on every row, held copy or not', () => {
+  it('marks the loaded file on every row a file loaded, held copy or not', () => {
     // The mark is not a warning about this image. It is a statement about what
     // the figure is: `currentSrc` is what the browser has, and a browser that
     // has a larger variant already never ran selection at all. There is no
     // reading of the page that can tell the two apart, so the mark cannot be
-    // conditional on anything.
+    // conditional on anything about the cache — only on there being a file for
+    // the cache to have supplied.
     const panel = panelOf(
       reading({
         images: [
-          image({ srcset: '/i/640.png 640w, /i/1080.png 1080w', sizes: '100vw' }),
+          image({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/1080.png' }),
           image({ currentSrc: 'https://example.com/px.gif' }),
+          image({ srcset: TWO, sizes: '100vw' }),
         ],
       }),
     );
-    const held = panel.rows.flatMap((row) => row.lines.filter((line) => line.held));
 
-    expect(held.map((line) => line.label)).toEqual(['loaded', 'loaded']);
+    expect(panel.rows.map((row) => row.details.filter((line) => line.held).map((l) => l.label))).toEqual([
+      ['loaded'],
+      ['loaded'],
+      [],
+    ]);
+    expect(panel.rows.map((row) => row.mark)).toEqual([
+      'what the browser has, not what it chose',
+      'what the browser has, not what it chose',
+      null,
+    ]);
   });
 
   it('marks the width an auto clause resolved to, and every figure under it', () => {
@@ -253,41 +257,37 @@ describe('the panel the worker computes from a reading', () => {
     // loaded file. `auto` defers to layout, so core answers with the width the
     // element ended up at — and for an image the page gives no width of its
     // own, the width it ended up at is the width of whichever file the browser
-    // already held. So `css px`, `needed` and `picked` all descend from a held
-    // copy, and a prediction that agrees with `loaded` here agrees because one
-    // produced the other. Cache-cold, the same page lays the image out at
-    // nothing and picks nothing.
-    const [row] = panelOf(
-      reading({
-        dpr: 2,
-        images: [
-          image({
-            srcset: '/i/400.png 400w, /i/1200.png 1200w',
-            sizes: 'auto',
-            renderedWidth: 1200,
-            renderedHeight: 800,
-            currentSrc: 'https://example.com/i/1200.png',
-            loading: 'lazy',
-          }),
-        ],
-      }),
-    ).rows;
-    if (row === undefined) throw new Error('the panel explained no image');
+    // already held. So `css px` and `needed` descend from a held copy, and a
+    // prediction that agrees with `loaded` here agrees because one produced
+    // the other. Cache-cold, the same page lays the image out at nothing and
+    // picks nothing.
+    const row = rowOf(
+      {
+        srcset: '/i/400.png 400w, /i/1200.png 1200w',
+        sizes: 'auto',
+        renderedWidth: 1200,
+        renderedHeight: 800,
+        currentSrc: 'https://example.com/i/1200.png',
+        loading: 'lazy',
+      },
+      2,
+    );
 
-    expect(said(row)).toEqual([
-      'alt  (no alt attribute)',
-      'rendered box  1200×800',
-      'loading  lazy',
-      'selector  html > body > img',
-      'candidates  400w, 1200w',
+    expect(said(row.steps)).toEqual([
       'sizes  auto',
       'clause used  auto',
       'css px  1200px  [cache]',
-      'needed  2400px  [cache]',
-      'picked  1200w  /i/1200.png  [cache]',
-      'loaded  /i/1200.png  [cache]',
-      'bytes  unknown',
+      'needed  1200px × DPR 2 = 2400px  [cache]',
+      'candidates  400w, 1200w (picked)',
     ]);
+    expect(row.why).toBe(
+      'Your screen is 1440 px wide at DPR 2 (retina); sizes is auto, and the width came from ' +
+        'layout: 1200 px, so it needs 2400 device pixels — no file covers that, so 1200w, the ' +
+        'largest on offer, is stretched to fit; add a candidate above 1200w.',
+    );
+    expect(row.mark).toBe(
+      'what the browser has, not what it chose — and the width above descends from it',
+    );
     expect(row.notes).toEqual([
       'sizes resolved to auto, so the width above is the width this render laid the image out ' +
         'at — and for an image the page gives no width of its own, that is the width of ' +
@@ -297,84 +297,13 @@ describe('the panel the worker computes from a reading', () => {
     ]);
   });
 
-  it('marks nothing else, so the mark keeps meaning one thing', () => {
-    const panel = panelOf(
-      reading({
-        images: [
-          image({
-            srcset: '/i/640.png 640w, /i/1080.png 1080w',
-            sizes: '33vw',
-            renderedWidth: 475,
-            currentSrc: 'https://example.com/i/640.png',
-            loading: 'lazy',
-          }),
-        ],
-      }),
-    );
-    const unmarked = panel.rows.flatMap((row) => row.lines.filter((line) => !line.held));
-
-    expect(unmarked.map((line) => line.label)).toEqual([
-      'alt',
-      'rendered box',
-      'loading',
-      'selector',
-      'candidates',
-      'sizes',
-      'clause used',
-      'css px',
-      'needed',
-      'picked',
-      'bytes',
-    ]);
-  });
-
-  it('says why a prediction and a loaded file may differ without either being wrong', () => {
-    const row = rowOf({
-      srcset: '/i/640.png 640w, /i/1080.png 1080w',
-      sizes: '33vw',
-      renderedWidth: 475,
-      currentSrc: 'https://example.com/i/1080.png',
-    });
-
-    expect(said(row)).toContain('picked  640w  /i/640.png');
-    expect(said(row)).toContain('loaded  /i/1080.png  [cache]');
-    expect(row.notes).toEqual([
-      'picked and loaded disagree. A browser holding a larger variant reuses it and never runs ' +
-        'selection at all, so a disagreement here is not necessarily a bug — it is the first ' +
-        'thing to rule out. An empty cache is the only way to tell.',
-    ]);
-  });
-
-  it('says nothing extra where the prediction and the loaded file agree', () => {
-    // A relative candidate URL and an absolute `currentSrc` are the same file,
-    // and a comparison that missed that would put the note on every row and
-    // teach a reader to skip it.
+  it('writes no note where the arithmetic needs none', () => {
+    // The cache argument for a disagreement now lives in the row's own
+    // sentence, so a note repeating it would be the same prose twice.
     expect(
-      rowOf({
-        srcset: '/i/640.png 640w, /i/1080.png 1080w',
-        sizes: '33vw',
-        renderedWidth: 475,
-        currentSrc: 'https://example.com/i/640.png',
-      }).notes,
+      rowOf({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' })
+        .notes,
     ).toEqual([]);
-  });
-
-  it('claims no disagreement about an image that has loaded nothing yet', () => {
-    // A lazy image below the fold has an empty `currentSrc`, which is not a
-    // file that differs from the prediction. It is no file at all.
-    expect(
-      rowOf({ srcset: '/i/640.png 640w, /i/1080.png 1080w', sizes: '33vw', currentSrc: '' }).notes,
-    ).toEqual([]);
-  });
-
-  it('says what loading the page asked for, and says nothing where it asked for none', () => {
-    // It used to be appended to the row's heading, the way `trace.ts` appends
-    // it to a block's first line. The heading is now the file the browser
-    // loaded — the thing a reader recognises the row by — so the attribute is
-    // a line of the grid, where `eager` is as much a page fact as `lazy`.
-    expect(said(rowOf({ loading: 'lazy' }))).toContain('loading  lazy');
-    expect(said(rowOf({ loading: 'eager' }))).toContain('loading  eager');
-    expect(said(rowOf({})).some((line) => line.startsWith('loading'))).toBe(false);
   });
 
   it('explains the mark once, and what the extension cannot measure', () => {
@@ -405,9 +334,240 @@ describe('the panel the worker computes from a reading', () => {
   });
 
   it('says nothing at all where no background was painted', () => {
-    // A line reading `0 background images` on every page would bury the pages
-    // that have some, which is the rule `trace.ts` keeps.
     expect(panelOf(reading()).footer).toHaveLength(2);
+  });
+});
+
+/**
+ * The one sentence per row, which is the whole of what the maintainer asked
+ * for: "I literally need to know which one got loaded and why. Succinctly."
+ *
+ * One template per outcome, and every template has the same shape — the
+ * outcome, then the causal chain from the reader's device through `sizes` to
+ * the pixels needed, then, where the outcome is a warning, what to do about
+ * it. The device is named in every sentence on purpose: the reader's question
+ * was "is it because of my device?", and the answer has to say *yes, these two
+ * numbers* on the line they are looking at rather than in the head.
+ *
+ * Every number in every sentence is core's, formatted. Nothing here is
+ * recomputed, and `through-core.test.ts` refuses the operators that would let
+ * it be.
+ */
+describe('the sentence that says which file loaded and why', () => {
+  const at = (fields: Parameters<typeof image>[0], dpr = 1, width = 1440): string =>
+    rowOf(fields, dpr, width).why;
+
+  it('width-selected and it fit: names the device, the clause, the pixels, and the pick', () => {
+    expect(
+      at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' }),
+    ).toBe(
+      'Your screen is 1440 px wide at DPR 1 (standard); sizes gives it 33vw, which is 475 px, so ' +
+        'it needs 475 device pixels — and 640w is the smallest file that covers that.',
+    );
+  });
+
+  it('width-selected and a larger file loaded: says the pick, then the held copy, then the cure', () => {
+    expect(at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' })).toBe(
+      'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
+        'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser already held ' +
+        '1080w and reused it rather than choosing again; an empty cache is the only way to see ' +
+        'the real pick.',
+    );
+  });
+
+  it('width-selected and nothing covers it: says the largest stood in, and what to add', () => {
+    expect(at({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/1080.png' }, 3)).toBe(
+      'Your screen is 1440 px wide at DPR 3 (retina); sizes gives it 100vw, which is 1440 px, so ' +
+        'it needs 4320 device pixels — no file covers that, so 1080w, the largest on offer, is ' +
+        'stretched to fit; add a candidate above 1080w.',
+    );
+  });
+
+  it('width-selected and a smaller file loaded: says it is stretched, and where to look', () => {
+    expect(at({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' })).toBe(
+      'The arithmetic picks 1080w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
+        'it 100vw, which is 1440 px, so it needs 1440 device pixels — but the browser loaded ' +
+        '640w, which is smaller, so the image is stretched to fit; check what set this src.',
+    );
+  });
+
+  it('width-selected and nothing loaded yet: says so, and what the arithmetic will pick', () => {
+    expect(at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: '' })).toBe(
+      'Nothing has loaded yet; when it does, the arithmetic picks 640w — your screen is 1440 px ' +
+        'wide at DPR 1 (standard); sizes gives it 33vw, which is 475 px, so it needs 475 device ' +
+        'pixels.',
+    );
+  });
+
+  it('width-selected and the loaded file is not a candidate: says so rather than guessing', () => {
+    expect(at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/other.png' })).toBe(
+      'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
+        'it 33vw, which is 475 px, so it needs 475 device pixels — but the loaded file is not ' +
+        'one the srcset offers; check what set this src.',
+    );
+  });
+
+  it('words each kind of sizes resolution as its own cause', () => {
+    // A pixel length is not followed by "which is N px", because that would say
+    // the number twice. A clause with a condition is named whole, so a reader
+    // can see which one matched at this viewport. The two defaults are two
+    // findings about the page, and are told apart.
+    const loaded = 'https://example.com/i/640.png';
+    expect(at({ srcset: TWO, sizes: '580px', currentSrc: loaded })).toContain(
+      '; sizes gives it 580px, so it needs 580 device pixels',
+    );
+    expect(at({ srcset: TWO, sizes: '(max-width: 768px) 100vw, 33vw', currentSrc: loaded }, 1, 600)).toContain(
+      '; sizes matched (max-width: 768px) 100vw, which is 600 px, so it needs 600 device pixels',
+    );
+    expect(at({ srcset: TWO, sizes: null, currentSrc: 'https://example.com/i/1080.png' })).toContain(
+      '; no sizes is written, and the 100vw default gives it 1440 px, so it needs 1440 device pixels',
+    );
+    expect(
+      at({ srcset: TWO, sizes: '(min-width: 2000px) 50vw', currentSrc: 'https://example.com/i/1080.png' }),
+    ).toContain('; no sizes clause matched, and the 100vw default gives it 1440 px, so it needs 1440');
+  });
+
+  it('density-selected and it fit: names the ratio, and that sizes never entered', () => {
+    expect(at({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' }, 2)).toBe(
+      'Your screen is DPR 2 (retina) and no candidate carries a width, so the ratio decided ' +
+        'alone — and 2x is the smallest density at or above it.',
+    );
+  });
+
+  it('density-selected and no candidate reaches the ratio: says the densest stood in', () => {
+    expect(at({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' }, 3)).toBe(
+      'Your screen is DPR 3 (retina) and no candidate carries a width, so the ratio decided ' +
+        'alone — no candidate reaches that, so 2x, the densest on offer, is stretched to fit; add ' +
+        'a candidate above 2x.',
+    );
+  });
+
+  it('density-selected and a denser file loaded: says the pick, then the held copy', () => {
+    expect(at({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' })).toBe(
+      'The arithmetic picks 1x — your screen is DPR 1 (standard) and no candidate carries a ' +
+        'width, so the ratio decided alone — but the browser already held 2x and reused it ' +
+        'rather than choosing again; an empty cache is the only way to see the real pick.',
+    );
+  });
+
+  it('unreadable sizes with nothing to pick: names the clause at fault, and what to fix', () => {
+    expect(at({ srcset: TWO, sizes: '(min-width: 100px) wide', currentSrc: 'https://example.com/i/640.png' })).toBe(
+      'The sizes clause (min-width: 100px) wide could not be read as a length, so there is no ' +
+        'width to select against and nothing was picked; fix the sizes attribute.',
+    );
+  });
+
+  it('unreadable sizes with an x candidate to fall back on: says only those were judged', () => {
+    expect(
+      at(
+        { srcset: '/i/640.png 640w, /i/hi.png 2x', sizes: '(min-width: 100px) wide', currentSrc: 'https://example.com/i/hi.png' },
+        2,
+      ),
+    ).toBe(
+      'The sizes clause (min-width: 100px) wide could not be read as a length, so only the x ' +
+        'candidates could be judged against DPR 2 (retina) — and 2x is the smallest density at ' +
+        'or above it.',
+    );
+  });
+
+  it('no srcset: says the device made no difference, and where the one file came from', () => {
+    expect(at({ currentSrc: 'https://example.com/px.gif' })).toBe(
+      'No srcset, so your device made no difference here; the src attribute is the only file on offer.',
+    );
+  });
+
+  it('one candidate: says the device made no difference', () => {
+    expect(at({ srcset: '/i/one.png 800w', currentSrc: 'https://example.com/i/one.png' })).toBe(
+      'Only one file on offer, so your device made no difference here.',
+    );
+  });
+
+  it('every candidate one file: says so once, rather than pretending a choice was made', () => {
+    // The maintainer's screenshot: a `1×1` overlay offering nine descriptors
+    // that all resolve to `clear.png`. The arithmetic ran and picked one of
+    // them, and it made no difference to the bytes.
+    expect(
+      at({ srcset: '/clear.png 320w, /clear.png 640w, /clear.png 1280w', sizes: '100vw', currentSrc: 'https://example.com/clear.png' }),
+    ).toBe(
+      'All 3 candidates name one file, so your device made no difference here — the descriptors ' +
+        'differ and the bytes do not.',
+    );
+  });
+});
+
+/**
+ * The verdict, which is the word a reader takes in before any other.
+ *
+ * "At a glance, I need to know if it's correct or not." One word per row, in
+ * one of three tones, and derived by comparison alone: whether the loaded file
+ * is the one core picked, and whether the pick covers the pixels core says are
+ * needed. Every category is pinned here for every kind of `Selection` that can
+ * produce it.
+ */
+describe('the verdict a row leads with', () => {
+  const verdictOf = (fields: Parameters<typeof image>[0], dpr = 1): [string, string] => {
+    const { verdict } = rowOf(fields, dpr);
+    return [verdict.word, verdict.tone];
+  };
+
+  it('is fit, and quiet about it, where the loaded file is the pick and covers the need', () => {
+    expect(verdictOf({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' })).toEqual(['fit', 'good']);
+    expect(verdictOf({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' }, 2)).toEqual(['fit', 'good']);
+    expect(
+      verdictOf({ srcset: '/i/640.png 640w, /i/hi.png 2x', sizes: '(min-width: 100px) wide', currentSrc: 'https://example.com/i/hi.png' }, 2),
+    ).toEqual(['fit', 'good']);
+  });
+
+  it('is oversized where a larger candidate than the pick loaded', () => {
+    expect(verdictOf({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' })).toEqual(['oversized', 'warn']);
+    expect(verdictOf({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' })).toEqual(['oversized', 'warn']);
+    expect(
+      verdictOf({ srcset: '/i/lo.png 1x, /i/hi.png 2x', sizes: '(min-width: 100px) wide', currentSrc: 'https://example.com/i/hi.png' }),
+    ).toEqual(['oversized', 'warn']);
+  });
+
+  it('is undersized where the loaded file does not cover the pixels needed', () => {
+    // Two routes to the same stretched image: no candidate covers it and the
+    // largest stood in, or something loaded a file smaller than the pick.
+    expect(verdictOf({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/1080.png' }, 3)).toEqual(['undersized', 'warn']);
+    expect(verdictOf({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' })).toEqual(['undersized', 'warn']);
+    expect(verdictOf({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' }, 3)).toEqual(['undersized', 'warn']);
+    expect(
+      verdictOf({ srcset: '/i/640.png 640w, /i/hi.png 2x', sizes: '(min-width: 100px) wide', currentSrc: 'https://example.com/i/hi.png' }, 3),
+    ).toEqual(['undersized', 'warn']);
+  });
+
+  it('is no choice where the device had no say', () => {
+    expect(verdictOf({ currentSrc: 'https://example.com/px.gif' })).toEqual(['no choice', 'quiet']);
+    expect(verdictOf({ srcset: '/i/one.png 800w', currentSrc: 'https://example.com/i/one.png' })).toEqual(['no choice', 'quiet']);
+    expect(
+      verdictOf({ srcset: '/clear.png 320w, /clear.png 640w', sizes: '100vw', currentSrc: 'https://example.com/clear.png' }),
+    ).toEqual(['no choice', 'quiet']);
+  });
+
+  it('is not loaded where there is no file to judge yet', () => {
+    expect(verdictOf({ srcset: TWO, sizes: '33vw', currentSrc: '' })).toEqual(['not loaded', 'quiet']);
+    expect(verdictOf({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: '' })).toEqual(['not loaded', 'quiet']);
+  });
+
+  it('is unknown where the comparison cannot settle it, and never a guess', () => {
+    expect(verdictOf({ srcset: TWO, sizes: '(min-width: 100px) wide', currentSrc: 'https://example.com/i/640.png' })).toEqual(['unknown', 'quiet']);
+    expect(verdictOf({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/other.png' })).toEqual(['unknown', 'quiet']);
+  });
+
+  it('carries every warning with a clause saying what to do', () => {
+    // A warning with no action is noise. Every `warn` sentence names a cure
+    // after its semicolon.
+    const warned = [
+      rowOf({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' }),
+      rowOf({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/1080.png' }, 3),
+      rowOf({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' }),
+    ];
+
+    for (const row of warned) {
+      expect(row.verdict.tone).toBe('warn');
+      expect(row.why).toMatch(/; (?:an empty cache is the only way|add a candidate|check what set)/);
+    }
   });
 });
 
@@ -418,28 +578,72 @@ describe('the panel the worker computes from a reading', () => {
  * > segment, so a reader looking at a page cannot tell which row is the hero
  * > and which is a 20px icon.
  *
- * Four answers, and none of them is arithmetic. The row is named after the file
- * the browser loaded rather than the path to the element. It carries that file's
- * whole URL, so a thumbnail can be drawn of it and so two directories can be
- * told apart. It says what the page called the image and what shape this render
- * drew it. And it says in one line what happened, so twenty-three of them can
- * be read without opening any.
+ * And this slice's addition, from the maintainer: "need to know the size that
+ * loaded like was it 640vw? which one? simple stuff." So the headline is the
+ * descriptor of the file that loaded, the name beside it is the file-name
+ * segment, and the whole URL is in the details.
  */
 describe('what a row says about which image it is', () => {
-  it('names the row after the file the browser loaded', () => {
-    expect(rowOf({ currentSrc: 'https://example.com/i/hero-photograph.png' }).name).toBe(
-      '/i/hero-photograph.png',
-    );
+  it('heads the row with the descriptor of the file that loaded', () => {
+    expect(rowOf({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' }).loaded).toBe('640w');
+    expect(rowOf({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' }).loaded).toBe('1080w');
+    expect(rowOf({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' }).loaded).toBe('2x');
+    expect(rowOf({ srcset: '/i/one.png 800w', currentSrc: 'https://example.com/i/one.png' }).loaded).toBe('800w');
   });
 
-  it('says so where the browser has loaded nothing, rather than naming a prediction', () => {
-    // A lazy image below the fold has loaded no file, and the candidate the
-    // arithmetic would pick is a prediction — naming the row after it would
-    // put a file the page has never fetched in the position a reader reads as
-    // identity.
-    expect(rowOf({ srcset: '/i/640.png 640w, /i/1080.png 1080w', currentSrc: '' }).name).toBe(
-      '(nothing loaded)',
+  it('heads it with the pick where several descriptors name the loaded file', () => {
+    // Nine descriptors, one file: the browser arrived at one of them, and the
+    // one core picks is the one it would have arrived at.
+    expect(
+      rowOf({ srcset: '/clear.png 320w, /clear.png 640w, /clear.png 1280w', sizes: '100vw', currentSrc: 'https://example.com/clear.png' }).loaded,
+    ).toBe('1280w');
+  });
+
+  it('says src where the file came from the src attribute, and a dash where none loaded', () => {
+    expect(rowOf({ currentSrc: 'https://example.com/px.gif' }).loaded).toBe('src');
+    expect(rowOf({ srcset: TWO, sizes: '33vw', currentSrc: 'https://example.com/i/other.png' }).loaded).toBe('src');
+    expect(rowOf({ srcset: TWO, sizes: '33vw', currentSrc: '' }).loaded).toBe('—');
+    expect(rowOf({ currentSrc: '' }).loaded).toBe('—');
+  });
+
+  it('names the row after the file-name segment of the URL, wherever the CDN put it', () => {
+    // The Storyblok shape from the maintainer's page: the file name sits three
+    // segments before the end, behind a resize and a filter. The last segment
+    // that carries an extension is the rule, and it lands on `card-1.webp`.
+    expect(
+      rowOf({
+        currentSrc: 'https://a.storyblok.com/f/123/640x506/f31865bb07/card-1.webp/m/640x506/filters:quality(70)',
+      }).name,
+    ).toBe('card-1.webp');
+    expect(rowOf({ currentSrc: 'https://example.com/i/hero-photograph.png' }).name).toBe('hero-photograph.png');
+    expect(rowOf({ currentSrc: 'https://example.com/i/p.png?w=640&q=80' }).name).toBe('p.png');
+  });
+
+  it('falls back to the last segment, then the host, where nothing looks like a file', () => {
+    expect(rowOf({ currentSrc: 'https://example.com/images/resize/640' }).name).toBe('640');
+    expect(rowOf({ currentSrc: 'https://cdn.example.net/' }).name).toBe('cdn.example.net');
+  });
+
+  it('says a data: URI is one, rather than naming a tail of the page instead', () => {
+    // A scheme that carries its own content has no path, so there is no file
+    // name to take — the last segment of one is an arbitrary slice of whatever
+    // the page inlined. The scheme is the part a reader can act on, so this is
+    // the one shape cut from the back.
+    expect(rowOf({ currentSrc: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' }).name).toBe(
+      'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAA…',
     );
+    expect(rowOf({ currentSrc: 'javascript:alert(1)' }).name).toBe('javascript:alert(1)');
+  });
+
+  it('names nothing where nothing loaded, because the verdict beside it says so', () => {
+    expect(rowOf({ srcset: TWO, currentSrc: '' }).name).toBe('');
+  });
+
+  it('says what it can about a URL that resolves against no base at all', () => {
+    // `baseURI` is what a `<base>` tag says, so it is page content like
+    // everything else here, and a relative candidate against an unusable base
+    // resolves to nothing. The string the page wrote is the honest answer.
+    expect(rowOf({ currentSrc: '/i/640.png', baseURI: 'not a URL' }).name).toBe('/i/640.png');
   });
 
   it('carries the loaded file whole, which is the one value the panel requests', () => {
@@ -453,140 +657,92 @@ describe('what a row says about which image it is', () => {
     expect(rowOf({ currentSrc: '' }).file).toBe('');
   });
 
-  it('offers the whole URL of the loaded file and of every candidate', () => {
-    // Criterion 4, and the reason it cannot be met by the grid above: those
-    // lines are cut to fit a column. These are not cut at all, and they are
-    // absolute, so a relative candidate and an absolute `currentSrc` can be
-    // read against each other.
+  it('holds the whole URL of the loaded file and of every candidate in the details', () => {
+    // Uncut and absolute, so a relative candidate and an absolute `currentSrc`
+    // can be read against each other, and two files that differ only by a
+    // directory can be told apart.
     expect(
-      rowOf({
-        srcset: '/i/640.png 640w, /i/1080.png 1080w',
-        sizes: '100vw',
-        currentSrc: 'https://example.com/i/640.png',
-      }).sources,
+      said(rowOf({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png', renderedWidth: 475, renderedHeight: 317 }).details),
     ).toEqual([
-      { label: 'loaded', url: 'https://example.com/i/640.png' },
-      { label: '640w', url: 'https://example.com/i/640.png' },
-      { label: '1080w', url: 'https://example.com/i/1080.png' },
+      'loaded  https://example.com/i/640.png  [cache]',
+      '640w  https://example.com/i/640.png',
+      '1080w  https://example.com/i/1080.png',
+      'alt  (no alt attribute)',
+      'rendered box  475×317',
+      'selector  html > body > img',
+      'bytes  unknown',
+    ]);
+  });
+
+  it('collapses candidates that share one URL into a single statement', () => {
+    expect(
+      said(rowOf({ srcset: '/clear.png 320w, /clear.png 640w, /clear.png 1280w', sizes: '100vw', currentSrc: 'https://example.com/clear.png' }).details),
+    ).toEqual([
+      'loaded  https://example.com/clear.png  [cache]',
+      '3 candidates  one file: https://example.com/clear.png',
+      'alt  (no alt attribute)',
+      'rendered box  0×0, so this render drew no box at all',
+      'selector  html > body > img',
+      'bytes  unknown',
     ]);
   });
 
   it('tells two images apart when their URLs differ only by a directory', () => {
-    // Criterion 5. The two paths below are the same length and the same file
-    // name, and long enough that the line in the grid cuts the directory off
-    // both — so the whole URL is the only reading that separates them, which
-    // is why every row carries one.
     const deep = (at: string): string =>
       `https://example.com/assets/2026/${at}/a/very/deep/set/of/directories/that/go/on/images/hero.png`;
     const rows = panelOf(
-      reading({
-        images: [image({ currentSrc: deep('one') }), image({ currentSrc: deep('two') })],
-      }),
+      reading({ images: [image({ currentSrc: deep('one') }), image({ currentSrc: deep('two') })] }),
     ).rows;
 
-    // The two headlines are the same string, and that is the finding rather
-    // than a failure: the directory that separates these files sits in the
-    // part the line had to drop, and the `…` says something was dropped
-    // without saying what. A panel with nothing else to offer would render
-    // two different files identically.
-    expect(rows[0]?.name).toBe(rows[1]?.name);
-    expect(rows[0]?.name).toContain('…');
+    // The two names are the same string, and that is the finding rather than a
+    // failure: the directory that separates these files is not the file name.
     // The whole URL is what separates them, and every row carries one.
-    expect(rows.map((row) => row.sources.map((source) => source.url))).toEqual([
-      [deep('one')],
-      [deep('two')],
-    ]);
+    expect(rows[0]?.name).toBe(rows[1]?.name);
+    expect(rows.map((row) => valueOf(row, 'loaded'))).toEqual([deep('one'), deep('two')]);
     expect(rows[0]?.file).not.toBe(rows[1]?.file);
   });
 
   it('says the alt text the page wrote, and which kind of nothing it wrote instead', () => {
-    // Criterion 6's first half, in three states rather than two. `alt=""` is a
-    // page calling the image decorative, which is a claim; no attribute is a
-    // page that made none.
     expect(valueOf(rowOf({ alt: 'A person at a desk' }), 'alt')).toBe('A person at a desk');
     expect(valueOf(rowOf({ alt: '' }), 'alt')).toBe('(empty, so the page calls it decorative)');
     expect(valueOf(rowOf({ alt: null }), 'alt')).toBe('(no alt attribute)');
   });
 
   it('says the box this render drew, which is the shape a reader recognises', () => {
-    // Criterion 6's second half. A banner and an icon are two rows of numbers
-    // otherwise.
-    expect(valueOf(rowOf({ renderedWidth: 1200, renderedHeight: 80 }), 'rendered box')).toBe(
-      '1200×80',
-    );
-    expect(valueOf(rowOf({ renderedWidth: 23.6, renderedHeight: 23.4 }), 'rendered box')).toBe(
-      '24×23',
-    );
-  });
-
-  it('says an image this render drew no box for drew none, rather than showing 0×0', () => {
-    // A hidden image is the one case where the mark the panel draws is
-    // invisible, so the row is where a reader finds out why.
+    expect(valueOf(rowOf({ renderedWidth: 1200, renderedHeight: 80 }), 'rendered box')).toBe('1200×80');
+    expect(valueOf(rowOf({ renderedWidth: 23.6, renderedHeight: 23.4 }), 'rendered box')).toBe('24×23');
     expect(valueOf(rowOf({}), 'rendered box')).toBe('0×0, so this render drew no box at all');
   });
 
+  it('says what loading the page asked for, and says nothing where it asked for none', () => {
+    expect(valueOf(rowOf({ loading: 'lazy' }), 'loading')).toBe('lazy');
+    expect(valueOf(rowOf({ loading: 'eager' }), 'loading')).toBe('eager');
+    expect(valueOf(rowOf({}), 'loading')).toBeUndefined();
+  });
+
+  it('says bytes are unknown on every row, and never a figure', () => {
+    expect(valueOf(rowOf({ srcset: TWO, sizes: '100vw' }), 'bytes')).toBe('unknown');
+    expect(valueOf(rowOf({}), 'bytes')).toBe('unknown');
+  });
+
   it('words the thumbnail’s own alt, so a box that will not draw still says what it was', () => {
-    // The page's own description first, because it was written by somebody who
-    // could see the image. The file name where the page wrote none. And the
-    // honest sentence where there is no file to describe at all — which is
-    // what a reader gets in place of a broken-image glyph.
-    expect(rowOf({ currentSrc: 'https://example.com/i/a.png', alt: 'A person' }).alt).toBe(
-      'A person',
-    );
-    expect(rowOf({ currentSrc: 'https://example.com/i/a.png', alt: '' }).alt).toBe('/i/a.png');
-    expect(rowOf({ currentSrc: 'https://example.com/i/a.png' }).alt).toBe('/i/a.png');
+    expect(rowOf({ currentSrc: 'https://example.com/i/a.png', alt: 'A person' }).alt).toBe('A person');
+    expect(rowOf({ currentSrc: 'https://example.com/i/a.png', alt: '' }).alt).toBe('a.png');
+    expect(rowOf({ currentSrc: 'https://example.com/i/a.png' }).alt).toBe('a.png');
     expect(rowOf({ currentSrc: '' }).alt).toBe('nothing loaded');
   });
 
-  it('says in one line what happened, so a page of images can be read without opening one', () => {
-    const gistOf = (fields: Parameters<typeof image>[0]): string => rowOf(fields).gist;
-
-    expect(
-      gistOf({
-        srcset: '/i/640.png 640w, /i/1080.png 1080w',
-        sizes: '33vw',
-        renderedWidth: 475,
-        currentSrc: 'https://example.com/i/640.png',
-      }),
-    ).toBe('picked 640w, and that is what loaded');
-    // The one alarm in the panel, and the sentence the whole tool exists to
-    // put in front of somebody.
-    expect(
-      gistOf({
-        srcset: '/i/640.png 640w, /i/1080.png 1080w',
-        sizes: '33vw',
-        renderedWidth: 475,
-        currentSrc: 'https://example.com/i/1080.png',
-      }),
-    ).toBe('picked 640w, loaded a different file');
-    expect(
-      gistOf({ srcset: '/i/640.png 640w, /i/1080.png 1080w', sizes: '33vw', currentSrc: '' }),
-    ).toBe('picked 640w, nothing loaded yet');
-    expect(
-      gistOf({ srcset: '/i/640.png 640w, /i/1080.png 1080w', sizes: '(min-width: 100px) wide' }),
-    ).toBe('picked nothing, nothing loaded yet');
-    expect(gistOf({ currentSrc: 'https://example.com/px.gif' })).toBe(
-      'no srcset, one file loaded',
-    );
-    expect(gistOf({ srcset: '/i/one.png 800w' })).toBe('one candidate only, nothing loaded yet');
-  });
-
-  it('says what the mark means where the mark is, and says more where the width descends from it', () => {
-    // The footer still carries the argument in full, and the row's note still
-    // carries the `auto` reasoning — a tooltip is a hover affordance and
-    // cannot be the only copy of anything. This is the short form, on the
-    // chip, so a reader who meets a mark does not have to go looking.
-    expect(rowOf({ srcset: '/i/a.png 640w, /i/b.png 1080w', sizes: '33vw' }).mark).toBe(
-      'what the browser has, not what it chose',
-    );
-    expect(
-      rowOf({
-        srcset: '/i/400.png 400w, /i/1200.png 1200w',
-        sizes: 'auto',
-        renderedWidth: 1200,
-        currentSrc: 'https://example.com/i/1200.png',
-      }).mark,
-    ).toBe('what the browser has, not what it chose — and the width above descends from it');
+  it('says the size in place of a thumbnail where the image is too small to show', () => {
+    // A 1×1 drawn into a 44px box is a square of one colour, or of the checked
+    // ground behind it, and reads as a thumbnail that failed. Under eight CSS
+    // pixels on both sides there is nothing to show, and the size is the
+    // honest picture. A box of zero is an image this render did not draw, and
+    // its file still gets a thumbnail.
+    expect(rowOf({ renderedWidth: 1, renderedHeight: 1, currentSrc: 'https://example.com/clear.png' }).tiny).toBe('1×1');
+    expect(rowOf({ renderedWidth: 4, renderedHeight: 7.4 }).tiny).toBe('4×7');
+    expect(rowOf({ renderedWidth: 8, renderedHeight: 8 }).tiny).toBeNull();
+    expect(rowOf({ renderedWidth: 1200, renderedHeight: 80 }).tiny).toBeNull();
+    expect(rowOf({ renderedWidth: 0, renderedHeight: 0 }).tiny).toBeNull();
   });
 
   it('hands each row the index the reader gave it, which is the panel’s handle', () => {
@@ -595,83 +751,5 @@ describe('what a row says about which image it is', () => {
     ).rows;
 
     expect(rows.map((row) => row.at)).toEqual([0, 1, 2]);
-  });
-});
-
-/**
- * The line a URL becomes, which is the one thing on a row a reader compares
- * against another row.
- *
- * Two candidates the panel renders the same are two candidates a reader cannot
- * tell apart, and on the row whose own note says `picked` and `loaded` disagree
- * that reads as nonsense — the panel says they differ and shows one file twice.
- * So the property this holds is not a format. It is that a difference is
- * visible: either the line shows it, or the line carries a `…` saying something
- * was dropped to fit.
- */
-describe('the file a candidate names, on one line of the panel', () => {
-  /** The `loaded` line of a page holding one image, which is one URL rendered. */
-  const loadedOf = (currentSrc: string, baseURI = 'https://example.com/'): string => {
-    const [row] = panelOf(reading({ images: [image({ currentSrc, baseURI })] })).rows;
-    if (row === undefined) throw new Error('the panel explained no image');
-    return said(row).find((line) => line.startsWith('loaded  ')) ?? '';
-  };
-
-  it('keeps the path, so two candidates in different directories read apart', () => {
-    // The whole point. A last path segment renders `/a/1.png` and `/b/1.png`
-    // identically, and this is the row that shows why that cannot stand: the
-    // note says the two disagree.
-    const row = rowOf({
-      srcset: '/a/1.png 640w, /b/1.png 1080w',
-      sizes: '100vw',
-      currentSrc: 'https://example.com/a/1.png',
-    });
-
-    expect(said(row)).toContain('picked  1080w  /b/1.png');
-    expect(said(row)).toContain('loaded  /a/1.png  [cache]');
-    expect(row.notes).toHaveLength(1);
-  });
-
-  it('keeps the query, which is the whole of what a resizing CDN varies', () => {
-    // A CDN that serves one file at every width puts the width in the query and
-    // nothing else, so a line that dropped it would render every candidate on
-    // the page as one file.
-    expect(
-      said(rowOf({ srcset: '/i/p.png?w=640&q=80 640w, /i/p.png?w=1080&q=80 1080w', sizes: '100vw' })),
-    ).toContain('picked  1080w  /i/p.png?w=1080&q=80');
-  });
-
-  it('names the host of a file that came from somewhere the page did not', () => {
-    // Which is the common shape of a disagreement worth reading: the page asked
-    // for its own path and an image CDN answered.
-    expect(loadedOf('https://cdn.example.net/i/1080.png')).toBe(
-      'loaded  cdn.example.net/i/1080.png  [cache]',
-    );
-  });
-
-  it('says a data: URI is one, rather than showing a tail of the page instead', () => {
-    // A scheme that carries its own content has no path, so there is no file
-    // name to take — the last segment of one is an arbitrary slice of whatever
-    // the page inlined. The scheme is the part a reader can act on, so this is
-    // the one shape cut from the back.
-    expect(loadedOf('data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7')).toBe(
-      'loaded  data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAA…  [cache]',
-    );
-    expect(loadedOf('javascript:alert(1)')).toBe('loaded  javascript:alert(1)  [cache]');
-  });
-
-  it('cuts a long path from the front, and says it cut it', () => {
-    // The file name is at the end of a path, so the end is the half to keep —
-    // and the `…` is what stops a cut line from reading like a short one.
-    expect(loadedOf('https://example.com/assets/build/2026/09/very/deep/directory/hero-photograph.png')).toBe(
-      'loaded  …s/build/2026/09/very/deep/directory/hero-photograph.png  [cache]',
-    );
-  });
-
-  it('says what it can about a URL that resolves against no base at all', () => {
-    // `baseURI` is what a `<base>` tag says, so it is page content like
-    // everything else here, and a relative candidate against an unusable base
-    // resolves to nothing. The string the page wrote is the honest answer.
-    expect(loadedOf('/i/640.png', 'not a URL')).toBe('loaded  /i/640.png  [cache]');
   });
 });

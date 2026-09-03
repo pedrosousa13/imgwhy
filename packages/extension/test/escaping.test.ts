@@ -133,16 +133,21 @@ function rendered(): { nodes: El[]; host: Page } {
  * somewhere it should not have; the panel names no tag from page content, so
  * anything else found as an element is a tag the page talked it into making.
  *
- * Nineteen names is the whole panel. `mark` is the cache flag, `div` is the box
- * drawn over an image, the two `style` elements are the stylesheet and the one
- * rule that positions that box, and the rest are the shape of the thing: a
- * card, a disclosure and its summary, a title, a head line, a list, an item, a
- * row header, a thumbnail, a name button, a grid of terms and values, a note,
- * and a footer.
+ * Twenty-two names is the whole panel. `mark` is the cache flag, `div` is the
+ * box drawn over an image, the two `style` elements are the stylesheet and the
+ * one rule that positions that box, and the rest are the shape of the thing: a
+ * card, a disclosure and its summary, a title, a count, a list, an item, a row
+ * header, a thumbnail, a name button, a grid of terms and values, a sentence,
+ * and a footer. Three arrived with the redesigned row: `output` is the
+ * verdict, the platform's element for the result of a calculation; `code` is
+ * the descriptor that loaded, a token out of the `srcset` attribute; `small`
+ * is the file name beside it, and the size that stands in for a thumbnail too
+ * small to show one.
  */
 const TAGS = [
   '#shadow-root',
   'button',
+  'code',
   'dd',
   'details',
   'div',
@@ -156,8 +161,10 @@ const TAGS = [
   'li',
   'mark',
   'ol',
+  'output',
   'p',
   'section',
+  'small',
   'style',
   'summary',
 ];
@@ -206,9 +213,8 @@ describe('the panel, given a page written to break out of it', () => {
   });
 
   it('writes a javascript: candidate URL as a word and never as a target', () => {
-    // The 2000w candidate is the one the arithmetic picks at this viewport, so
-    // it is the one the panel names — as the text of a `dd`, which is where
-    // every candidate URL in this panel lands. A candidate is never assigned
+    // Every candidate URL in this panel lands as the text of a `dd` in the
+    // row's files, labelled by its descriptor. A candidate is never assigned
     // to anything: the one property this package gives a URL to is the
     // thumbnail's `src`, and the only URL it may have is the file the browser
     // already loaded.
@@ -216,7 +222,8 @@ describe('the panel, given a page written to break out of it', () => {
     const words = nodes.map((node) => node.textContent);
     const targets = nodes.filter((node) => node.src !== '' || node.srcset !== '');
 
-    expect(words.some((word) => word.includes('2000w  javascript:alert(1)'))).toBe(true);
+    expect(words).toContain('2000w');
+    expect(words).toContain('javascript:alert(1)');
     expect(targets.map((node) => node.src)).toEqual(
       hostile()
         .images.filter((one) => one.currentSrc !== '')
@@ -246,30 +253,32 @@ describe('the panel, given a page written to break out of it', () => {
   it('writes a descriptor the page invented as a word, forged mark and all', () => {
     // The descriptor is the field with no validation behind it at all —
     // `parseSrcset` keeps whatever text stood where a `640w` should have — and
-    // it lands on two lines of the grid. The count of marks is what says the
-    // forgery made no element: three rows, each with a chip on its compact
-    // line and a chip on its `loaded` figure, and the `<mark>` the page asked
-    // for is a word in a `dd`.
+    // it lands on the candidates line, in the sentence, and as the label of a
+    // file. The count of marks is what says the forgery made no element: two
+    // rows loaded a file and carry a chip in the heading and a chip on the
+    // `loaded` URL, the third loaded nothing and carries none, and the
+    // `<mark>` the page asked for is a word in a `dd`.
     const { nodes } = rendered();
     const words = nodes.map((node) => node.textContent);
 
-    expect(words).toContain(`400w, ${DESCRIPTOR}`);
-    expect(words).toContain(`${DESCRIPTOR}  /i/800.png`);
-    expect(nodes.filter((node) => node.name === 'mark')).toHaveLength(6);
+    expect(words).toContain(`400w, ${DESCRIPTOR} (picked)`);
+    expect(words).toContain(DESCRIPTOR);
+    expect(words.some((word) => word.startsWith(`Nothing has loaded yet; when it does, the arithmetic picks ${DESCRIPTOR} —`))).toBe(true);
+    expect(nodes.filter((node) => node.name === 'mark')).toHaveLength(4);
   });
 
-  it('says why the prediction and a hostile loaded URL disagree, and says only that', () => {
-    // The notes live inside the row's own disclosure now rather than standing
-    // in the row, so a `p` whose parent is a `details` inside an `li` is a
-    // note and a `p` in the row's `header` is the compact line.
+  it('says the sentence with the page’s hostile sizes string in it, as text', () => {
+    // The one sentence a collapsed row shows is a `p` in the row's `header`,
+    // and the second image's names the clause at fault — which is the page's
+    // own `<script>` — byte for byte, as the text of that `p`.
     const { nodes } = rendered();
-    const notes = nodes.filter(
-      (node) => node.name === 'p' && node.parent?.name === 'details' && node.parent.parent?.name === 'li',
-    );
+    const sentences = nodes.filter((node) => node.name === 'p' && node.parent?.name === 'header');
 
-    expect(notes.map((node) => node.textContent.slice(0, 25))).toEqual([
-      'picked and loaded disagre',
-    ]);
+    expect(sentences).toHaveLength(3);
+    expect(sentences[1]?.textContent).toBe(
+      "The sizes clause <script>alert('source sizes')</script> could not be read as a length, so " +
+        'there is no width to select against and nothing was picked; fix the sizes attribute.',
+    );
   });
 
   it('leaves nothing in the light tree, so nothing the page wrote is in the page', () => {
