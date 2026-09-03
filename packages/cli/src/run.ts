@@ -1,9 +1,9 @@
 import type { Capture, DeviceProfile } from '@imgwhy/core';
-import { DESKTOP_PROFILE } from '@imgwhy/runner';
-import { formatTrace } from './trace.js';
+import { loadDeviceProfiles } from './config.js';
+import { formatCapture } from './trace.js';
 import { parsePageUrl } from './url.js';
 
-export type CaptureFn = (options: { url: string; profile: DeviceProfile }) => Promise<Capture>;
+export type CaptureFn = (options: { url: string; profiles: DeviceProfile[] }) => Promise<Capture>;
 
 /** What the command writes and the status it leaves behind. */
 export type Outcome = { code: number; stdout: string; stderr: string };
@@ -13,29 +13,42 @@ const USAGE = 'usage: imgwhy <url>';
 const fail = (message: string): Outcome => ({ code: 1, stdout: '', stderr: `${message}\n` });
 
 /**
- * Render one page as one device and trace the first image that has a choice to
- * make. The URL is checked before anything opens a browser.
+ * Render one page as every device profile and trace every image on it.
+ *
+ * The URL and the device set are both checked before anything opens a browser,
+ * so a typo in either costs no browser start.
  */
-export async function run(argv: string[], capture: CaptureFn): Promise<Outcome> {
+export async function run(
+  argv: string[],
+  capture: CaptureFn,
+  /**
+   * The directory the command was run in, defaulted as a relative path rather
+   * than through `process.cwd()`. That call throws where the directory has
+   * been deleted under the command, and a throw in a default parameter leaves
+   * `run` with no Outcome to return; `loadDeviceProfiles` resolves this inside
+   * its own try, so the same failure comes back as a message.
+   */
+  cwd: string = '.',
+): Promise<Outcome> {
   const [raw, ...rest] = argv;
   if (raw === undefined || rest.length > 0) return fail(USAGE);
 
   const target = parsePageUrl(raw);
   if (!target.ok) return fail(target.message);
 
+  const devices = loadDeviceProfiles(cwd);
+  if (!devices.ok) return fail(devices.message);
+
   let captured: Capture;
   try {
-    captured = await capture({ url: target.url, profile: DESKTOP_PROFILE });
+    captured = await capture({ url: target.url, profiles: devices.profiles });
   } catch (error) {
     return fail(error instanceof Error ? error.message : String(error));
   }
 
-  const traced = captured.runs[0]?.images.find((image) => image.candidates.length > 1);
-  if (!traced) {
-    return fail(
-      `No image on ${captured.url} carries more than one srcset candidate, so nothing selects a file.`,
-    );
+  if (!captured.runs.some((deviceRun) => deviceRun.images.length > 0)) {
+    return fail(`${captured.url} carries no <img> element, so there is nothing to explain.`);
   }
 
-  return { code: 0, stdout: `${formatTrace(captured, traced)}\n`, stderr: '' };
+  return { code: 0, stdout: `${formatCapture(captured)}\n`, stderr: '' };
 }
