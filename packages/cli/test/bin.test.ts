@@ -164,6 +164,104 @@ describe('the imgwhy command', () => {
     );
   }, 120_000);
 
+  it('resolves a picture per device, and names the source the sizes came from', async () => {
+    const ran = await imgwhy(plain, `${server.url}/picture-sources.html`);
+
+    expect(ran.stderr).toBe('');
+    expect(ran.code).toBe(0);
+    expect(ran.stdout).toContain('images   2 on 5 devices');
+
+    // What the hero offered is three different things, because three
+    // different elements answered for it.
+    expect(ran.stdout).toContain(
+      '  candidates  640w, 1080w, 1920w on iPhone SE, iPhone 15 Pro, Pixel 8',
+    );
+    expect(ran.stdout).toContain('  candidates  640w, 1080w on iPad');
+    expect(ran.stdout).toContain('  candidates  1080w, 1920w on Desktop');
+    expect(ran.stdout).toContain('  sizes       100vw on iPhone SE, iPhone 15 Pro, Pixel 8');
+    expect(ran.stdout).toContain('  sizes       75vw from a matching <source> on iPad');
+    expect(ran.stdout).toContain('  sizes       50vw from a matching <source> on Desktop');
+
+    // Nothing says "differs", so the browser downloaded what the resolved
+    // source says it should have — on every device, including the three that
+    // fell through to the `<img>`.
+    expect(ran.stdout).not.toContain('differs');
+    expect(withoutBytes(tableUnder(ran.stdout, 'image 1 of 2'))).toEqual([
+      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'file'],
+      ['iPhone SE', '375×667', '2', '100vw', '375px', '750px', '1080w', '1080.png'],
+      ['iPhone 15 Pro', '393×852', '3', '100vw', '393px', '1179px', '1920w', '1920.png'],
+      ['Pixel 8', '412×915', '2.625', '100vw', '412px', '1082px', '1920w', '1920.png'],
+      // 75vw of 820 is 615, which needs 1230 at DPR 2 — more than the source
+      // offers, so its largest wins.
+      ['iPad', '820×1180', '2', '75vw', '615px', '1230px', '1080w', '1080.png'],
+      ['Desktop', '1440×900', '1', '50vw', '720px', '720px', '1080w', '1080.png'],
+    ]);
+  }, 120_000);
+
+  it('says a matching source wrote no sizes, so the img\'s played no part', async () => {
+    const ran = await imgwhy(plain, `${server.url}/picture-sources.html`);
+
+    expect(ran.code).toBe(0);
+    // The three narrow devices matched no source and read the tag's 120px.
+    // The two wide ones matched a source that wrote no `sizes` at all, so the
+    // 100vw default applied and the tag's 120px played no part — which is what
+    // the browser did, and why nothing here says "differs".
+    expect(ran.stdout).toContain('  candidates  160w, 480w on iPhone SE, iPhone 15 Pro, Pixel 8');
+    expect(ran.stdout).toContain('  candidates  200w, 300w on iPad, Desktop');
+    expect(ran.stdout).toContain('  sizes       120px on iPhone SE, iPhone 15 Pro, Pixel 8');
+    expect(ran.stdout).toContain(
+      '  sizes       (absent) from a matching <source> on iPad, Desktop',
+    );
+    expect(withoutBytes(tableUnder(ran.stdout, 'image 2 of 2'))).toEqual([
+      ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'file'],
+      ['iPhone SE', '375×667', '2', '120px', '120px', '240px', '480w', '480.png'],
+      ['iPhone 15 Pro', '393×852', '3', '120px', '120px', '360px', '480w', '480.png'],
+      ['Pixel 8', '412×915', '2.625', '120px', '120px', '315px', '480w', '480.png'],
+      [
+        'iPad',
+        '820×1180',
+        '2',
+        'absent → 100vw default',
+        '820px',
+        '1640px',
+        '300w',
+        '300.png',
+      ],
+      [
+        'Desktop',
+        '1440×900',
+        '1',
+        'absent → 100vw default',
+        '1440px',
+        '1440px',
+        '300w',
+        '300.png',
+      ],
+    ]);
+  }, 120_000);
+
+  it('counts the CSS background images a page painted and says they select nothing', async () => {
+    const ran = await imgwhy(plain, `${server.url}/backgrounds.html`);
+
+    expect(ran.stderr).toBe('');
+    expect(ran.code).toBe(0);
+    // Two tiles everywhere, and the banner only where the viewport reaches the
+    // width its media query asks for. The gradient is painted on all five and
+    // counted on none, because it is not a file.
+    expect(lines(ran.stdout)[2]).toBe(
+      'css      2 background images on iPhone SE, iPhone 15 Pro, Pixel 8, iPad, ' +
+        '3 background images on Desktop. A CSS background image has no selection mechanism ' +
+        'at all, so imgwhy counts them and explains nothing further.',
+    );
+  }, 120_000);
+
+  it('says nothing about backgrounds on a page whose CSS paints none', async () => {
+    const ran = await imgwhy(plain, `${server.url}/gallery.html`);
+
+    expect(ran.code).toBe(0);
+    expect(ran.stdout).not.toContain('background image');
+  }, 120_000);
+
   it('still traces a page whose only image had nothing to choose from', async () => {
     const ran = await imgwhy(plain, `${server.url}/no-srcset.html`);
 

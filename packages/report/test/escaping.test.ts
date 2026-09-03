@@ -12,6 +12,15 @@ import { attributes, scripts, unread } from './document.js';
  * every candidate URL are attributes off the page's own markup; and the id is
  * derived from a DOM path, which carries whatever the page put in an
  * attribute selector. None of it is imgwhy's to trust.
+ *
+ * Two devices, and two runs that saw the one image differently, because that
+ * is what a `<picture>` does: a `<source>` matched on the second device and
+ * answered for both the candidates and the `sizes`. The row heading then
+ * writes one block per offer, each naming the devices it was offered to — so
+ * this document holds the markup that arrangement produces, and the checks
+ * below read a device name as element text inside a heading as well as in a
+ * column heading. A one-device capture renders one bare offer and would leave
+ * every one of those strings unexamined.
  */
 const hostile = (): Capture => ({
   url: 'https://evil.example/"><script>alert(\'page url\')</script>',
@@ -22,6 +31,12 @@ const hostile = (): Capture => ({
       name: '<img src=x onerror=alert(\'device name\')>',
       viewport: { width: 1440, height: 900 },
       dpr: 1,
+    },
+    {
+      id: 'tablet',
+      name: '<img src=x onerror=alert(\'second device name\')>',
+      viewport: { width: 820, height: 1180 },
+      dpr: 2,
     },
   ],
   runs: [
@@ -49,6 +64,39 @@ const hostile = (): Capture => ({
           loading: 'lazy',
         },
       ],
+      // Painted, so the head carries the background line too and every check
+      // below reads a document that holds it.
+      backgroundImageCount: 3,
+    },
+    {
+      deviceId: 'tablet',
+      images: [
+        {
+          // The same image, so the two sightings are one row of the matrix
+          // and the heading has two offers to write rather than two rows.
+          id: 'html > body > img[alt="<script>alert(\'alt text\')</script>"]',
+          selector: 'html > body > img[alt="<script>alert(\'alt text\')</script>"]',
+          candidates: [
+            {
+              url: '/i/300.png" onmouseover="alert(\'source candidate\')',
+              w: 300,
+              x: null,
+              raw: '300w" onerror="alert(2)',
+            },
+          ],
+          // Off the `<source>`, which is what makes the heading write the
+          // sentence naming both elements — the one place the report writes
+          // an escaped `<` of its own beside a string off the page.
+          sizes: '50vw" onload="alert(\'source sizes\')</script>',
+          sizesSource: 'source',
+          renderedWidth: 410,
+          currentSrc: 'data:text/html,<script>alert(\'source current src\')</script>',
+          naturalWidth: 300,
+          transferBytes: 8102,
+          loading: 'lazy',
+        },
+      ],
+      backgroundImageCount: 3,
     },
   ],
 });
@@ -75,6 +123,8 @@ const OWN_VALUES = new Set([
   'col',
   'id',
   'flag',
+  'offer',
+  'on',
   'sizes',
   'none',
   'candidates',
@@ -149,7 +199,7 @@ describe('a report of a page written to break out of it', () => {
     const benign = renderReport({
       ...hostile(),
       url: 'https://example.com/gallery',
-      runs: [{ deviceId: 'desktop', images: [] }],
+      runs: [{ deviceId: 'desktop', images: [], backgroundImageCount: 0 }],
     });
 
     expect(scripts(report)[1].text).toBe(scripts(benign)[1].text);
@@ -202,6 +252,27 @@ describe('a report of a page written to break out of it', () => {
     );
   });
 
+  it('escapes a device name in a row heading, which is where a picture puts one', () => {
+    // The heading names the devices an offer was offered to, so a device name
+    // is element text there as well as in a column heading. Nothing else in
+    // this suite reads it in that position.
+    expect(report).toContain(
+      '<span class="on">on &lt;img src=x onerror=alert(&#39;second device name&#39;)&gt;</span>',
+    );
+  });
+
+  it('writes its own angle brackets in the source note once, and not twice over', () => {
+    // The one sentence in the report that carries an escaped `<` of its own,
+    // beside a `sizes` string off the page. The entities are the report's own
+    // markup and are written as literal template text, so a reader sees
+    // `<source>`; escaping them again would show them `&lt;source&gt;`.
+    expect(report).toContain(
+      'read off the matching &lt;source&gt; rather than the &lt;img&gt;</span>',
+    );
+    expect(report).not.toContain('&amp;lt;source');
+    expect(report).not.toContain('&amp;lt;img');
+  });
+
   it('escapes the timestamp and the device name, which no reader would suspect', () => {
     expect(report).toContain('&lt;script&gt;alert(&#39;captured at&#39;)&lt;/script&gt;');
     expect(report).toContain('&lt;img src=x onerror=alert(&#39;device name&#39;)&gt;');
@@ -214,7 +285,10 @@ describe('a report of a page written to break out of it', () => {
   });
 
   it('escapes a hostile page URL in the message for a page with no image', () => {
-    const empty: Capture = { ...hostile(), runs: [{ deviceId: 'desktop', images: [] }] };
+    const empty: Capture = {
+      ...hostile(),
+      runs: [{ deviceId: 'desktop', images: [], backgroundImageCount: 3 }],
+    };
 
     const report = renderReport(empty);
 

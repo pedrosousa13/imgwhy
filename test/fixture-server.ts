@@ -39,6 +39,13 @@ const shell = (title: string, body: string): string =>
   .pixel { width: 1px; height: 1px }
   .hidden { display: none }
   .third { width: 33.33%; height: auto }
+  /* Two elements a browser paints a file onto with no way to choose it. */
+  .tile { width: 100px; height: 100px; background-image: url(/img/100.png) }
+  /* A gradient is painted, and it is not a file, so nothing counts it. */
+  .fade { width: 100%; height: 40px; background-image: linear-gradient(#000, #fff) }
+  /* A background only the widest profile paints, so the count is per render. */
+  .wide { width: 100%; height: 40px }
+  @media (min-width: 1000px) { .wide { background-image: url(/img/200.png) } }
 </style>
 </head>
 <body>
@@ -160,6 +167,76 @@ const PAGES: Record<string, string> = {
     'unknown bytes',
     `<main><img class="logo" src="${DATA_URL}" alt="inline">
 <img class="logo" src="http://127.0.0.1:1/img/640.png" alt="refused"></main>`,
+  ),
+
+  // Two `<picture>` elements, so one page carries every way a `sizes` string
+  // can be arrived at.
+  //
+  // The hero has two sources and matches them in document order: at 1440 both
+  // conditions hold and the first one wins, so a run that read the last match
+  // would resolve 75vw instead of 50vw. Below 700 neither holds and the `<img>`
+  // answers for both the candidates and the `sizes`.
+  //
+  // The badge's source carries no `sizes` of its own, which is the case that
+  // separates a source that matched from a source that answered for the
+  // `sizes` too: the 100vw default applies and the tag's own `sizes` is read
+  // past entirely.
+  //
+  // No file appears in both images' candidate lists, and that is load-bearing
+  // rather than tidy. Blink's per-render memory cache can hand an element a
+  // larger copy it already holds instead of selecting at all — the cache
+  // mismatch the design names — so a badge offering the file the hero just
+  // downloaded measures the cache rather than the markup, intermittently.
+  '/picture-sources.html': shell(
+    'picture sources',
+    `<main><picture>
+  <source media="(min-width: 1200px)" sizes="50vw"
+    srcset="/img/1080.png 1080w, /img/1920.png 1920w">
+  <source media="(min-width: 700px)" sizes="75vw"
+    srcset="/img/640.png 640w, /img/1080.png 1080w">
+  <img class="hero" sizes="100vw"
+    srcset="/img/640.png 640w, /img/1080.png 1080w, /img/1920.png 1920w"
+    src="/img/640.png" alt="hero">
+</picture>
+<picture>
+  <source media="(min-width: 700px)" srcset="/img/200.png 200w, /img/300.png 300w">
+  <img class="logo" sizes="120px" srcset="/img/160.png 160w, /img/480.png 480w"
+    src="/img/160.png" alt="badge">
+</picture></main>`,
+  ),
+
+  // A `<picture>` whose only `<source>` is written after the `<img>`, which is
+  // the one place a source can sit and still be in the DOM without being read.
+  //
+  // A browser walks the `<picture>`'s children in tree order and stops when it
+  // reaches the `<img>`, so this source is never consulted however well its
+  // `media` matches — and at 1440 it matches. `querySelectorAll('source')`
+  // finds it anyway, which is why the page exists: a run that collected the
+  // sources rather than walking to the tag resolves 90vw against the source's
+  // own candidates, and the browser resolved 120px against the tag's.
+  '/source-after-img.html': shell(
+    'source after img',
+    `<main><picture>
+  <img class="logo" sizes="120px" srcset="/img/160.png 160w, /img/480.png 480w"
+    src="/img/160.png" alt="badge">
+  <source media="(min-width: 700px)" sizes="90vw"
+    srcset="/img/200.png 200w, /img/300.png 300w">
+</picture></main>`,
+  ),
+
+  // A page whose CSS paints files no `srcset` reaches. Two tiles carry one on
+  // every render and the banner carries one only where the viewport is wide
+  // enough, so the count is a property of a render rather than of the page. The
+  // gradient is painted too and is not a file, so nothing counts it.
+  '/backgrounds.html': shell(
+    'backgrounds',
+    `<main><img class="hero" sizes="100vw"
+  srcset="/img/640.png 640w, /img/1080.png 1080w, /img/1920.png 1920w"
+  src="/img/640.png" alt="hero">
+<div class="tile"></div>
+<div class="tile"></div>
+<div class="wide"></div>
+<div class="fade"></div></main>`,
   ),
 
   // Three images with three different reasons to pick a file: `w` descriptors

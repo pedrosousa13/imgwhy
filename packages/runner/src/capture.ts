@@ -2,7 +2,7 @@ import type { Capture, CapturedImage, DeviceProfile, DeviceRun } from '@imgwhy/c
 import { parseSrcset } from '@imgwhy/core';
 import { type Browser, type CDPSession, chromium } from 'playwright';
 import { alignImageIds } from './align.js';
-import { type RawImage, collectImages } from './collect.js';
+import { type RawImage, collectImages, countBackgroundImages } from './collect.js';
 import { type TransferLog, recordTransfers } from './transfers.js';
 
 export type CaptureOptions = {
@@ -51,10 +51,16 @@ export async function capturePage({
           const transfers = recordTransfers(session);
           await page.goto(url, { waitUntil: 'load' });
           const raw = await page.evaluate(collectImages);
+          // A second call rather than one that answers both, so each function
+          // sent into the page stays one that references nothing outside
+          // itself. The page is not navigating between them, so the two read
+          // the same render.
+          const backgroundImageCount = await page.evaluate(countBackgroundImages);
           landedOn = page.url();
           runs.push({
             deviceId: profile.id,
             images: raw.map((image) => toCapturedImage(image, transfers)),
+            backgroundImageCount,
           });
         } catch (failure) {
           // Detaching is attempted here too — a page that never loaded reaches

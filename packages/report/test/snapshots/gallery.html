@@ -128,6 +128,16 @@
     overflow-wrap: anywhere;
   }
 
+  th.image .offer + .offer {
+    margin-top: 0.7rem;
+  }
+
+  th.image .on {
+    display: block;
+    margin-top: 0.3rem;
+    font-weight: 600;
+  }
+
   ul.candidates {
     margin: 0.4rem 0 0;
     padding: 0;
@@ -315,7 +325,7 @@
 <dt>picked</dt><dd class="picked">—</dd>
 </dl>
 <p class="reason">The page shipped no srcset, so there was nothing to select.</p></section>
-<section class="panel"><h3 class="id">html &gt; body &gt; main &gt; img:nth-of-type(1)</h3><p class="from">Starts from iPhone SE: a 375 px viewport at DPR 2.</p><div class="controls">
+<section class="panel"><h3 class="id">html &gt; body &gt; main &gt; img:nth-of-type(1)</h3><p class="from">Starts from iPhone SE: a 375 px viewport at DPR 2, and the candidates that render was offered.</p><div class="controls">
 <label class="control">sizes<textarea class="sizes-input"></textarea></label>
 <label class="control">viewport<input class="viewport-input" type="number" min="1" step="1"></label>
 <label class="control">DPR<input class="dpr-input" type="number" min="0.1" step="any"></label>
@@ -329,7 +339,7 @@
 </dl>
 <ul class="candidates"><li><span class="raw">640w</span><span class="url">/i/640.png</span><span class="mark"></span></li><li><span class="raw">1080w</span><span class="url">/i/1080.png</span><span class="mark">← picked</span></li><li><span class="raw">1920w</span><span class="url">/i/1920.png</span><span class="mark"></span></li></ul>
 <p class="reason">375 css px × DPR 2 = 750 physical pixels, and 1080w is the smallest candidate at or above that.</p></section>
-<section class="panel"><h3 class="id">html &gt; body &gt; main &gt; img:nth-of-type(2)</h3><p class="from">Starts from iPhone SE: a 375 px viewport at DPR 2.</p><div class="controls">
+<section class="panel"><h3 class="id">html &gt; body &gt; main &gt; img:nth-of-type(2)</h3><p class="from">Starts from iPhone SE: a 375 px viewport at DPR 2, and the candidates that render was offered.</p><div class="controls">
 <label class="control">sizes<textarea class="sizes-input"></textarea></label>
 <label class="control">viewport<input class="viewport-input" type="number" min="1" step="1"></label>
 <label class="control">DPR<input class="dpr-input" type="number" min="0.1" step="any"></label>

@@ -35,33 +35,96 @@ const bytesArrived = (transferBytes: number | null): string =>
 /** `label` and value, on the label column every image block shares. */
 const field = (label: string, value: string): string => `  ${label.padEnd(10)}  ${value}`;
 
+const plural = (count: number, noun: string): string =>
+  `${count} ${noun}${count === 1 ? '' : 's'}`;
+
+/**
+ * The `sizes` string this device resolved against, and the element it came off
+ * where that was not the `<img>`.
+ *
+ * A `<picture>` can put the `sizes` string on the `<source>` whose `media`
+ * matched, and then the attribute a reader finds on the tag is not the one the
+ * browser read. Where it came off the tag — which is every image outside a
+ * `<picture>`, and every one inside a `<picture>` whose matching source wrote
+ * no `sizes` of its own — the tag is where a reader would look anyway, and the
+ * line says nothing extra.
+ *
+ * `media` is the only thing a `<source>` is evaluated on. Its `type` is not
+ * read, so nothing here can say a format decided anything, because none did.
+ */
+const offered = (image: CapturedImage): string => {
+  const element = image.sizesSource === 'source' ? ' from a matching <source>' : '';
+  return `${image.sizes ?? '(absent)'}${element}`;
+};
+
+/** One reading per sighting of one image, keyed by the device that took it. */
+const readings = (
+  sightings: Sighting[],
+  of: (image: CapturedImage) => string,
+): [device: string, value: string][] =>
+  sightings.map(({ device, image }) => [device.name, of(image)]);
+
+/** Every distinct value with the devices that measured it, in first-seen order. */
+function grouped(measurements: [device: string, value: string][]): [string, string[]][] {
+  const devicesByValue = new Map<string, string[]>();
+  for (const [device, value] of measurements) {
+    const measured = devicesByValue.get(value);
+    if (measured) measured.push(device);
+    else devicesByValue.set(value, [device]);
+  }
+  return [...devicesByValue];
+}
+
 /**
  * One value where every device agrees, or every value with the devices that
  * measured it.
  *
- * For the image an image block cannot table — nothing was selected, so there
- * is no arithmetic to lay out — this is what keeps the report per device. The
- * devices usually agree, and five lines saying the same thing would bury the
- * images that do differ, so agreement stays one value and names no device.
+ * The devices usually agree, and five lines saying the same thing would bury
+ * the images that do differ, so agreement stays one value and names no device.
  * Disagreement is the case that has to: a bare `12345, unknown` says two
  * things were measured and leaves a reader with no way to tell which device
  * measured which.
  */
-function perDevice(sightings: Sighting[], of: (image: CapturedImage) => string): string {
-  const devicesByValue = new Map<string, string[]>();
-  for (const { device, image } of sightings) {
-    const value = of(image);
-    const measured = devicesByValue.get(value);
-    if (measured) measured.push(device.name);
-    else devicesByValue.set(value, [device.name]);
-  }
-
-  return [...devicesByValue]
+function agreed(measurements: [device: string, value: string][]): string {
+  const groups = grouped(measurements);
+  return groups
     .map(([value, measured]) =>
-      devicesByValue.size === 1 ? value : `${value} on ${measured.join(', ')}`,
+      groups.length === 1 ? value : `${value} on ${measured.join(', ')}`,
     )
     .join(', ');
 }
+
+/**
+ * One `label` line per distinct value, naming the devices where they differ.
+ *
+ * `<picture>` is why this is not one line. With a `<source>` in play, what an
+ * image offered is not the same on every device: the candidates come off
+ * whichever source matched, and a block that wrote them once would be writing
+ * one device's markup over the others'. A list of candidates has commas in it,
+ * so `agreed` cannot say this on one line — its own separator would disappear
+ * into theirs.
+ *
+ * Where every device agrees, which is every page with no `<picture>` on it, it
+ * is one line and names no device, exactly as it was.
+ */
+const fieldPerValue = (
+  label: string,
+  measurements: [device: string, value: string][],
+): string[] => {
+  const groups = grouped(measurements);
+  return groups.map(([value, measured]) =>
+    field(label, groups.length === 1 ? value : `${value} on ${measured.join(', ')}`),
+  );
+};
+
+/**
+ * The same, for one figure per sighting of one image.
+ *
+ * This is what keeps the report per device for the image an image block cannot
+ * table — nothing was selected, so there is no arithmetic to lay out.
+ */
+const perDevice = (sightings: Sighting[], of: (image: CapturedImage) => string): string =>
+  agreed(readings(sightings, of));
 
 /**
  * One device's line of the arithmetic, keyed by the column each value prints
@@ -117,22 +180,61 @@ function table(rows: Row[]): string[] {
  * Explain every image on a page across every device, as arithmetic a reader
  * can check.
  *
- * An image gets one block: what it offered, which is the same on every device,
- * and then one table row per device, which is where the devices disagree. That
- * way a page with a dozen images stays a page you can scan, and the interesting
- * column — the file each device picked — reads straight down.
+ * An image gets one block: what it offered, and then one table row per device,
+ * which is where the devices disagree. What it offered is usually one thing —
+ * and where a `<picture>` put a different `<source>` in front of each device,
+ * it is one line per distinct value, naming the devices. That way a page with
+ * a dozen images stays a page you can scan, and the interesting column — the
+ * file each device picked — reads straight down.
  */
 export function formatCapture(capture: Capture): string {
   const groups = groupById(capture);
   const head = [
     `url      ${capture.url}`,
     `images   ${groups.length} on ${capture.devices.length} devices`,
+    ...backgrounds(capture),
   ];
   const blocks = groups.flatMap(([id, sightings], index) => [
     '',
     ...imageBlock(capture.url, capture.devices, id, sightings, index + 1, groups.length),
   ]);
   return [...head, ...blocks].join('\n');
+}
+
+/**
+ * How many files this page's CSS painted, and why that is all there is to say
+ * about them.
+ *
+ * A CSS background image has no selection mechanism at all: it reaches the
+ * browser as a URL in a stylesheet, with no `srcset` beside it and no `sizes`
+ * to resolve. There is nothing to select between, so there is no arithmetic to
+ * table — which is exactly why the count has to be stated rather than left
+ * out. A trace of every `<img>` on a page reads like a trace of every image on
+ * it, and on a page that paints its hero in CSS it is not one.
+ *
+ * Per device, because the count is a property of a render: a media query can
+ * paint a background at one viewport and not at the next. Where they agree,
+ * `agreed` says so once.
+ *
+ * Nothing at all where nothing was painted. A line reading `0 background
+ * images` on every page would bury the pages that have some.
+ */
+function backgrounds(capture: Capture): string[] {
+  if (capture.runs.every((run) => run.backgroundImageCount === 0)) return [];
+
+  const counted: [string, string][] = [];
+  for (const device of capture.devices) {
+    // Device order, and a device that never rendered has nothing to report.
+    // Every run's device is known by here: `groupById` has already refused a
+    // capture whose run names one the capture does not describe.
+    const run = capture.runs.find((one) => one.deviceId === device.id);
+    if (run) counted.push([device.name, plural(run.backgroundImageCount, 'background image')]);
+  }
+
+  return [
+    `css      ${agreed(counted)}. A CSS background image has no selection mechanism at all, ` +
+      'so imgwhy counts them and explains nothing further.',
+  ];
 }
 
 /** Every image, keyed by the id that holds across runs, in first-seen order. */
@@ -163,7 +265,7 @@ function imageBlock(
 ): string[] {
   const first = sightings[0];
   if (!first) throw new Error(`the capture groups image "${id}" with no sighting to explain`);
-  const { candidates, sizes } = first.image;
+  const { candidates } = first.image;
   const lazy = sightings.some((s) => s.image.loading === 'lazy');
   const lines = [`image ${index} of ${total}  ${id}${lazy ? '   loading=lazy' : ''}`];
 
@@ -189,10 +291,23 @@ function imageBlock(
   // `w` and `x` descriptors are answered by different questions, and a page
   // may carry both. `sizes` only enters the `w` case; a browser reads past it
   // otherwise, however the tag was written.
-  const byWidth = candidates.some((c) => c.w != null);
+  //
+  // Asked of every sighting rather than of the first, because a `<picture>`
+  // can put a `w` descriptor in front of one device and an `x` in front of
+  // the next, and a line dropped on the strength of one render would be a
+  // line dropped for all of them.
+  const byWidth = sightings.some((s) => s.image.candidates.some((c) => c.w != null));
+  const wrote = sightings.some((s) => s.image.sizes !== null);
 
-  lines.push(field('candidates', candidates.map((c) => c.raw).join(', ')));
-  if (byWidth || sizes !== null) lines.push(field('sizes', sizes ?? '(absent)'));
+  lines.push(
+    ...fieldPerValue(
+      'candidates',
+      readings(sightings, (image) => image.candidates.map((c) => c.raw).join(', ')),
+    ),
+  );
+  if (byWidth || wrote) {
+    lines.push(...fieldPerValue('sizes', readings(sightings, offered)));
+  }
 
   // A responsive layout can move an image, and then the id names where it sat
   // on some devices only. Say where it sat on the others.

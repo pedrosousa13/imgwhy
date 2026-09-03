@@ -15,6 +15,9 @@ const canonical: DeviceProfile = {
 
 /** The widest of the default profiles, which is the last of them. */
 const desktop = DEFAULT_PROFILES[4];
+/** The narrowest, at 375, and the one in the middle, at 820. */
+const phone = DEFAULT_PROFILES[0];
+const tablet = DEFAULT_PROFILES[3];
 
 let server: FixtureServer;
 /** A second origin, because `127.0.0.1:A` and `127.0.0.1:B` are two of them. */
@@ -213,6 +216,135 @@ describe('capturePage', () => {
     expect(logo?.sizes).toBe('100vw');
     expect(logo?.renderedWidth).toBe(120);
     expect(logo?.currentSrc).toBe(`${server.url}/img/1080.png`);
+  });
+
+  it('resolves a picture against the first source whose media matches', async () => {
+    const capture = await capturePage({
+      url: `${server.url}/picture-sources.html`,
+      profiles: [desktop],
+    });
+
+    // Both conditions hold at 1440. Document order decides, so the first one
+    // does: 50vw, and not the 75vw the second source asks for.
+    const hero = capture.runs[0]?.images[0];
+    expect(hero?.candidates.map((c) => c.raw)).toEqual(['1080w', '1920w']);
+    expect(hero?.sizes).toBe('50vw');
+    expect(hero?.sizesSource).toBe('source');
+    // 720 css px at DPR 1 needs 720, so the browser took the 1080 file — which
+    // is what the resolved source says it should have.
+    expect(hero?.currentSrc).toBe(`${server.url}/img/1080.png`);
+  });
+
+  it('resolves a picture against a later source where the first does not match', async () => {
+    const capture = await capturePage({
+      url: `${server.url}/picture-sources.html`,
+      profiles: [tablet],
+    });
+
+    const hero = capture.runs[0]?.images[0];
+    expect(hero?.candidates.map((c) => c.raw)).toEqual(['640w', '1080w']);
+    expect(hero?.sizes).toBe('75vw');
+    expect(hero?.sizesSource).toBe('source');
+  });
+
+  it('falls through to the img where no source media matches', async () => {
+    const capture = await capturePage({
+      url: `${server.url}/picture-sources.html`,
+      profiles: [phone],
+    });
+
+    // 375 matches neither condition, so the tag itself answers for both the
+    // candidates and the `sizes`.
+    const hero = capture.runs[0]?.images[0];
+    expect(hero?.candidates.map((c) => c.raw)).toEqual(['640w', '1080w', '1920w']);
+    expect(hero?.sizes).toBe('100vw');
+    expect(hero?.sizesSource).toBe('img');
+    expect(hero?.currentSrc).toBe(`${server.url}/img/1080.png`);
+  });
+
+  it('leaves the sizes null where the matching source wrote none, and says source', async () => {
+    const capture = await capturePage({
+      url: `${server.url}/picture-sources.html`,
+      profiles: [desktop],
+    });
+
+    // The source wrote no `sizes`, so the 100vw default applied and the
+    // `<img sizes="120px">` played no part. `sizesSource` says which element
+    // answered; the null says it wrote nothing.
+    const badge = capture.runs[0]?.images[1];
+    expect(badge?.candidates.map((c) => c.raw)).toEqual(['200w', '300w']);
+    expect(badge?.sizes).toBeNull();
+    expect(badge?.sizesSource).toBe('source');
+    // The measurement that settles it. 100vw of 1440 at DPR 1 needs 1440, so
+    // the source's largest wins; the tag's 120px would have needed 120 and
+    // taken the 200 file. The browser took the 300 one.
+    expect(badge?.currentSrc).toBe(`${server.url}/img/300.png`);
+  });
+
+  it('reads the img sizes only where no source matched at all', async () => {
+    const capture = await capturePage({
+      url: `${server.url}/picture-sources.html`,
+      profiles: [phone],
+    });
+
+    const badge = capture.runs[0]?.images[1];
+    expect(badge?.candidates.map((c) => c.raw)).toEqual(['160w', '480w']);
+    expect(badge?.sizes).toBe('120px');
+    expect(badge?.sizesSource).toBe('img');
+    // 120 css px at DPR 2 needs 240, so the larger of the tag's two wins.
+    expect(badge?.currentSrc).toBe(`${server.url}/img/480.png`);
+  });
+
+  it('reads no source written after the img, because a browser stops at the tag', async () => {
+    const capture = await capturePage({
+      url: `${server.url}/source-after-img.html`,
+      profiles: [desktop],
+    });
+
+    // The source's `media` matches at 1440 and it is still not consulted. A
+    // browser walks the `<picture>`'s children in tree order and stops when it
+    // reaches the `<img>`, so a source written after the tag is out of reach —
+    // however easily a query for every source in the element finds it.
+    const badge = capture.runs[0]?.images[0];
+    expect(badge?.candidates.map((c) => c.raw)).toEqual(['160w', '480w']);
+    expect(badge?.sizes).toBe('120px');
+    expect(badge?.sizesSource).toBe('img');
+    // The measurement that settles it. 120 css px at DPR 1 needs 120, so the
+    // tag's smaller file wins; the source's 90vw of 1440 would have needed
+    // 1296 and taken the 300 file. The browser took the 160 one.
+    expect(badge?.currentSrc).toBe(`${server.url}/img/160.png`);
+  });
+
+  it('counts the elements a render painted a CSS background image on', async () => {
+    const capture = await capturePage({
+      url: `${server.url}/backgrounds.html`,
+      profiles: [tablet, desktop],
+    });
+
+    // Two tiles on both, and the banner only where the viewport reaches the
+    // width its media query asks for. A figure for the whole capture would be
+    // a figure neither render produced, which is why this sits on the run.
+    expect(capture.runs.map((run) => run.backgroundImageCount)).toEqual([2, 3]);
+  }, 60_000);
+
+  it('counts a painted file and not a painted gradient, which is no file at all', async () => {
+    const capture = await capturePage({
+      url: `${server.url}/backgrounds.html`,
+      profiles: [tablet],
+    });
+
+    // The page paints four backgrounds at this width: two tiles, the banner's
+    // empty rule, and a gradient. Only the two that name a file are counted.
+    expect(capture.runs[0]?.backgroundImageCount).toBe(2);
+  });
+
+  it('counts nothing on a page whose CSS paints no file', async () => {
+    const capture = await capturePage({
+      url: `${server.url}/gallery.html`,
+      profiles: [desktop],
+    });
+
+    expect(capture.runs[0]?.backgroundImageCount).toBe(0);
   });
 
   it('records the URL the page ended on, not the one that was requested', async () => {
