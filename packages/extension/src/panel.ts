@@ -1,4 +1,4 @@
-import type { Panel } from './explain.js';
+import type { Line, Panel } from './explain.js';
 
 /**
  * The panel, and the one function a click sends into the page second.
@@ -101,18 +101,21 @@ export function renderPanel(panel: Panel): 'opened' {
   // Rules for the panel's own elements need none of this. A page selector
   // cannot match a node in a shadow tree, so the only route in was
   // inheritance and the `:host` rule has already closed it. They select on
-  // tag names alone, which is not a shortcut: a class name is a property
-  // written to an element, and `privacy.test.ts` keeps this package's list of
-  // written properties as short as the panel can be built with. Semantic
-  // elements cost nothing and are the reason that list holds no class name.
+  // tag names, with one exception: the verdict carries one of three tone
+  // classes, because a tone is a state and not a kind of element, and the
+  // three words are the extension's own. `privacy.test.ts` keeps this
+  // package's list of written properties as short as the panel can be built
+  // with, and that class is the one it costs.
   //
-  // The palette, the type scale and the two font stacks are the report's.
-  // `report/src/style.ts` already has a visual language for this data — a
-  // muted label column, ink figures, monospace for anything that is an
-  // address or a descriptor — and a second dialect for the same numbers would
-  // read as a second tool. What is not the report's is the size: this is an
-  // instrument sitting on somebody's page, so it is 480px, bottom-right, and
-  // it collapses.
+  // The palette and the two font stacks are the report's. `report/src/style.ts`
+  // already has a visual language for this data — a muted label column, ink
+  // figures, monospace for anything that is an address or a descriptor — and a
+  // second dialect for the same numbers would read as a second tool. What is
+  // not the report's is the size and the emphasis: this is an instrument
+  // sitting on somebody's page, so it is 480px, bottom-right, and it
+  // collapses; and on every row one token is the answer — the descriptor of
+  // the file that loaded — so that token is the largest thing on the row and
+  // everything else is set to recede from it.
   style.textContent = `
     :host {
       all: initial !important;
@@ -162,10 +165,18 @@ export function renderPanel(panel: Panel): 'opened' {
       box-shadow: 0 10px 30px rgba(23, 24, 26, 0.16);
     }
 
-    /* The page-level summary, which is also the handle that collapses the panel. */
+    /*
+     * The head: the title, the count, and the two inputs.
+     *
+     * The viewport width and the ratio are the two numbers that explain every
+     * row below, so they are set as a pair of read-only fields — a small label
+     * over a figure — rather than as a line of metadata. Every sentence in the
+     * panel names them again, and this is where a reader checks them.
+     */
     section > details > summary {
-      padding: 10px 12px;
+      padding: 10px 12px 9px;
       border-bottom: 1px solid #d7dae0;
+      cursor: pointer;
     }
     h1 {
       display: inline;
@@ -174,9 +185,33 @@ export function renderPanel(panel: Panel): 'opened' {
       font-weight: 700;
       color: #17181a;
     }
-    section > details > summary p {
-      margin: 2px 0 0;
+    section > details > summary > p {
+      display: inline;
+      margin: 0 0 0 8px;
       color: #5c6066;
+      font-variant-numeric: tabular-nums;
+    }
+    section > details > summary > dl {
+      display: grid;
+      grid-template-columns: auto auto;
+      justify-content: start;
+      column-gap: 24px;
+      margin: 6px 0 0;
+    }
+    section > details > summary dt {
+      grid-row: 1;
+      color: #5c6066;
+      font-size: 10px;
+      line-height: 1.4;
+    }
+    section > details > summary dd {
+      grid-row: 2;
+      margin: 0;
+      color: #17181a;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.3;
       font-variant-numeric: tabular-nums;
     }
 
@@ -186,7 +221,7 @@ export function renderPanel(panel: Panel): 'opened' {
       list-style: none;
     }
     li {
-      padding: 8px 12px;
+      padding: 9px 12px 8px;
       border-top: 1px solid #d7dae0;
     }
     li:first-child {
@@ -203,67 +238,151 @@ export function renderPanel(panel: Panel): 'opened' {
       background: #f4f5f7;
     }
 
-    /* Thumbnail in one column, name and gist stacked in the other. */
+    /* Thumbnail in one column; heading and sentence stacked in the other. */
     header {
       display: grid;
       grid-template-columns: 44px minmax(0, 1fr);
-      gap: 1px 10px;
+      gap: 2px 10px;
       align-items: start;
     }
+
+    /*
+     * The thumbnail, which fills its box rather than fitting inside it.
+     *
+     * \`contain\` was the blank-thumbnail bug. A 568×152 banner fitted inside a
+     * 44px square is a strip 12px tall, and a 1763×393 one is 10px, and on a
+     * light ground a strip of a mostly-light banner is nothing at all. \`cover\`
+     * crops instead, so a wide or a tall image shows a recognisable piece of
+     * itself at full height. The box stays small; it is an identifier.
+     *
+     * The ground is checked, so a transparent image reads as transparent
+     * rather than as missing — drawn with a gradient, because a stylesheet
+     * that loaded an image would be a request this extension does not make.
+     */
     img {
       grid-row: span 2;
       box-sizing: border-box;
       width: 44px;
       height: 44px;
       overflow: hidden;
-      object-fit: contain;
-      background: #f4f5f7;
+      object-fit: cover;
+      background-color: #ffffff;
+      background-image: repeating-conic-gradient(#e3e5e9 0 25%, #ffffff 0 50%);
+      background-size: 10px 10px;
       border: 1px solid #d7dae0;
       border-radius: 4px;
       color: #5c6066;
       font-size: 8px;
       line-height: 1.15;
     }
+    /* The size, where the image is too small for a thumbnail to show anything. */
+    header > small {
+      grid-row: span 2;
+      display: flex;
+      box-sizing: border-box;
+      width: 44px;
+      height: 44px;
+      align-items: center;
+      justify-content: center;
+      background: #f4f5f7;
+      border: 1px dashed #d7dae0;
+      border-radius: 4px;
+      color: #5c6066;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 10px;
+    }
+
+    /*
+     * The heading: verdict, descriptor, name, mark — in that order, and set so
+     * the eye lands on them in that order.
+     *
+     * The verdict is a small tinted word, fixed to one width so the
+     * descriptors line up in a column down the panel. The descriptor is the
+     * largest type on the row, because it is the answer to the question the
+     * reader came with. The name is monospace and dim beside it, there to
+     * confirm which image and not to compete.
+     */
     h2 {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 2px 8px;
       margin: 0;
       font-size: 12px;
+      font-weight: 400;
+    }
+    output {
+      display: inline-block;
+      box-sizing: border-box;
+      min-width: 5.6em;
+      padding: 1px 6px 0;
+      border-radius: 3px;
+      font-size: 10px;
       font-weight: 600;
+      line-height: 1.6;
+      letter-spacing: 0.01em;
+      text-align: center;
+    }
+    output.good {
+      background: #e3f3e8;
+      color: #1b5e33;
+    }
+    output.warn {
+      background: #fbeccd;
+      color: #7a4e00;
+    }
+    output.quiet {
+      background: #eceef1;
+      color: #5c6066;
     }
     /*
      * The name is a button because activating it does something: it brings the
      * image it names into view. \`all: initial\` on the host does not reach a
      * descendant's own UA styles, so the whole of a button's chrome is undone
-     * here by hand — and \`text-align: left\` matters, since a centred file
-     * name in a column of left-aligned ones reads as a different kind of
-     * thing.
+     * here by hand.
      */
     button {
-      display: block;
-      box-sizing: border-box;
-      width: 100%;
+      display: inline-flex;
+      align-items: baseline;
+      gap: 7px;
+      min-width: 0;
       min-height: 24px;
       margin: 0;
-      padding: 1px 0;
+      padding: 0;
       border: 0;
       background: none;
       color: #17181a;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
-      font-weight: 600;
-      line-height: 1.4;
+      font: inherit;
       text-align: left;
-      overflow-wrap: anywhere;
       cursor: pointer;
     }
-    button:hover {
-      color: #6b21a8;
+    button > code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      line-height: 1.3;
+      white-space: nowrap;
     }
-    header p {
-      margin: 0;
+    button > small {
       color: #5c6066;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 11px;
+      font-weight: 400;
+      line-height: 1.4;
       overflow-wrap: anywhere;
+    }
+    button:hover > code {
+      color: #6b21a8;
+    }
+
+    /* The one sentence, set to recede from the heading and to read in a column. */
+    header > p {
+      margin: 0;
+      max-width: 62ch;
+      color: #3b3f46;
+      font-size: 12px;
+      line-height: 1.5;
     }
 
     /*
@@ -271,11 +390,10 @@ export function renderPanel(panel: Panel): 'opened' {
      * explanation. \`mark\` is the element the platform already has for a figure
      * flagged for reference, so the flag needs no class of its own — and its
      * \`title\` is the mark's meaning, reachable from the mark. The same
-     * reasoning is written out in the row's own note, because a tooltip is a
-     * hover affordance and cannot be the only copy of anything.
+     * reasoning is written out in the footer, because a tooltip is a hover
+     * affordance and cannot be the only copy of anything.
      */
     mark {
-      margin-left: 6px;
       padding: 0 4px;
       border-radius: 3px;
       background: #f3e8ff;
@@ -285,12 +403,15 @@ export function renderPanel(panel: Panel): 'opened' {
       letter-spacing: 0.04em;
       cursor: help;
     }
-
-    /* The arithmetic, which opens. Indented to the column the name starts in. */
-    li details {
-      margin: 6px 0 0 54px;
+    dd > mark {
+      margin-left: 6px;
     }
-    summary {
+
+    /* The arithmetic, which opens. Indented to the column the heading starts in. */
+    li details {
+      margin: 4px 0 0 54px;
+    }
+    li summary {
       min-height: 24px;
       padding: 2px 0;
       color: #5c6066;
@@ -303,38 +424,37 @@ export function renderPanel(panel: Panel): 'opened' {
       outline-offset: 2px;
     }
 
-    dl {
+    li dl {
       display: grid;
-      grid-template-columns: 86px minmax(0, 1fr);
+      grid-template-columns: 92px minmax(0, 1fr);
       margin: 4px 0 0;
       column-gap: 10px;
       row-gap: 2px;
     }
-    dt {
+    li dt {
       color: #5c6066;
+      font-size: 11px;
+      line-height: 1.6;
     }
-    dd {
+    li dd {
       margin: 0;
       overflow-wrap: anywhere;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.6;
       font-variant-numeric: tabular-nums;
     }
     /*
-     * The second grid in a row is the addresses, whole and uncut, and it is
-     * separated from the arithmetic rather than continuing it — the figures
-     * above are compared down a column and these are read one at a time. The
-     * adjacent-sibling selector is what says so without a class name.
+     * The second opening is the addresses, whole and uncut, and it is set
+     * apart from the steps rather than continuing them — the figures above are
+     * compared down a column and these are read one at a time.
      */
-    dl + dl {
-      margin-top: 8px;
-      padding-top: 8px;
+    li details details {
+      margin: 8px 0 0;
+      padding-top: 6px;
       border-top: 1px dashed #d7dae0;
     }
-    dl + dl dt,
-    dl + dl dd {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 11px;
-    }
-    dl + dl dd {
+    li details details dd {
       color: #5c6066;
     }
 
@@ -447,6 +567,36 @@ export function renderPanel(panel: Panel): 'opened' {
     frame.textContent = '';
   };
 
+  /**
+   * One grid of labels and values, with a mark on every held figure.
+   *
+   * The design's requirement as an element rather than a sentence: a figure
+   * the cache could have contaminated is marked where it is shown, and the
+   * footer says once what the mark means. `textContent` removes every existing
+   * child, so the value is written before the mark is appended and never
+   * after — the other order deletes the mark and leaves the footer's sentence
+   * pointing at nothing.
+   */
+  const gridOf = (lines: Line[], meaning: string | null) => {
+    const grid = document.createElement('dl');
+    for (const line of lines) {
+      const label = document.createElement('dt');
+      label.textContent = line.label;
+      grid.appendChild(label);
+
+      const value = document.createElement('dd');
+      value.textContent = line.value;
+      if (line.held && meaning !== null) {
+        const held = document.createElement('mark');
+        held.textContent = 'cache';
+        held.title = meaning;
+        value.appendChild(held);
+      }
+      grid.appendChild(value);
+    }
+    return grid;
+  };
+
   const section = document.createElement('section');
 
   /**
@@ -473,9 +623,20 @@ export function renderPanel(panel: Panel): 'opened' {
   // be reinterpreted as a tag however the page wrote it — there is no parser
   // in the path to reinterpret it. `escaping.test.ts` holds that as behaviour
   // and refuses the properties that would undo it.
-  const head = document.createElement('p');
-  head.textContent = panel.head;
-  heading.appendChild(head);
+  const count = document.createElement('p');
+  count.textContent = panel.head.images;
+  heading.appendChild(count);
+
+  // The two inputs, as fields. Every row's sentence names them again.
+  heading.appendChild(
+    gridOf(
+      [
+        { label: 'viewport width', value: panel.head.width, held: false },
+        { label: 'pixel ratio', value: panel.head.dpr, held: false },
+      ],
+      null,
+    ),
+  );
   card.appendChild(heading);
 
   const list = document.createElement('ol');
@@ -502,91 +663,96 @@ export function renderPanel(panel: Panel): 'opened' {
      * a request for the document. It shows its `alt` instead, and so does a
      * `src` that fails: `explain.ts` words that string so a box that will not
      * draw still says which image it was.
+     *
+     * An image too small to show anything gets no thumbnail at all. A `1×1`
+     * drawn into the box is a square of one colour, which reads as a thumbnail
+     * that failed, so the box says the size instead.
      */
-    const thumb = document.createElement('img');
-    thumb.alt = row.alt;
-    if (row.file !== '') thumb.src = row.file;
-    top.appendChild(thumb);
+    if (row.tiny !== null) {
+      const size = document.createElement('small');
+      size.textContent = row.tiny;
+      top.appendChild(size);
+    } else {
+      const thumb = document.createElement('img');
+      thumb.alt = row.alt;
+      if (row.file !== '') thumb.src = row.file;
+      top.appendChild(thumb);
+    }
 
+    /**
+     * The heading: the verdict, then the descriptor and the name, then the
+     * mark where a file loaded.
+     *
+     * `output` is the element the platform has for the result of a
+     * calculation, which is what a verdict is. Its class is the tone — one of
+     * three words the extension owns — and it is the only class in the panel.
+     * The word is what carries the meaning; the tone is what lets a reader
+     * find the warnings in a column of rows before reading any of them.
+     */
     const named = document.createElement('h2');
+    const verdict = document.createElement('output');
+    verdict.textContent = row.verdict.word;
+    verdict.className = row.verdict.tone;
+    named.appendChild(verdict);
+
+    /**
+     * The name is a button because activating it does something: it brings the
+     * image it names into view. Inside it, the descriptor of the file that
+     * loaded is a `code` token — it is a token, out of the `srcset` attribute
+     * as the page wrote it — and the file name is `small`, which is the
+     * element for a side note, and here it is one.
+     */
     const name = document.createElement('button');
-    name.textContent = row.name;
+    const token = document.createElement('code');
+    token.textContent = row.loaded;
+    name.appendChild(token);
+    const file = document.createElement('small');
+    file.textContent = row.name;
+    name.appendChild(file);
     named.appendChild(name);
+
+    if (row.mark !== null) {
+      const flag = document.createElement('mark');
+      flag.textContent = 'cache';
+      flag.title = row.mark;
+      named.appendChild(flag);
+    }
     top.appendChild(named);
 
-    const gist = document.createElement('p');
-    gist.textContent = row.gist;
-    // The mark's word, then the mark. `textContent` removes every existing
-    // child, so the order is load-bearing: written after the append it would
-    // delete the flag and leave the footer's sentence pointing at nothing.
-    const flag = document.createElement('mark');
-    flag.textContent = 'cache';
-    flag.title = row.mark;
-    gist.appendChild(flag);
-    top.appendChild(gist);
+    // The one sentence, which is the whole of what the collapsed row says.
+    const why = document.createElement('p');
+    why.textContent = row.why;
+    top.appendChild(why);
 
     item.appendChild(top);
 
     /**
-     * The arithmetic, which opens.
+     * The arithmetic, which opens, and the files, which open again.
      *
-     * Closed by default, and that is the layout decision the maintainer's
-     * screenshot forced. Twenty-three images each standing eight figures, a
-     * DOM path and four paragraphs tall is a panel four times more prose than
-     * data, taller than any screen, with one row of one image visible. Every
-     * word of it is still here — nothing was cut, only moved behind the
-     * summary a reader opens for the row they are actually asking about.
+     * Two disclosures nested rather than one, because they answer two
+     * questions in the order a reader asks them. The first is "because x y z":
+     * the steps, aligned, no prose. The second is "which files, exactly": the
+     * whole URLs and where the image sat. Closed by default, both of them, so
+     * the default view of twenty-three images is twenty-three sentences.
      */
     const more = document.createElement('details');
     const opens = document.createElement('summary');
-    opens.textContent = 'arithmetic, files and where it sat';
+    opens.textContent = 'why, step by step';
     more.appendChild(opens);
-
-    const fields = document.createElement('dl');
-    for (const line of row.lines) {
-      const label = document.createElement('dt');
-      label.textContent = line.label;
-      fields.appendChild(label);
-
-      const value = document.createElement('dd');
-      value.textContent = line.value;
-      // The design's requirement, as an element rather than a sentence: a
-      // figure the cache could have contaminated is marked where it is shown,
-      // and the footer says once what the mark means.
-      if (line.held) {
-        const held = document.createElement('mark');
-        held.textContent = 'cache';
-        held.title = row.mark;
-        value.appendChild(held);
-      }
-      fields.appendChild(value);
-    }
-    more.appendChild(fields);
-
-    // The addresses, whole. The `loaded` and `picked` lines above are cut to
-    // fit a column, and a cut URL is a URL two files can share — which is
-    // exactly the reading a row whose own note says they disagree cannot
-    // survive. These are uncut and selectable, so a difference in a directory
-    // is a difference a reader can see and copy.
-    if (row.sources.length > 0) {
-      const files = document.createElement('dl');
-      for (const source of row.sources) {
-        const label = document.createElement('dt');
-        label.textContent = source.label;
-        files.appendChild(label);
-
-        const value = document.createElement('dd');
-        value.textContent = source.url;
-        files.appendChild(value);
-      }
-      more.appendChild(files);
-    }
+    more.appendChild(gridOf(row.steps, row.mark));
 
     for (const note of row.notes) {
       const said = document.createElement('p');
       said.textContent = note;
       more.appendChild(said);
     }
+
+    const deeper = document.createElement('details');
+    const files = document.createElement('summary');
+    files.textContent = 'files and where it sat';
+    deeper.appendChild(files);
+    deeper.appendChild(gridOf(row.details, row.mark));
+    more.appendChild(deeper);
 
     item.appendChild(more);
 
@@ -642,7 +808,7 @@ export function renderPanel(panel: Panel): 'opened' {
   /**
    * What the extension cannot do, behind one line.
    *
-   * The three sentences are the design's and every word of them is kept. What
+   * The sentences are the design's and every word of them is kept. What
    * changed is that they no longer stand between a reader and the data: three
    * paragraphs at the same size and weight as the figures made the panel read
    * as documentation with numbers in it. Closed by default, opened once by

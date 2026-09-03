@@ -308,7 +308,7 @@ describe('a row, reached with a keyboard', () => {
       descendants(row)
         .map((node) => node.name)
         .filter((name) => name === 'button' || name === 'summary'),
-    ).toEqual(['button', 'summary']);
+    ).toEqual(['button', 'summary', 'summary']);
   });
 
   it('marks the image when the row takes focus, the same as a hover does', () => {
@@ -491,10 +491,10 @@ describe('the panel, laid out so twenty-three images can be read', () => {
     ).toEqual([false, false, false]);
   });
 
-  it('keeps the arithmetic, the addresses and the DOM path inside the row’s disclosure', () => {
+  it('keeps the arithmetic, the addresses and the DOM path inside the row’s disclosures', () => {
     // Demoting the path was the fourth of the maintainer's notes. It is still
-    // there and still selectable text; it is simply no longer the most
-    // prominent thing on a row.
+    // there and still selectable text; it is simply two openings down, with
+    // the whole URLs, where a reader who wants it goes.
     const host = many();
     render(host, [image({ at: 0, selector: 'html > body > figure > a > picture > img' })]);
     const open = rows(host)[0]?.children.filter((node) => node.name === 'details')[0];
@@ -503,10 +503,10 @@ describe('the panel, laid out so twenty-three images can be read', () => {
     expect(inside.map((node) => node.textContent)).toContain(
       'html > body > figure > a > picture > img',
     );
-    expect(inside.filter((node) => node.name === 'dl')).toHaveLength(1);
+    expect(inside.filter((node) => node.name === 'dl')).toHaveLength(2);
   });
 
-  it('says in one line, per row, what happened, which is what a scan reads', () => {
+  it('says in one heading and one sentence, per row, what happened, which is what a scan reads', () => {
     const host = many();
     render(host, [
       image({
@@ -521,8 +521,11 @@ describe('the panel, laid out so twenty-three images can be read', () => {
 
     expect(top?.children.map((node) => node.textContent)).toEqual([
       '',
-      '/i/1080.png',
-      'picked 640w, loaded a different filecache',
+      'oversized1080w1080.pngcache',
+      'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
+        'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser already held ' +
+        '1080w and reused it rather than choosing again; an empty cache is the only way to see ' +
+        'the real pick.',
     ]);
   });
 });

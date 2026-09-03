@@ -346,45 +346,117 @@ describe('the panel a click injects', () => {
     expect(host.getElementById(HOST_ID)?.parent?.name).toBe('html');
   });
 
-  it('writes the head, one item per image, and the footer', () => {
+  it('writes the head as two inputs and a count, one item per image, and the footer', () => {
     const host = page();
     inPage(source, host);
     const nodes = nodesIn(host);
 
     expect(nodes.filter((node) => node.name === 'li')).toHaveLength(2);
-    // The row is named after the file the browser loaded, which is what a
-    // reader recognises it by. The DOM path that used to head it is a line of
-    // the grid now.
-    expect(nodes.filter((node) => node.name === 'h2').map((node) => node.textContent)).toEqual([
-      '/i/640.png',
-      '/i/1080.png',
+    // The two numbers every row's sentence names, laid out as fields under
+    // the title rather than as a line of metadata.
+    expect(gridsIn(host)[0]).toEqual([
+      'dt: viewport width',
+      'dd: 1440 px',
+      'dt: pixel ratio',
+      'dd: DPR 1 (standard)',
     ]);
-    expect(said(host)).toContain('p: viewport 1440×900 · DPR 1 · 2 images');
+    expect(said(host)).toContain('p: 2 images');
   });
 
-  it('writes a term and then its own description, all the way down the grid', () => {
+  it('heads every row with the verdict, then the descriptor that loaded, then the name', () => {
+    // The maintainer's three messages, as an order of elements: whether it
+    // was right, which size loaded, and which file that was. The verdict is an
+    // `output` — the platform's element for the result of a calculation — the
+    // descriptor is a `code` token inside the name button, and the file name
+    // is `small` beside it.
     const host = page();
     inPage(source, host);
-    const [first] = gridsIn(host);
+    const headings = nodesIn(host).filter((node) => node.name === 'h2');
+
+    expect(
+      headings.map((h2) => h2.children.map((node) => `${node.name}: ${node.textContent}`)),
+    ).toEqual([
+      ['output: fit', 'button: 640w640.png', 'mark: cache'],
+      ['output: oversized', 'button: 1080w1080.png', 'mark: cache'],
+    ]);
+    expect(
+      headings.map((h2) =>
+        h2.children[1]?.children.map((node) => `${node.name}: ${node.textContent}`),
+      ),
+    ).toEqual([
+      ['code: 640w', 'small: 640.png'],
+      ['code: 1080w', 'small: 1080.png'],
+    ]);
+  });
+
+  it('carries the verdict’s tone as the one class in the panel, and the word beside it', () => {
+    // Colour is never alone: the word is the verdict and the class is how a
+    // reader finds the warnings in a column before reading any of them. The
+    // three tone words are the extension's own, so no page string reaches a
+    // class name.
+    const host = page();
+    inPage(source, host);
+    const verdicts = nodesIn(host).filter((node) => node.name === 'output');
+
+    expect(verdicts.map((node) => [node.textContent, node.className])).toEqual([
+      ['fit', 'good'],
+      ['oversized', 'warn'],
+    ]);
+  });
+
+  it('says one sentence per row, and nothing else prose-shaped until a row is opened', () => {
+    // "Succinctly. If I want more info maybe I can interact with it." The
+    // collapsed row is the heading and one sentence; every paragraph beyond
+    // that is inside a closed disclosure.
+    const host = page();
+    inPage(source, host);
+    const rows = nodesIn(host).filter((node) => node.name === 'li');
+
+    for (const row of rows) {
+      const top = row.children[0];
+      expect(top?.name).toBe('header');
+      expect(top?.children.map((node) => node.name)).toEqual(['img', 'h2', 'p']);
+    }
+    expect(rows.map((row) => row.children[0]?.children[2]?.textContent)).toEqual([
+      'Your screen is 1440 px wide at DPR 1 (standard); sizes gives it 33vw, which is 475 px, so ' +
+        'it needs 475 device pixels — and 640w is the smallest file that covers that.',
+      'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
+        'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser already held ' +
+        '1080w and reused it rather than choosing again; an empty cache is the only way to see ' +
+        'the real pick.',
+    ]);
+  });
+
+  it('opens once to the arithmetic as steps, and again to the files, both closed by default', () => {
+    // Three levels, each answering one question. The first opening is the
+    // "because x y z"; the second is which files, exactly, and where the image
+    // sat. Nested rather than side by side, because a reader asks them in
+    // that order.
+    const host = page();
+    inPage(source, host);
+    const [row] = nodesIn(host).filter((node) => node.name === 'li');
+    const steps = row?.children[1];
+    const files = steps?.children.filter((node) => node.name === 'details')[0];
+
+    expect(steps?.name).toBe('details');
+    expect(steps?.open).toBe(false);
+    expect(steps?.children.map((node) => node.name)).toEqual(['summary', 'dl', 'details']);
+    expect(steps?.children[0]?.textContent).toBe('why, step by step');
+    expect(files?.open).toBe(false);
+    expect(files?.children.map((node) => node.name)).toEqual(['summary', 'dl']);
+    expect(files?.children[0]?.textContent).toBe('files and where it sat');
+  });
+
+  it('writes a term and then its own description, all the way down both grids', () => {
+    const host = page();
+    inPage(source, host);
+    const [, steps, files] = gridsIn(host);
 
     // The pairing asserted as an order rather than as two counts, because the
     // grid pairs by position: the label a reader reads a value against is the
     // node before it, and nothing about the number of each kind says which one
     // that was.
-    //
-    // `loaded` comes back as the file and the mark's word run together, and
-    // that is a real `textContent` read rather than a quirk of the stub: the
-    // mark is a child of the `dd`, and reading a node's text concatenates its
-    // descendants. It is what says the mark is inside the value it qualifies.
-    expect(first).toEqual([
-      'dt: alt',
-      'dd: A person at a desk',
-      'dt: rendered box',
-      'dd: 475×317',
-      'dt: selector',
-      'dd: html > body > img:nth-of-type(1)',
-      'dt: candidates',
-      'dd: 640w, 1080w',
+    expect(steps).toEqual([
       'dt: sizes',
       'dd: 33vw',
       'dt: clause used',
@@ -392,11 +464,27 @@ describe('the panel a click injects', () => {
       'dt: css px',
       'dd: 475px',
       'dt: needed',
-      'dd: 475px',
-      'dt: picked',
-      'dd: 640w  /i/640.png',
+      'dd: 475px × DPR 1 = 475px',
+      'dt: candidates',
+      'dd: 640w (picked), 1080w',
+    ]);
+    // `loaded` comes back as the URL and the mark's word run together, and
+    // that is a real `textContent` read rather than a quirk of the stub: the
+    // mark is a child of the `dd`, and reading a node's text concatenates its
+    // descendants. It is what says the mark is inside the value it qualifies.
+    expect(files).toEqual([
       'dt: loaded',
-      'dd: /i/640.pngcache',
+      'dd: https://example.com/i/640.pngcache',
+      'dt: 640w',
+      'dd: https://example.com/i/640.png',
+      'dt: 1080w',
+      'dd: https://example.com/i/1080.png',
+      'dt: alt',
+      'dd: A person at a desk',
+      'dt: rendered box',
+      'dd: 475×317',
+      'dt: selector',
+      'dd: html > body > img:nth-of-type(1)',
       'dt: bytes',
       'dd: unknown',
     ]);
@@ -410,41 +498,21 @@ describe('the panel a click injects', () => {
     inPage(source, host);
     const marks = nodesIn(host).filter((node) => node.name === 'mark');
 
-    expect(marks.map((node) => node.textContent)).toEqual([
-      'cache',
-      'cache',
-      'cache',
-      'cache',
+    expect(marks.map((node) => node.textContent)).toEqual(['cache', 'cache', 'cache', 'cache']);
+    // One chip in each row's heading, beside the descriptor that loaded, and
+    // one on the `loaded` URL inside the row's files.
+    expect(marks.map((node) => node.parent?.name)).toEqual(['h2', 'dd', 'h2', 'dd']);
+    // The write order in `renderPanel` is what keeps the mark inside the
+    // `dd`: `textContent` removes every existing child, so the value has to be
+    // written before the mark is appended and never after.
+    expect(marks.filter((node) => node.parent?.name === 'dd').map((node) => node.parent?.textContent)).toEqual([
+      'https://example.com/i/640.pngcache',
+      'https://example.com/i/1080.pngcache',
     ]);
-    // One chip on each row's compact line, where the loaded file is named
-    // while a reader is scanning, and one on the `loaded` figure inside the
-    // row's own grid.
-    expect(marks.map((node) => node.parent?.name)).toEqual(['p', 'dd', 'p', 'dd']);
-    // The figure and the mark's word as one string, which is what a real
-    // `textContent` read of the `dd` returns — the mark is a child of it, and
-    // reading a node's text concatenates its descendants. Asserting the figure
-    // alone here would be asserting that the mark is not in the `dd`, and it
-    // is the write order in `renderPanel` that keeps it there: `textContent`
-    // removes every existing child, so the value has to be written before the
-    // mark is appended and never after.
-    expect(marks.map((node) => node.parent?.textContent)).toEqual([
-      'picked 640w, and that is what loadedcache',
-      '/i/640.pngcache',
-      'picked 640w, loaded a different filecache',
-      '/i/1080.pngcache',
-    ]);
-    // And every chip says what it means, where the mark is. The row's own
-    // note carries the same reasoning in a form a keyboard reaches.
+    // And every chip says what it means, where the mark is.
     expect([...new Set(marks.map((node) => node.title))]).toEqual([
       'what the browser has, not what it chose',
     ]);
-  });
-
-  it('says why the second image loaded a file the arithmetic did not pick', () => {
-    const host = page();
-    inPage(source, host);
-
-    expect(said(host).some((line) => line.includes('not necessarily a bug'))).toBe(true);
   });
 
   it('says bytes are unknown, and shows no figure in their place', () => {
@@ -475,7 +543,7 @@ describe('the panel a click injects', () => {
     inPage(source, host, panelOf(reading()));
 
     expect(nodesIn(host).filter((node) => node.name === 'li')).toEqual([]);
-    expect(said(host)).toContain('p: viewport 1440×900 · DPR 1 · 0 images');
+    expect(said(host)).toContain('p: 0 images');
   });
 
   it('says every word as text rather than as markup', () => {
@@ -584,17 +652,98 @@ describe('the panel, checked as a boundary against page styles', () => {
     expect(css).not.toContain('url(');
   });
 
-  it('selects on tag names alone, so the panel writes no class to any element', () => {
-    // Which is why the elements are semantic ones. `privacy.test.ts` allows
-    // this package two written properties — an id and the words it says — and
-    // a class name would be a third for no gain a `dl` does not already give.
+  it('selects on tag names, and on the three tone classes the verdict carries, and no other', () => {
+    // Which is why the elements are semantic ones. `privacy.test.ts` keeps
+    // this package's list of written properties as short as the panel can be
+    // built with, and a class is on it for one reason: a tone is a state and
+    // not a kind of element, so no tag name can carry it. The three words are
+    // the extension's own, and this is the closed list of them.
+    const host = page();
+    inPage(source, host);
+    const classes = [...stylesheetIn(host).matchAll(/\.([a-z][a-z0-9-]*)/g)]
+      .map((found) => found[1])
+      // A selector, not a full stop: `rgba(16, 18, 22, 0.18)` and `0.01em`
+      // have one of those and are not classes. A class in this sheet only
+      // ever follows `output`.
+      .filter((name) => !/^\d/.test(name ?? ''));
+
+    expect([...new Set(classes)].sort()).toEqual(['good', 'quiet', 'warn']);
+    expect(stylesheetIn(host)).not.toMatch(/^\s*\.[a-z]/im);
+  });
+});
+
+/**
+ * The thumbnail, checked as a stylesheet, because the bug was one.
+ *
+ * The maintainer's screenshot: a 568×152 banner and a 1763×393 banner as
+ * blank grey squares, a 640×506 card fine. The box fitted the image inside it
+ * — `object-fit: contain` in a 44px square — so the first banner drew 44×12
+ * and the second 44×10, a strip of a mostly-light image on a light ground. The
+ * card, nearly square, filled the box. There is no browser here to draw it, so
+ * the rule is read as text, which is where the bug was.
+ */
+describe('the thumbnail, checked as the rule that draws it', () => {
+  const source = String(renderPanel);
+
+  /** The `img` block of the panel's stylesheet, as `property: value` lines. */
+  const thumbRule = (host: Page): string[] => {
+    const block = /\n\s*img\s*\{([^}]*)\}/.exec(stylesheetIn(host))?.[1] ?? '';
+    return block
+      .split(';')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+  };
+
+  it('fills the box rather than fitting inside it, so a banner shows a crop and not a strip', () => {
     const host = page();
     inPage(source, host);
 
-    // A selector, not a full stop: `rgba(16, 18, 22, 0.18)` has one of those
-    // and is not a class. What this refuses is a rule whose selector opens
-    // with a dot, which is the only shape a class selector takes.
-    expect(stylesheetIn(host)).not.toMatch(/^\s*\.[a-z]/im);
+    expect(thumbRule(host)).toContain('object-fit: cover');
+    expect(thumbRule(host)).not.toContain('object-fit: contain');
+  });
+
+  it('draws a checked ground, so a transparent image reads as transparent and not as missing', () => {
+    // A gradient rather than an image, because a stylesheet that loaded a
+    // file would be a request this extension does not make — and
+    // `privacy.test.ts` refuses a `url(` anywhere in the package.
+    const host = page();
+    inPage(source, host);
+
+    expect(thumbRule(host).some((line) => /^background-image: repeating-conic-gradient\(/.test(line))).toBe(true);
+    expect(thumbRule(host)).toContain('background-size: 10px 10px');
+  });
+
+  it('keeps the box small, because it is an identifier and not a preview', () => {
+    const host = page();
+    inPage(source, host);
+
+    expect(thumbRule(host)).toContain('width: 44px');
+    expect(thumbRule(host)).toContain('height: 44px');
+  });
+
+  it('says the size in place of a thumbnail where the image is too small to show one', () => {
+    // A `1×1` overlay drawn into the box is a square of the checked ground,
+    // which reads as a thumbnail that failed. The size is the honest picture.
+    const host = page();
+    inPage(
+      source,
+      host,
+      panelOf(
+        reading({
+          images: [
+            image({ at: 0, renderedWidth: 1, renderedHeight: 1, currentSrc: 'https://example.com/clear.png' }),
+            image({ at: 1, renderedWidth: 568, renderedHeight: 152, currentSrc: 'https://example.com/banner.png' }),
+          ],
+        }),
+      ),
+    );
+    const tops = nodesIn(host).filter((node) => node.name === 'header');
+
+    expect(tops.map((top) => top.children[0]?.name)).toEqual(['small', 'img']);
+    expect(tops[0]?.children[0]?.textContent).toBe('1×1');
+    expect(nodesIn(host).filter((node) => node.name === 'img').map((node) => node.src)).toEqual([
+      'https://example.com/banner.png',
+    ]);
   });
 });
 

@@ -70,7 +70,7 @@ const GLOBALS = new Set([
  * as innocent as it gets — and `caches.open` or `chrome.storage.local.set`
  * would name none either if their objects were ever allowed.
  *
- * Twenty-three names, and the list is longer than it was because the panel says
+ * Twenty-eight names, and the list is longer than it was because the panel says
  * more than it did. It still groups into four things and nothing else.
  *
  * The extension's own work: register, inject, and swallow the one rejection an
@@ -93,11 +93,15 @@ const GLOBALS = new Set([
  * got in, and the rules below refuse those by name whatever this list has
  * grown to.
  *
- * `startsWith` is the newest and it replaced two. `explain.ts` used to reduce a
- * URL to the last segment of its path — a `split` and a `pop` — and rendered
- * two candidates that differed only in a directory as one file. It shows the
- * path now, and asks `startsWith` the one question that separates a path from a
- * `data:` payload: whether it opens with a slash.
+ * `startsWith` asks the one question that separates a path from a `data:`
+ * payload: whether it opens with a slash. `split` and `test` are how the name
+ * beside a row's headline is found once it is a path — the segments, and
+ * whether one ends in an extension — and they are safe for the same reason the
+ * rest of this group is: a segment of a URL the page already loaded is not a
+ * destination, and nothing here can make one of it. The whole URL is still
+ * shown, two openings down, so nothing is lost to the shortening.
+ * `toUpperCase` capitalises the first letter of a sentence that otherwise
+ * follows a dash.
  *
  * `addEventListener` and `scrollIntoView` are the pointing half, and they are
  * the two entries that read like a reach into the page. Neither is.
@@ -133,9 +137,12 @@ const CALLED = new Set([
   'round',
   'scrollIntoView',
   'slice',
+  'split',
   'startsWith',
+  'test',
   'then',
   'toLowerCase',
+  'toUpperCase',
   'unshift',
 ]);
 
@@ -148,16 +155,23 @@ const CALLED = new Set([
  * assignment, with no name any list of dangerous APIs would hold.
  *
  * It was two names for two slices — the host's id and the words it says — and
- * it is six now, because the panel draws a thumbnail and holds two
- * disclosures. Each is written on an element the panel made and nowhere else,
- * and the four new ones divide sharply:
+ * it is seven now, because the panel draws a thumbnail, holds disclosures, and
+ * leads every row with a verdict. Each is written on an element the panel made
+ * and nowhere else, and the new ones divide sharply:
  *
  * `alt`, `title` and `open` carry text and a boolean. None of them can name a
  * destination in any browser: an `alt` is read aloud, a `title` is a tooltip,
- * an `open` is a disclosure's state. They are here because the panel now says
- * what a thumbnail shows where it will not draw, what the cache mark means
- * where the mark is, and that the card starts open — and every one of those is
+ * an `open` is a disclosure's state. They are here because the panel says what
+ * a thumbnail shows where it will not draw, what the cache mark means where
+ * the mark is, and that the card starts open — and every one of those is
  * something the platform's own element does with no class name and no script.
+ *
+ * `className` is the verdict's tone, and it is the one class in the panel. It
+ * takes one of three words the extension owns — `good`, `warn`, `quiet` — and
+ * never a page string, and `panel.test.ts` holds the stylesheet to exactly
+ * those three. It is here because a tone is a state and not a kind of element,
+ * so no tag name can carry it, and a reader has to be able to find the
+ * warnings in a column of rows before reading any of them.
  *
  * `src` is the one that is a request, and it is the reason `WHOLE` below
  * exists. It is not allowed here as a name a contributor may write freely: the
@@ -166,10 +180,9 @@ const CALLED = new Set([
  * checked as one.
  *
  * `innerHTML` is still refused, by absence here and by name in
- * `escaping.test.ts`, and the class name is still not here — which is why the
- * panel's elements are semantic ones and its stylesheet selects on tag names.
+ * `escaping.test.ts`.
  */
-const WRITTEN = new Set(['alt', 'id', 'open', 'src', 'textContent', 'title']);
+const WRITTEN = new Set(['alt', 'className', 'id', 'open', 'src', 'textContent', 'title']);
 
 /**
  * Properties whose value may only ever be a whole value read off something.
@@ -353,13 +366,13 @@ describe('the extension, checked against storing or sending anything', () => {
     expect([...reached].sort()).toEqual([...GLOBALS].sort());
   });
 
-  it('calls twenty-five properties, and no others', () => {
+  it('calls twenty-eight properties, and no others', () => {
     const calls = new Set(Object.values(modules).flatMap((text) => surfaceOf(text).called));
 
     expect([...calls].sort()).toEqual([...CALLED].sort());
   });
 
-  it('writes six properties, and no others', () => {
+  it('writes seven properties, and no others', () => {
     const writes = new Set(Object.values(modules).flatMap((text) => surfaceOf(text).written));
 
     expect([...writes].sort()).toEqual([...WRITTEN].sort());
