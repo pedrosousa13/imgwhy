@@ -14,6 +14,10 @@ import { image, reading } from './reading.js';
 const said = (row: Row): string[] =>
   row.lines.map((line) => `${line.label}  ${line.value}${line.held ? '  [cache]' : ''}`);
 
+/** One field of one row, by the label a reader reads it against. */
+const valueOf = (row: Row, label: string): string | undefined =>
+  row.lines.find((line) => line.label === label)?.value;
+
 /** The one row a single-image reading produces. */
 const rowOf = (fields: Parameters<typeof image>[0]): Row => {
   const [row] = panelOf(reading({ images: [image(fields)] })).rows;
@@ -52,7 +56,7 @@ describe('the panel the worker computes from a reading', () => {
       }),
     );
 
-    expect(panel.rows.map((row) => row.heading)).toEqual([
+    expect(panel.rows.map((row) => valueOf(row, 'selector'))).toEqual([
       'html > body > img:nth-of-type(1)',
       'html > body > img:nth-of-type(2)',
       'html > body > figure > img',
@@ -72,10 +76,14 @@ describe('the panel the worker computes from a reading', () => {
           srcset: '/i/640.png 640w, /i/1080.png 1080w',
           sizes: '(max-width: 768px) 100vw, 33vw',
           renderedWidth: 475,
+          renderedHeight: 317,
           currentSrc: 'https://example.com/i/640.png',
         }),
       ),
     ).toEqual([
+      'alt  (no alt attribute)',
+      'rendered box  475×317',
+      'selector  html > body > img',
       'candidates  640w, 1080w',
       'sizes  (max-width: 768px) 100vw, 33vw',
       'clause used  33vw',
@@ -130,6 +138,9 @@ describe('the panel the worker computes from a reading', () => {
     // clause to name and no width to show — and the panel says which of those
     // it is rather than leaving three empty cells.
     expect(said(rowOf({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: '' }))).toEqual([
+      'alt  (no alt attribute)',
+      'rendered box  0×0, so this render drew no box at all',
+      'selector  html > body > img',
       'candidates  1x, 2x',
       'clause used  x descriptors only',
       'css px  —',
@@ -163,6 +174,9 @@ describe('the panel the worker computes from a reading', () => {
 
   it('says a sizes string is absent where no clause was written at all', () => {
     expect(said(rowOf({ srcset: '/i/640.png 640w, /i/1080.png 1080w' }))).toEqual([
+      'alt  (no alt attribute)',
+      'rendered box  0×0, so this render drew no box at all',
+      'selector  html > body > img',
       'candidates  640w, 1080w',
       'sizes  (absent)',
       'clause used  absent → 100vw default',
@@ -178,6 +192,9 @@ describe('the panel the worker computes from a reading', () => {
     expect(
       said(rowOf({ srcset: '/i/640.png 640w, /i/1080.png 1080w', sizes: '(min-width: 100px) wide' })),
     ).toEqual([
+      'alt  (no alt attribute)',
+      'rendered box  0×0, so this render drew no box at all',
+      'selector  html > body > img',
       'candidates  640w, 1080w',
       'sizes  (min-width: 100px) wide',
       'clause used  (min-width: 100px) wide',
@@ -195,11 +212,17 @@ describe('the panel the worker computes from a reading', () => {
     // choice to explain, and eight lines of dashes would bury the images that
     // do choose. `trace.ts` collapses the same case for the same reason.
     expect(said(rowOf({ currentSrc: 'https://example.com/px.gif' }))).toEqual([
+      'alt  (no alt attribute)',
+      'rendered box  0×0, so this render drew no box at all',
+      'selector  html > body > img',
       'selection  no srcset, so nothing was selected',
       'loaded  /px.gif  [cache]',
       'bytes  unknown',
     ]);
     expect(said(rowOf({ srcset: '/i/one.png 800w' }))).toEqual([
+      'alt  (no alt attribute)',
+      'rendered box  0×0, so this render drew no box at all',
+      'selector  html > body > img',
       'selection  one candidate only, so selection is a formality',
       'loaded  (none)  [cache]',
       'bytes  unknown',
@@ -242,6 +265,7 @@ describe('the panel the worker computes from a reading', () => {
             srcset: '/i/400.png 400w, /i/1200.png 1200w',
             sizes: 'auto',
             renderedWidth: 1200,
+            renderedHeight: 800,
             currentSrc: 'https://example.com/i/1200.png',
             loading: 'lazy',
           }),
@@ -251,6 +275,10 @@ describe('the panel the worker computes from a reading', () => {
     if (row === undefined) throw new Error('the panel explained no image');
 
     expect(said(row)).toEqual([
+      'alt  (no alt attribute)',
+      'rendered box  1200×800',
+      'loading  lazy',
+      'selector  html > body > img',
       'candidates  400w, 1200w',
       'sizes  auto',
       'clause used  auto',
@@ -286,6 +314,10 @@ describe('the panel the worker computes from a reading', () => {
     const unmarked = panel.rows.flatMap((row) => row.lines.filter((line) => !line.held));
 
     expect(unmarked.map((line) => line.label)).toEqual([
+      'alt',
+      'rendered box',
+      'loading',
+      'selector',
       'candidates',
       'sizes',
       'clause used',
@@ -335,9 +367,14 @@ describe('the panel the worker computes from a reading', () => {
     ).toEqual([]);
   });
 
-  it('says loading=lazy in the heading, where the trace says it too', () => {
-    expect(rowOf({ loading: 'lazy' }).heading).toBe('html > body > img   loading=lazy');
-    expect(rowOf({ loading: 'eager' }).heading).toBe('html > body > img');
+  it('says what loading the page asked for, and says nothing where it asked for none', () => {
+    // It used to be appended to the row's heading, the way `trace.ts` appends
+    // it to a block's first line. The heading is now the file the browser
+    // loaded — the thing a reader recognises the row by — so the attribute is
+    // a line of the grid, where `eager` is as much a page fact as `lazy`.
+    expect(said(rowOf({ loading: 'lazy' }))).toContain('loading  lazy');
+    expect(said(rowOf({ loading: 'eager' }))).toContain('loading  eager');
+    expect(said(rowOf({})).some((line) => line.startsWith('loading'))).toBe(false);
   });
 
   it('explains the mark once, and what the extension cannot measure', () => {
@@ -375,6 +412,193 @@ describe('the panel the worker computes from a reading', () => {
 });
 
 /**
+ * What a row says about which image it is, which is the issue's own complaint:
+ *
+ * > A row is headed by a DOM path […] and names files by a shortened last path
+ * > segment, so a reader looking at a page cannot tell which row is the hero
+ * > and which is a 20px icon.
+ *
+ * Four answers, and none of them is arithmetic. The row is named after the file
+ * the browser loaded rather than the path to the element. It carries that file's
+ * whole URL, so a thumbnail can be drawn of it and so two directories can be
+ * told apart. It says what the page called the image and what shape this render
+ * drew it. And it says in one line what happened, so twenty-three of them can
+ * be read without opening any.
+ */
+describe('what a row says about which image it is', () => {
+  it('names the row after the file the browser loaded', () => {
+    expect(rowOf({ currentSrc: 'https://example.com/i/hero-photograph.png' }).name).toBe(
+      '/i/hero-photograph.png',
+    );
+  });
+
+  it('says so where the browser has loaded nothing, rather than naming a prediction', () => {
+    // A lazy image below the fold has loaded no file, and the candidate the
+    // arithmetic would pick is a prediction — naming the row after it would
+    // put a file the page has never fetched in the position a reader reads as
+    // identity.
+    expect(rowOf({ srcset: '/i/640.png 640w, /i/1080.png 1080w', currentSrc: '' }).name).toBe(
+      '(nothing loaded)',
+    );
+  });
+
+  it('carries the loaded file whole, which is the one value the panel requests', () => {
+    // Whole and untouched: `panel.ts` gives this to the thumbnail's `src`, and
+    // `privacy.test.ts` holds that a `src` is only ever a value that arrived
+    // this way. Empty is an image that loaded nothing, and the panel then
+    // points the browser at no URL at all.
+    expect(rowOf({ currentSrc: 'https://example.com/i/640.png?w=640&q=80' }).file).toBe(
+      'https://example.com/i/640.png?w=640&q=80',
+    );
+    expect(rowOf({ currentSrc: '' }).file).toBe('');
+  });
+
+  it('offers the whole URL of the loaded file and of every candidate', () => {
+    // Criterion 4, and the reason it cannot be met by the grid above: those
+    // lines are cut to fit a column. These are not cut at all, and they are
+    // absolute, so a relative candidate and an absolute `currentSrc` can be
+    // read against each other.
+    expect(
+      rowOf({
+        srcset: '/i/640.png 640w, /i/1080.png 1080w',
+        sizes: '100vw',
+        currentSrc: 'https://example.com/i/640.png',
+      }).sources,
+    ).toEqual([
+      { label: 'loaded', url: 'https://example.com/i/640.png' },
+      { label: '640w', url: 'https://example.com/i/640.png' },
+      { label: '1080w', url: 'https://example.com/i/1080.png' },
+    ]);
+  });
+
+  it('tells two images apart when their URLs differ only by a directory', () => {
+    // Criterion 5. The two paths below are the same length and the same file
+    // name, and long enough that the line in the grid cuts the directory off
+    // both — so the whole URL is the only reading that separates them, which
+    // is why every row carries one.
+    const deep = (at: string): string =>
+      `https://example.com/assets/2026/${at}/a/very/deep/set/of/directories/that/go/on/images/hero.png`;
+    const rows = panelOf(
+      reading({
+        images: [image({ currentSrc: deep('one') }), image({ currentSrc: deep('two') })],
+      }),
+    ).rows;
+
+    // The two headlines are the same string, and that is the finding rather
+    // than a failure: the directory that separates these files sits in the
+    // part the line had to drop, and the `…` says something was dropped
+    // without saying what. A panel with nothing else to offer would render
+    // two different files identically.
+    expect(rows[0]?.name).toBe(rows[1]?.name);
+    expect(rows[0]?.name).toContain('…');
+    // The whole URL is what separates them, and every row carries one.
+    expect(rows.map((row) => row.sources.map((source) => source.url))).toEqual([
+      [deep('one')],
+      [deep('two')],
+    ]);
+    expect(rows[0]?.file).not.toBe(rows[1]?.file);
+  });
+
+  it('says the alt text the page wrote, and which kind of nothing it wrote instead', () => {
+    // Criterion 6's first half, in three states rather than two. `alt=""` is a
+    // page calling the image decorative, which is a claim; no attribute is a
+    // page that made none.
+    expect(valueOf(rowOf({ alt: 'A person at a desk' }), 'alt')).toBe('A person at a desk');
+    expect(valueOf(rowOf({ alt: '' }), 'alt')).toBe('(empty, so the page calls it decorative)');
+    expect(valueOf(rowOf({ alt: null }), 'alt')).toBe('(no alt attribute)');
+  });
+
+  it('says the box this render drew, which is the shape a reader recognises', () => {
+    // Criterion 6's second half. A banner and an icon are two rows of numbers
+    // otherwise.
+    expect(valueOf(rowOf({ renderedWidth: 1200, renderedHeight: 80 }), 'rendered box')).toBe(
+      '1200×80',
+    );
+    expect(valueOf(rowOf({ renderedWidth: 23.6, renderedHeight: 23.4 }), 'rendered box')).toBe(
+      '24×23',
+    );
+  });
+
+  it('says an image this render drew no box for drew none, rather than showing 0×0', () => {
+    // A hidden image is the one case where the mark the panel draws is
+    // invisible, so the row is where a reader finds out why.
+    expect(valueOf(rowOf({}), 'rendered box')).toBe('0×0, so this render drew no box at all');
+  });
+
+  it('words the thumbnail’s own alt, so a box that will not draw still says what it was', () => {
+    // The page's own description first, because it was written by somebody who
+    // could see the image. The file name where the page wrote none. And the
+    // honest sentence where there is no file to describe at all — which is
+    // what a reader gets in place of a broken-image glyph.
+    expect(rowOf({ currentSrc: 'https://example.com/i/a.png', alt: 'A person' }).alt).toBe(
+      'A person',
+    );
+    expect(rowOf({ currentSrc: 'https://example.com/i/a.png', alt: '' }).alt).toBe('/i/a.png');
+    expect(rowOf({ currentSrc: 'https://example.com/i/a.png' }).alt).toBe('/i/a.png');
+    expect(rowOf({ currentSrc: '' }).alt).toBe('nothing loaded');
+  });
+
+  it('says in one line what happened, so a page of images can be read without opening one', () => {
+    const gistOf = (fields: Parameters<typeof image>[0]): string => rowOf(fields).gist;
+
+    expect(
+      gistOf({
+        srcset: '/i/640.png 640w, /i/1080.png 1080w',
+        sizes: '33vw',
+        renderedWidth: 475,
+        currentSrc: 'https://example.com/i/640.png',
+      }),
+    ).toBe('picked 640w, and that is what loaded');
+    // The one alarm in the panel, and the sentence the whole tool exists to
+    // put in front of somebody.
+    expect(
+      gistOf({
+        srcset: '/i/640.png 640w, /i/1080.png 1080w',
+        sizes: '33vw',
+        renderedWidth: 475,
+        currentSrc: 'https://example.com/i/1080.png',
+      }),
+    ).toBe('picked 640w, loaded a different file');
+    expect(
+      gistOf({ srcset: '/i/640.png 640w, /i/1080.png 1080w', sizes: '33vw', currentSrc: '' }),
+    ).toBe('picked 640w, nothing loaded yet');
+    expect(
+      gistOf({ srcset: '/i/640.png 640w, /i/1080.png 1080w', sizes: '(min-width: 100px) wide' }),
+    ).toBe('picked nothing, nothing loaded yet');
+    expect(gistOf({ currentSrc: 'https://example.com/px.gif' })).toBe(
+      'no srcset, one file loaded',
+    );
+    expect(gistOf({ srcset: '/i/one.png 800w' })).toBe('one candidate only, nothing loaded yet');
+  });
+
+  it('says what the mark means where the mark is, and says more where the width descends from it', () => {
+    // The footer still carries the argument in full, and the row's note still
+    // carries the `auto` reasoning — a tooltip is a hover affordance and
+    // cannot be the only copy of anything. This is the short form, on the
+    // chip, so a reader who meets a mark does not have to go looking.
+    expect(rowOf({ srcset: '/i/a.png 640w, /i/b.png 1080w', sizes: '33vw' }).mark).toBe(
+      'what the browser has, not what it chose',
+    );
+    expect(
+      rowOf({
+        srcset: '/i/400.png 400w, /i/1200.png 1200w',
+        sizes: 'auto',
+        renderedWidth: 1200,
+        currentSrc: 'https://example.com/i/1200.png',
+      }).mark,
+    ).toBe('what the browser has, not what it chose — and the width above descends from it');
+  });
+
+  it('hands each row the index the reader gave it, which is the panel’s handle', () => {
+    const rows = panelOf(
+      reading({ images: [image({ at: 0 }), image({ at: 1 }), image({ at: 2 })] }),
+    ).rows;
+
+    expect(rows.map((row) => row.at)).toEqual([0, 1, 2]);
+  });
+});
+
+/**
  * The line a URL becomes, which is the one thing on a row a reader compares
  * against another row.
  *
@@ -385,13 +609,12 @@ describe('the panel the worker computes from a reading', () => {
  * visible: either the line shows it, or the line carries a `…` saying something
  * was dropped to fit.
  */
-describe('the file a candidate names, on one line of a 440px panel', () => {
+describe('the file a candidate names, on one line of the panel', () => {
   /** The `loaded` line of a page holding one image, which is one URL rendered. */
   const loadedOf = (currentSrc: string, baseURI = 'https://example.com/'): string => {
     const [row] = panelOf(reading({ images: [image({ currentSrc, baseURI })] })).rows;
     if (row === undefined) throw new Error('the panel explained no image');
-    const [, loaded] = said(row);
-    return loaded ?? '';
+    return said(row).find((line) => line.startsWith('loaded  ')) ?? '';
   };
 
   it('keeps the path, so two candidates in different directories read apart', () => {

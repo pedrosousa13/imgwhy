@@ -53,8 +53,64 @@ import type { RawImage, Reading } from './read.js';
  */
 export type Line = { label: string; value: string; held: boolean };
 
-/** One image, said. `notes` qualify a figure the arithmetic cannot account for. */
-export type Row = { heading: string; lines: Line[]; notes: string[] };
+/**
+ * One file this image involved, named by its whole URL.
+ *
+ * Whole and uncut, which is the difference between this and the `picked` and
+ * `loaded` lines above it. Those are one line of a grid and have to fit on one,
+ * so `fileOf` shortens them — and a shortened URL is a URL two files can share.
+ * The issue puts it as a criterion: two images whose URLs differ only by
+ * directory must be distinguishable, and the only reading that always is, is
+ * the whole string. So the row carries both: a line a reader compares at a
+ * glance, and the address underneath it that settles an argument.
+ *
+ * Absolute, because a candidate is written relative and `currentSrc` is not,
+ * and two URLs a reader is meant to compare have to be the same kind of thing.
+ */
+export type Source = { label: string; url: string };
+
+/**
+ * One image, said.
+ *
+ * The order of the fields is the order the panel reads them: what this image is
+ * (`at`, `name`, `alt`, `file`), the one line that says what happened (`gist`,
+ * `mark`), and then the arithmetic a reader opens (`lines`, `sources`,
+ * `notes`).
+ *
+ * That split is the issue's, and it is a split of one flat list into a
+ * headline and a detail. Twenty-three images on a photo page produced
+ * twenty-three blocks of eight figures and four paragraphs of prose, which is
+ * a panel taller than any screen and a reader who can see one row of it. So
+ * every row now says who it is and what happened in two short lines, and holds
+ * the rest until it is asked. Nothing was cut: `lines`, `sources` and `notes`
+ * are the whole of what was standing in the row before.
+ */
+export type Row = {
+  /**
+   * Where this image sits in `document.images`, which is how the panel finds
+   * the element to mark. `read.ts` says why it is an index and what it costs.
+   */
+  at: number;
+  /** The headline: which file this row is about, short enough to scan. */
+  name: string;
+  /** What the thumbnail says where it has nothing to show. */
+  alt: string;
+  /**
+   * The whole URL of the file the browser loaded, or the empty string where it
+   * loaded none. This is the one value in the panel that becomes a request:
+   * `renderPanel` assigns it to the thumbnail's `src`, whole and untouched,
+   * and `privacy.test.ts` holds that it is never anything else.
+   */
+  file: string;
+  /** The one line under the name: what was picked, and what loaded. */
+  gist: string;
+  /** What the cache mark means on this row, said where the mark is. */
+  mark: string;
+  lines: Line[];
+  sources: Source[];
+  /** Prose the arithmetic needs, shown where a reader opens the row. */
+  notes: string[];
+};
 
 /**
  * The whole panel as plain data, which is what crosses into the page.
@@ -139,7 +195,13 @@ const absolute = (url: string, base: string): string => {
   }
 };
 
-/** How much of a URL fits on one line of a 440px panel. */
+/**
+ * How much of a URL fits on one line of the panel's grid.
+ *
+ * A shortened URL is a URL two files can share, which is why every row also
+ * carries its `sources` — the whole address, uncut, under the arithmetic. This
+ * figure is about a line a reader compares at a glance and nothing more.
+ */
 const WIDTH = 56;
 
 /**
@@ -279,6 +341,59 @@ const picked = (candidate: Candidate | null, base: string): string =>
   candidate === null ? '—' : `${candidate.raw}  ${fileOf(candidate.url, base)}`;
 
 /**
+ * What the page wrote in `alt`, or the word for it having written none.
+ *
+ * Three answers, because the attribute has three states and two of them are
+ * not the same finding. No attribute is a page that said nothing. `alt=""` is
+ * a page that said this image carries no meaning of its own, which is correct
+ * for a spacer and a bug on a hero — so the panel says which it is rather than
+ * rendering both as an absence.
+ */
+const altSaid = (alt: string | null): string =>
+  alt === null
+    ? '(no alt attribute)'
+    : alt === ''
+      ? '(empty, so the page calls it decorative)'
+      : alt;
+
+/**
+ * What the thumbnail's own `alt` says.
+ *
+ * Which is what a reader sees in the thumbnail's place whenever the file will
+ * not draw — an image that has loaded nothing yet, a URL that 404s, a
+ * `currentSrc` that is not an image at all. A broken-image glyph with no words
+ * beside it says only that something failed; these say which image failed and
+ * what the page called it.
+ *
+ * The page's own `alt` first, because it is the one description written by
+ * somebody who could see the image. The file name where the page wrote none,
+ * because a name is still an identification. And where nothing loaded there is
+ * no file to describe, so it says that instead.
+ */
+const altFor = (raw: RawImage, name: string): string =>
+  raw.currentSrc === ''
+    ? 'nothing loaded'
+    : raw.alt === null || raw.alt === ''
+      ? name
+      : raw.alt;
+
+/**
+ * What the cache mark means, said where the mark is rather than in a
+ * paragraph under it.
+ *
+ * The footer still carries the argument in full. This is the short form, and
+ * it exists because the mark and its meaning had drifted a whole panel apart:
+ * a reader met a `cache` chip on a figure and had to scroll past every row to
+ * find out what it claimed. A phrase on the chip closes that, and the row's
+ * own note carries the same reasoning in a form a keyboard reaches — a
+ * tooltip is a hover affordance and cannot be the only copy.
+ */
+const markOf = (laidOut: boolean): string =>
+  laidOut
+    ? 'what the browser has, not what it chose — and the width above descends from it'
+    : 'what the browser has, not what it chose';
+
+/**
  * One image's row.
  *
  * Two shapes, and the split is the same one `trace.ts` makes. An image with
@@ -290,7 +405,15 @@ const picked = (candidate: Candidate | null, base: string): string =>
 function rowOf(raw: RawImage, device: DeviceProfile): Row {
   const image = captured(raw);
   const base = raw.baseURI;
-  const heading = `${raw.selector}${raw.loading === 'lazy' ? '   loading=lazy' : ''}`;
+
+  // The headline, and the whole reason this slice exists. It used to be the DOM
+  // path — `html > body > div:nth-of-type(2) > main > … > img` — which names
+  // the one thing about an image nobody recognises it by, and which on a real
+  // page wraps across two lines and pushes everything else off the panel. The
+  // file the browser loaded is what a reader is looking for, so that is what
+  // the row is called; the path is a line in the detail below, where it is
+  // still selectable and still pasteable into DevTools.
+  const name = image.currentSrc === '' ? '(nothing loaded)' : fileOf(image.currentSrc, base);
 
   // Marked on every row, held copy or not, and that is deliberate. The mark is
   // not a warning about this image: it says what the figure is. `currentSrc` is
@@ -304,12 +427,52 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
   };
   const bytes: Line = { label: 'bytes', value: UNKNOWN, held: false };
 
+  // Who this image is, above what happened to it. Three facts a reader uses to
+  // recognise an image and none of which the arithmetic needs: what the page
+  // called it, the shape this render drew it at, and where it sat.
+  const box = `${Math.round(raw.renderedWidth)}×${Math.round(raw.renderedHeight)}`;
+  const identity: Line[] = [
+    { label: 'alt', value: altSaid(raw.alt), held: false },
+    {
+      label: 'rendered box',
+      value:
+        raw.renderedWidth === 0 && raw.renderedHeight === 0
+          ? `${box}, so this render drew no box at all`
+          : box,
+      held: false,
+    },
+    ...(raw.loading === null ? [] : [{ label: 'loading', value: raw.loading, held: false }]),
+    { label: 'selector', value: raw.selector, held: false },
+  ];
+
+  // Every file this row involves, whole. The loaded one first, because it is
+  // the one a reader came to check, then every candidate in the order the page
+  // offered them. Absolute, so a relative candidate and an absolute
+  // `currentSrc` can be read against each other at all.
+  const sources: Source[] = [
+    ...(image.currentSrc === '' ? [] : [{ label: 'loaded', url: image.currentSrc }]),
+    ...image.candidates.map((candidate) => ({
+      label: candidate.raw,
+      url: absolute(candidate.url, base),
+    })),
+  ];
+
+  const carried = { at: raw.at, name, alt: altFor(raw, name), file: image.currentSrc, sources };
+
   if (image.candidates.length < 2) {
-    const why =
-      image.candidates.length === 0
-        ? 'no srcset, so nothing was selected'
-        : 'one candidate only, so selection is a formality';
-    return { heading, lines: [{ label: 'selection', value: why, held: false }, loaded, bytes], notes: [] };
+    const nothing = image.candidates.length === 0;
+    const why = nothing
+      ? 'no srcset, so nothing was selected'
+      : 'one candidate only, so selection is a formality';
+    return {
+      ...carried,
+      gist:
+        `${nothing ? 'no srcset' : 'one candidate only'}, ` +
+        `${image.currentSrc === '' ? 'nothing loaded yet' : 'one file loaded'}`,
+      mark: markOf(false),
+      lines: [...identity, { label: 'selection', value: why, held: false }, loaded, bytes],
+      notes: [],
+    };
   }
 
   const selection = explainSelection(image, device);
@@ -346,8 +509,23 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
   const laidOut = selection.kind === 'width' && selection.resolution.kind === 'auto';
 
   return {
-    heading,
+    ...carried,
+    // The one line a reader reads while scanning: what the arithmetic chose,
+    // and whether the page agrees with it. `loaded a different file` is the
+    // only alarm in the panel, and it is the sentence the whole tool exists to
+    // put in front of somebody.
+    gist:
+      `picked ${prediction === null ? 'nothing' : prediction.raw}, ` +
+      `${
+        image.currentSrc === ''
+          ? 'nothing loaded yet'
+          : differs
+            ? 'loaded a different file'
+            : 'and that is what loaded'
+      }`,
+    mark: markOf(laidOut),
     lines: [
+      ...identity,
       {
         label: 'candidates',
         value: image.candidates.map((candidate) => candidate.raw).join(', '),

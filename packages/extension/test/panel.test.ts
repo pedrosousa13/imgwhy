@@ -25,17 +25,22 @@ const PANEL: Panel = panelOf(
   reading({
     images: [
       image({
+        at: 0,
         selector: 'html > body > img:nth-of-type(1)',
         srcset: '/i/640.png 640w, /i/1080.png 1080w',
         sizes: '33vw',
         renderedWidth: 475,
+        renderedHeight: 317,
+        alt: 'A person at a desk',
         currentSrc: 'https://example.com/i/640.png',
       }),
       image({
+        at: 1,
         selector: 'html > body > img:nth-of-type(2)',
         srcset: '/i/640.png 640w, /i/1080.png 1080w',
         sizes: '33vw',
         renderedWidth: 475,
+        renderedHeight: 317,
         currentSrc: 'https://example.com/i/1080.png',
         loading: 'lazy',
       }),
@@ -347,9 +352,12 @@ describe('the panel a click injects', () => {
     const nodes = nodesIn(host);
 
     expect(nodes.filter((node) => node.name === 'li')).toHaveLength(2);
+    // The row is named after the file the browser loaded, which is what a
+    // reader recognises it by. The DOM path that used to head it is a line of
+    // the grid now.
     expect(nodes.filter((node) => node.name === 'h2').map((node) => node.textContent)).toEqual([
-      'html > body > img:nth-of-type(1)',
-      'html > body > img:nth-of-type(2)   loading=lazy',
+      '/i/640.png',
+      '/i/1080.png',
     ]);
     expect(said(host)).toContain('p: viewport 1440×900 · DPR 1 · 2 images');
   });
@@ -369,6 +377,12 @@ describe('the panel a click injects', () => {
     // mark is a child of the `dd`, and reading a node's text concatenates its
     // descendants. It is what says the mark is inside the value it qualifies.
     expect(first).toEqual([
+      'dt: alt',
+      'dd: A person at a desk',
+      'dt: rendered box',
+      'dd: 475×317',
+      'dt: selector',
+      'dd: html > body > img:nth-of-type(1)',
       'dt: candidates',
       'dd: 640w, 1080w',
       'dt: sizes',
@@ -396,8 +410,16 @@ describe('the panel a click injects', () => {
     inPage(source, host);
     const marks = nodesIn(host).filter((node) => node.name === 'mark');
 
-    expect(marks.map((node) => node.textContent)).toEqual(['cache', 'cache']);
-    expect(marks.map((node) => node.parent?.name)).toEqual(['dd', 'dd']);
+    expect(marks.map((node) => node.textContent)).toEqual([
+      'cache',
+      'cache',
+      'cache',
+      'cache',
+    ]);
+    // One chip on each row's compact line, where the loaded file is named
+    // while a reader is scanning, and one on the `loaded` figure inside the
+    // row's own grid.
+    expect(marks.map((node) => node.parent?.name)).toEqual(['p', 'dd', 'p', 'dd']);
     // The figure and the mark's word as one string, which is what a real
     // `textContent` read of the `dd` returns — the mark is a child of it, and
     // reading a node's text concatenates its descendants. Asserting the figure
@@ -406,8 +428,15 @@ describe('the panel a click injects', () => {
     // removes every existing child, so the value has to be written before the
     // mark is appended and never after.
     expect(marks.map((node) => node.parent?.textContent)).toEqual([
+      'picked 640w, and that is what loadedcache',
       '/i/640.pngcache',
+      'picked 640w, loaded a different filecache',
       '/i/1080.pngcache',
+    ]);
+    // And every chip says what it means, where the mark is. The row's own
+    // note carries the same reasoning in a form a keyboard reaches.
+    expect([...new Set(marks.map((node) => node.title))]).toEqual([
+      'what the browser has, not what it chose',
     ]);
   });
 

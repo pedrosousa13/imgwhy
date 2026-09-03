@@ -39,6 +39,62 @@
 /** What `attachShadow` is handed, which is one field of interest. */
 export type ShadowOptions = { mode: 'open' | 'closed' };
 
+/**
+ * The box `getBoundingClientRect` reports, which is four numbers and not one.
+ *
+ * All four, because the two halves of the extension read different ones. The
+ * reader takes the width and the height, which is the shape a person
+ * recognises an image by. The panel takes the top and the left as well, which
+ * is where it puts the box it draws over the image — and viewport coordinates
+ * are what makes that a `position: fixed` rule with no scroll offset in it.
+ *
+ * A stub that reported the width alone would let a panel place its mark at the
+ * origin of the screen on every image on the page and still pass.
+ */
+export type Box = { width: number; height: number; top: number; left: number };
+
+/** One box, with the numbers a case cares about set and the rest at zero. */
+export const box = (fields: Partial<Box> = {}): Box => ({
+  width: 0,
+  height: 0,
+  top: 0,
+  left: 0,
+  ...fields,
+});
+
+/**
+ * How `scrollIntoView` was asked for, kept so a case can read it back.
+ *
+ * The options are not decoration. `behavior: 'instant'` is what overrides a
+ * page's own `scroll-behavior: smooth`, and without it the rect the panel
+ * reads on the next line is the box's position before the animation — a mark
+ * drawn where the image used to be.
+ */
+export type ScrollAsked = { block?: string; behavior?: string };
+
+/**
+ * Which events bubble.
+ *
+ * The panel's listeners come in pairs that turn on exactly this: `mouseenter`
+ * and `mouseleave` do not bubble, which is why they are the pair a row uses
+ * for a pointer, and `focusin` and `focusout` do, which is why they are the
+ * pair it uses for a keyboard — the thing that takes focus is the button
+ * inside the row rather than the row. A stub that bubbled everything would
+ * pass a panel listening for `focus` on the row, which fires never.
+ *
+ * A closed table rather than a default, so `dispatch` throws on an event
+ * nobody wrote down instead of quietly deciding it does not bubble.
+ */
+const BUBBLES: Record<string, boolean> = {
+  click: true,
+  focusin: true,
+  focusout: true,
+  focus: false,
+  blur: false,
+  mouseenter: false,
+  mouseleave: false,
+};
+
 /** An element, and a shadow root, which behaves enough like one here. */
 export class El {
   id = '';
@@ -79,10 +135,10 @@ export class El {
    * The attributes an `<img>` or a `<source>` carries, as the reader reads
    * them. Empty unless a test sets one, so a case says what it means.
    *
-   * `rect` is what `getBoundingClientRect().width` reports and `width` is the
-   * attribute the reader falls back to, which are two different things: a
-   * `display: none` image has a rect of zero and an attribute that still says
-   * how wide the page asked for it.
+   * `rect` is what `getBoundingClientRect()` reports and `width` and `height`
+   * are the attributes the reader falls back to, which are two different
+   * things: a `display: none` image has a rect of zeros and attributes that
+   * still say how large the page asked for it.
    */
   srcset = '';
   sizes = '';
@@ -90,11 +146,41 @@ export class El {
   currentSrc = '';
   src = '';
   width = 0;
-  rect = 0;
+  height = 0;
+  rect: Box = box();
   baseURI = '';
   loading: string | null = null;
+  /**
+   * The `alt` attribute, one field for both halves of the extension.
+   *
+   * One rather than two because a browser has one. `getAttribute('alt')` reads
+   * the attribute — null where the page wrote none, which is the state the
+   * reader needs and `img.alt` collapses to `''` — and writing the `alt`
+   * property writes that same attribute, which is what the panel does to its
+   * thumbnail. So a write here is visible to a read here, exactly as it would
+   * be in a page.
+   */
+  alt: string | null = null;
+  /** The tooltip the panel writes on the cache mark. */
+  title = '';
+  /** Whether a `details` is open, which the panel writes once. */
+  open = false;
   /** The computed `background-image`, which is a string and often `none`. */
   background = 'none';
+
+  /**
+   * Every listener registered on this element, by event name.
+   *
+   * Kept rather than counted, because the claim they answer is about where
+   * they are: the panel registers every one of them on a node it made inside
+   * its own closed root, so removing the host removes the lot and no page
+   * element is left carrying anything. A test can only say that by walking the
+   * page and finding none.
+   */
+  readonly listeners: Map<string, (() => void)[]> = new Map();
+
+  /** Every `scrollIntoView` this element was asked for, in order. */
+  readonly scrolled: ScrollAsked[] = [];
 
   constructor(readonly name: string) {}
 
@@ -106,13 +192,25 @@ export class El {
     return this.parent;
   }
 
-  getBoundingClientRect(): { width: number } {
-    return { width: this.rect };
+  getBoundingClientRect(): Box {
+    return this.rect;
   }
 
-  /** One attribute, and the reader asks about exactly one. */
+  /** The two attributes the reader asks for, and null for anything else. */
   getAttribute(name: string): string | null {
-    return name === 'loading' ? this.loading : null;
+    if (name === 'loading') return this.loading;
+    if (name === 'alt') return this.alt;
+    return null;
+  }
+
+  addEventListener(type: string, handler: () => void): void {
+    const held = this.listeners.get(type) ?? [];
+    held.push(handler);
+    this.listeners.set(type, held);
+  }
+
+  scrollIntoView(asked: ScrollAsked = {}): void {
+    this.scrolled.push(asked);
   }
 
   /** The nearest ancestor with this tag name, itself included. */
@@ -161,6 +259,44 @@ export class El {
 /** The subtree under one node, itself excluded, shadow roots not entered. */
 export const descendants = (node: El): El[] =>
   node.children.flatMap((child) => [child, ...descendants(child)]);
+
+/**
+ * Fire one event at one element, the way a browser fires it.
+ *
+ * Bubbling is modelled rather than assumed, and it is the whole reason this is
+ * a function and not a loop over one element's handlers. The panel's four row
+ * listeners are two deliberate pairs — a non-bubbling one for the pointer and
+ * a bubbling one for focus — and a dispatcher that ran only the target's own
+ * handlers would report a working panel for one written the other way round.
+ * `focusin` on the button has to reach the row; `mouseenter` on the button
+ * must not.
+ *
+ * An event nobody wrote down throws, so a listener registered for a fifth
+ * event is modelled before it is trusted.
+ */
+export function dispatch(target: El, type: string): void {
+  const bubbles = BUBBLES[type];
+  if (bubbles === undefined) throw new Error(`no test models the "${type}" event`);
+
+  let node: El | null = target;
+  while (node !== null) {
+    for (const handler of node.listeners.get(type) ?? []) handler();
+    node = bubbles ? node.parent : null;
+  }
+}
+
+/**
+ * Every listener on a node the page can reach, as `tag: event`.
+ *
+ * The page and not the panel, which is the point of it. "Listeners are removed
+ * when the panel closes" is a claim about the page, and the strongest form of
+ * it is that no page element ever carried one — so this walks the light tree,
+ * where a shadow root is exactly where it stops.
+ */
+export const listenersIn = (host: Page): string[] =>
+  host
+    .light()
+    .flatMap((node) => [...node.listeners.keys()].map((type) => `${node.name}: ${type}`));
 
 /** A document, and the readings the two injected functions take of one. */
 export type Page = {

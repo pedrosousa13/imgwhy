@@ -14,11 +14,14 @@ import type { RawImage, Reading } from '../src/read.js';
  * own worked example uses.
  */
 export const image = (fields: Partial<RawImage> = {}): RawImage => ({
+  at: 0,
   selector: 'html > body > img',
   srcset: '',
   sizes: null,
   sizesSource: 'img',
   renderedWidth: 0,
+  renderedHeight: 0,
+  alt: null,
   currentSrc: '',
   loading: null,
   baseURI: 'https://example.com/',
