@@ -89,3 +89,6 @@ export function explainSelection(image: CapturedImage, device: DeviceProfile): S
   if (cssPx === null) return { kind: 'unreadable', resolution, picked };
   return { kind: 'width', resolution, cssPx, neededPx: cssPx * device.dpr, picked };
 }
+
+/** Every function this module is made of. `srcset.ts` says what for. */
+export const PARTS: readonly Function[] = [resolvedPx, explainSelection];

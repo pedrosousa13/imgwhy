@@ -23,3 +23,6 @@ export function selectCandidate(
   const picked = withDensity.find((c) => c.density >= dpr) ?? withDensity[withDensity.length - 1];
   return picked.candidate;
 }
+
+/** Every function this module is made of. `srcset.ts` says what for. */
+export const PARTS: readonly Function[] = [selectCandidate];

@@ -1,7 +1,7 @@
 import type { Capture } from '@imgwhy/core';
 import { describe, expect, it } from 'vitest';
 import { renderReport } from '../src/index.js';
-import { attributes, elements, unread } from './document.js';
+import { attributes, scripts, unread } from './document.js';
 
 /**
  * A Capture whose every string came from a page written to break out of the
@@ -40,7 +40,7 @@ const hostile = (): Capture => ({
               raw: '1080w\' onfocus=\'alert(1)',
             },
           ],
-          sizes: '100vw" onload="alert(\'sizes\')',
+          sizes: '100vw" onload="alert(\'sizes\')</script><!--<script>alert(\'break out\')</script>',
           sizesSource: 'img',
           renderedWidth: 640,
           currentSrc: 'data:text/html,<script>alert(\'current src\')</script>',
@@ -87,16 +87,74 @@ const OWN_VALUES = new Set([
   'notes',
   'scroll',
   'html',
+  'panels',
+  'lead',
+  'panel',
+  'from',
+  'controls',
+  'control',
+  'sizes-input',
+  'viewport-input',
+  'dpr-input',
+  'limit',
+  'sums',
+  'clause',
+  'css',
+  'needed',
+  'mark',
+  'reason',
+  'text',
+  'number',
+  'any',
+  '1',
+  '0.1',
+  'application/json',
 ]);
 
 describe('a report of a page written to break out of it', () => {
   const report = renderReport(hostile());
 
   it('opens no element the page asked for', () => {
-    // `<script>` is the one the alt text and the page URL both wrote. There
-    // is no script element in a report at all, so any at all is an injection.
-    expect(report).not.toContain('<script');
-    expect(elements(report).map((element) => element.name)).not.toContain('script');
+    // `<script>` is the one the alt text, the page URL and the `sizes` string
+    // all wrote. The report ships two of its own, so the check is not that
+    // there are none — it is that there are exactly the two, in the order this
+    // package writes them, and that nothing the page asked for opened a third.
+    expect(scripts(report).map((one) => one.type)).toEqual(['application/json', '']);
+    expect(report).not.toContain("<script>alert");
+    expect(report).not.toContain('<!--');
+  });
+
+  it('escapes the end tag in the sizes string, which no HTML escape would stop', () => {
+    // A `</script>` inside a script element ends it whatever escaping was
+    // applied, so the data island writes every `<` as its JSON escape instead.
+    const island = scripts(report)[0].text;
+
+    expect(island).not.toContain('<');
+    expect(island).toContain('\\u003c/script\\u003e');
+  });
+
+  it('hands the sizes string back to the page exactly as the page wrote it', () => {
+    // Escaping that changed the string would be a different bug: the control
+    // starts from what the page shipped, and a reader types against that.
+    const data = JSON.parse(scripts(report)[0].text) as {
+      panels: { image: { sizes: string } }[];
+    };
+
+    expect(data.panels[0].image.sizes).toBe(hostile().runs[0].images[0].sizes);
+  });
+
+  it('ships a script the page cannot reach at all, which is why it needs no escaping', () => {
+    // The rule the stylesheet has always kept, now kept by the script too:
+    // nothing is interpolated into it. Two reports of two different pages
+    // carry the same code, byte for byte — the page's own strings are in the
+    // island, as data.
+    const benign = renderReport({
+      ...hostile(),
+      url: 'https://example.com/gallery',
+      runs: [{ deviceId: 'desktop', images: [] }],
+    });
+
+    expect(scripts(report)[1].text).toBe(scripts(benign)[1].text);
   });
 
   it('leaves no handler attribute anywhere in the document', () => {
@@ -162,7 +220,7 @@ describe('a report of a page written to break out of it', () => {
 
     const report = renderReport(empty);
 
-    expect(report).not.toContain('<script');
+    expect(report).not.toContain("<script>alert");
     expect(unread(report)).toEqual([]);
   });
 });

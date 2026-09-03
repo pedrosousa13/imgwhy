@@ -1,4 +1,5 @@
 import type { Capture } from '@imgwhy/core';
+import { coreSource, explainSelection } from '@imgwhy/core';
 import { describe, expect, it } from 'vitest';
 import { renderReport } from '../src/index.js';
 import { DEVICES, badge, gallery, hero, logo, on } from './capture.js';
@@ -10,6 +11,18 @@ const cellsOf = (report: string, id: string): string[] => {
   if (!row) throw new Error(`no row for ${id} in\n${report}`);
   return [...row.matchAll(/<td[^>]*>.*?<\/td>/g)].map((match) => match[0]);
 };
+
+/** The `<section class="panel">` whose heading holds `id`. */
+const panelOf = (report: string, id: string): string => {
+  const [, ...panels] = report.split('<section class="panel">');
+  const panel = panels.find((one) => one.includes(id));
+  if (!panel) throw new Error(`no panel for ${id} in\n${report}`);
+  return panel;
+};
+
+/** The text of the JSON island, which is the only page data the script reads. */
+const islandOf = (report: string): string =>
+  /<script type="application\/json">([\s\S]*?)<\/script>/.exec(report)?.[1] ?? '';
 
 describe('renderReport', () => {
   it('emits one whole HTML document', () => {
@@ -144,6 +157,96 @@ describe('renderReport', () => {
     const report = renderReport(gallery());
 
     expect(report).toContain('never guessed');
+  });
+
+  it('gives every image a panel, which is the detail behind a row of the matrix', () => {
+    const report = renderReport(gallery());
+
+    expect(report.match(/<section class="panel">/g)).toHaveLength(3);
+    expect(report).toContain('<h3 class="id">html &gt; body &gt; main &gt; img:nth-of-type(1)</h3>');
+  });
+
+  it('shows the arithmetic in full, clause to winner, for the device it starts from', () => {
+    // The hero on the first device that rendered it: iPhone SE, 375 at DPR 2.
+    const report = renderReport(gallery());
+    const panel = panelOf(report, 'nth-of-type(1)');
+
+    expect(panel).toContain('<dd class="clause">100vw</dd>');
+    expect(panel).toContain('<dd class="css">375px</dd>');
+    expect(panel).toContain('<dd class="needed">750px</dd>');
+    expect(panel).toContain('<dd class="picked">1080w</dd>');
+    expect(panel).toContain(
+      '<p class="reason">375 css px × DPR 2 = 750 physical pixels, and 1080w is the ' +
+        'smallest candidate at or above that.</p>',
+    );
+  });
+
+  it('lists the candidates in the panel and marks the one that won', () => {
+    const panel = panelOf(renderReport(gallery()), 'nth-of-type(1)');
+
+    expect(panel).toContain(
+      '<li><span class="raw">1080w</span><span class="url">/i/1080.png</span>' +
+        '<span class="mark">← picked</span></li>',
+    );
+    expect(panel).toContain(
+      '<li><span class="raw">640w</span><span class="url">/i/640.png</span>' +
+        '<span class="mark"></span></li>',
+    );
+  });
+
+  it('names the device the panel starts from, so no number is unexplained', () => {
+    expect(panelOf(renderReport(gallery()), 'nth-of-type(1)')).toContain(
+      '<p class="from">Starts from iPhone SE: a 375 px viewport at DPR 2.</p>',
+    );
+  });
+
+  it('carries a control for the sizes string, the viewport width and the ratio', () => {
+    const panel = panelOf(renderReport(gallery()), 'nth-of-type(1)');
+
+    expect(panel).toContain('<input class="sizes-input" type="text">');
+    expect(panel).toContain('<input class="viewport-input" type="number" min="1" step="1">');
+    expect(panel).toContain('<input class="dpr-input" type="number" min="0.1" step="any">');
+  });
+
+  it('leaves every control empty in the markup, because no page string may reach an attribute', () => {
+    // The `sizes` string a control starts from came off the page. It reaches
+    // the page through the data island, as text a script reads, and never
+    // through a `value` attribute — which is what keeps the closed list in
+    // `escaping.test.ts` closed.
+    expect(renderReport(gallery())).not.toContain('value=');
+  });
+
+  it('states the framework limit beside the controls, not only in the notes at the end', () => {
+    const panel = panelOf(renderReport(gallery()), 'nth-of-type(1)');
+
+    expect(panel).toContain('candidates this page shipped');
+    expect(panel).toContain('understates the gain');
+  });
+
+  it('gives an image with nothing to choose a panel that says so, and no controls', () => {
+    const panel = panelOf(renderReport(gallery()), 'header &gt; img');
+
+    expect(panel).toContain('The page shipped no srcset, so there was nothing to select.');
+    expect(panel).not.toContain('<input');
+  });
+
+  it('carries the panel data as one inert JSON island the script reads back', () => {
+    const island = islandOf(renderReport(gallery()));
+
+    const data = JSON.parse(island) as { panels: { device: { name: string } }[] };
+    expect(data.panels).toHaveLength(3);
+    expect(data.panels.map((panel) => panel.device.name)).toEqual([
+      'iPhone SE',
+      'iPhone SE',
+      'iPhone SE',
+    ]);
+  });
+
+  it('ships core into the file as the source of the functions the command calls', () => {
+    const report = renderReport(gallery());
+
+    expect(report).toContain(coreSource());
+    expect(report).toContain(String(explainSelection));
   });
 
   it('refuses a run whose device the capture does not describe', () => {

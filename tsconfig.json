@@ -18,6 +18,6 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["packages/*/src", "packages/*/test", "test"],
+  "include": ["packages/*/src", "packages/*/test", "test", "vitest.config.ts"],
   "exclude": ["packages/core"]
 }

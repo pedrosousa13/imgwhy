@@ -132,6 +132,89 @@ describe('imgwhy --report', () => {
     await context.close();
   }, 60_000);
 
+  it('recomputes the selection in the page when a control changes, with no request at all', async () => {
+    const path = join(dir, 'controls.html');
+
+    await imgwhy('--report', path, `${server.url}/gallery.html`);
+
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const asked: string[] = [];
+    page.on('request', (request) => asked.push(request.url()));
+    page.on('requestfailed', (request) => asked.push(`failed ${request.url()}`));
+    server.requests.length = 0;
+
+    const file = pathToFileURL(path).href;
+    await page.goto(file);
+    await page.waitForLoadState('load');
+
+    // The hero: the second image on the page, and the second panel.
+    expect(await page.locator('.panel').count()).toBe(3);
+    const hero = page.locator('.panel').nth(1);
+    const sizes = hero.locator('.sizes-input');
+
+    // The controls start from what the page shipped, filled by the script out
+    // of the data island rather than written into a value attribute.
+    expect(await sizes.inputValue()).toBe('(min-width: 1000px) 50vw, 100vw');
+    expect(await hero.locator('.viewport-input').inputValue()).toBe('375');
+    expect(await hero.locator('.dpr-input').inputValue()).toBe('2');
+
+    // What the file says before anything is typed: iPhone SE, 375 at DPR 2.
+    expect(await hero.locator('.clause').textContent()).toBe('100vw');
+    expect(await hero.locator('.picked').textContent()).toBe('1080w');
+    expect(await hero.locator('.mark').allTextContents()).toEqual(['', '← picked', '']);
+
+    // A different `sizes` string, and a different candidate wins.
+    await sizes.fill('25vw');
+
+    expect(await hero.locator('.clause').textContent()).toBe('25vw');
+    expect(await hero.locator('.css').textContent()).toBe('94px');
+    expect(await hero.locator('.needed').textContent()).toBe('188px');
+    expect(await hero.locator('.picked').textContent()).toBe('640w');
+    expect(await hero.locator('.reason').textContent()).toBe(
+      '94 css px × DPR 2 = 188 physical pixels, and 640w is the smallest candidate at or above that.',
+    );
+    expect(await hero.locator('.mark').allTextContents()).toEqual(['← picked', '', '']);
+
+    // Typing the recorded string back gives the page back, which is the whole
+    // of the claim that the panel and the controls are one function.
+    await sizes.fill('(min-width: 1000px) 50vw, 100vw');
+
+    expect(await hero.locator('.clause').textContent()).toBe('100vw');
+    expect(await hero.locator('.picked').textContent()).toBe('1080w');
+
+    // A wider viewport takes the other clause, and the ratio decides again.
+    await hero.locator('.viewport-input').fill('1440');
+
+    expect(await hero.locator('.clause').textContent()).toBe('(min-width: 1000px) 50vw');
+    expect(await hero.locator('.css').textContent()).toBe('720px');
+    expect(await hero.locator('.picked').textContent()).toBe('1920w');
+
+    await hero.locator('.dpr-input').fill('1');
+
+    expect(await hero.locator('.needed').textContent()).toBe('720px');
+    expect(await hero.locator('.picked').textContent()).toBe('1080w');
+
+    // The badge chooses on density alone, and reads past sizes the way a
+    // browser does — there is no sizes control on it to read past.
+    const badge = page.locator('.panel').nth(2);
+    expect(await badge.locator('.clause').textContent()).toBe('x descriptors only');
+    await badge.locator('.dpr-input').fill('1');
+    expect(await badge.locator('.picked').textContent()).toBe('1x');
+
+    // The image with nothing to choose has a panel that says so, and no boxes.
+    const logo = page.locator('.panel').nth(0);
+    expect(await logo.locator('.reason').textContent()).toContain('no srcset');
+    expect(await logo.locator('input').count()).toBe(0);
+
+    // And through every one of those, the file asked for nothing: not a
+    // stylesheet, not a font, not a script, and nothing from the site.
+    expect(asked).toEqual([file]);
+    expect(server.requests).toEqual([]);
+
+    await context.close();
+  }, 60_000);
+
   it('reports a page with no image as a page with no image, and still writes the file', async () => {
     const path = join(dir, 'empty.html');
 

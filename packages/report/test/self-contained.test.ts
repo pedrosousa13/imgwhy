@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderReport } from '../src/index.js';
-import { attributes, elements, stylesheets, unread } from './document.js';
+import { attributes, elements, scripts, stylesheets, unread } from './document.js';
 import { gallery } from './capture.js';
 
 /**
@@ -42,10 +42,37 @@ const ELEMENTS = new Set([
   'span',
   'strong',
   'code',
+  'h3',
+  'script',
+  'label',
+  'input',
 ]);
 
 /** Every attribute a report writes. An allowlist, for the same reason. */
-const ATTRIBUTES = new Set(['lang', 'charset', 'name', 'content', 'class', 'scope']);
+const ATTRIBUTES = new Set([
+  'lang',
+  'charset',
+  'name',
+  'content',
+  'class',
+  'scope',
+  'type',
+  'min',
+  'step',
+]);
+
+/**
+ * What a `<script>` may be.
+ *
+ * `type` had to be allowed for the controls — `<input type="number">` — and it
+ * is the one attribute in the list above that decides what an element *does*.
+ * On a script it decides whether the element runs, and `type="module"` would
+ * turn one into something that can `import`, which is a request. So the two
+ * this report writes are named and the rest are refused: an empty type, which
+ * is the classic script the panel wiring ships in, and the JSON island, which
+ * runs nothing at all.
+ */
+const SCRIPT_TYPES = new Set(['', 'application/json']);
 
 /**
  * Attributes refused by name as well as by absence from the allowlist above.
@@ -106,6 +133,54 @@ const IN_CSS: [RegExp, string][] = [
 ];
 
 /**
+ * Every way the report's own script could reach the network, and every way it
+ * could turn text into markup.
+ *
+ * The second half is what re-establishes the escaping argument for a document
+ * that now ships a script. Escaping is a claim about what reaches the parser,
+ * and it holds for the document as written; a script runs afterwards, so
+ * `innerHTML = data` would put page content back into the parser with no
+ * escaping anywhere in sight, and `createElement('img')` would fetch with no
+ * attribute in the file to find. Neither is in the wiring, and this is what
+ * keeps it that way: the panel writes `textContent` and `value`, which are
+ * text however hostile the string is.
+ *
+ * The host patterns are anchored, unlike the stylesheet's. A bare `//` is a
+ * comment in JavaScript, so the CSS rule would refuse every commented script
+ * ever written — which is not a rule, it is a trap for whoever writes the next
+ * one. A scheme, or a `//host` inside a string literal, is a URL.
+ */
+const IN_JS: [RegExp, string][] = [
+  [/\bfetch\s*\(/, 'a fetch() in its script'],
+  [/XMLHttpRequest/, 'an XMLHttpRequest in its script'],
+  [/\bimport\s*\(/, 'a dynamic import() in its script'],
+  [/importScripts/, 'an importScripts() in its script'],
+  [/sendBeacon/, 'a sendBeacon() in its script'],
+  [/WebSocket|EventSource/, 'a socket in its script'],
+  [/new\s+Image\b/, 'an Image() in its script'],
+  [/\.src\s*=/, 'an assignment to a src in its script'],
+  [/createElement|setAttribute/, 'an element built in its script'],
+  [/innerHTML|outerHTML|insertAdjacentHTML|document\.write/, 'markup written from its script'],
+  [/\beval\s*\(|new\s+Function/, 'code built at run time in its script'],
+  [/https?:\/\//i, 'a host named in its script'],
+  [/['\"]\/\/[a-z0-9.-]/i, 'a protocol-relative host in its script'],
+];
+
+/** Every way a data island could stop being data, one line each. */
+function inertData(text: string): string[] {
+  const found: string[] = [];
+  // Every `<` is written as its JSON escape, so one that survived is either a
+  // string that reached the island unescaped or an element that is not data.
+  if (text.includes('<')) found.push('writes a < inside its data');
+  try {
+    JSON.parse(text);
+  } catch {
+    found.push('writes data that does not parse as JSON');
+  }
+  return found;
+}
+
+/**
  * Every way the document could reach the network, one line each. Empty is
  * self-contained.
  *
@@ -135,6 +210,15 @@ function reaching(document: string): string[] {
     for (const [pattern, why] of IN_CSS) if (pattern.test(sheet)) found.push(`has ${why}`);
   }
 
+  for (const script of scripts(document)) {
+    if (!SCRIPT_TYPES.has(script.type)) found.push(`runs a <script type="${script.type}">`);
+    if (script.type === 'application/json') {
+      for (const why of inertData(script.text)) found.push(why);
+      continue;
+    }
+    for (const [pattern, why] of IN_JS) if (pattern.test(script.text)) found.push(`has ${why}`);
+  }
+
   for (const rest of unread(document)) found.push(`writes markup no scanner read: ${rest}`);
 
   return [...new Set(found)];
@@ -145,6 +229,10 @@ describe('the emitted report, as a file that must load nothing', () => {
 
   it('reaches the network in no way at all', () => {
     expect(reaching(report)).toEqual([]);
+  });
+
+  it('carries one script that runs and one island of data, and no other', () => {
+    expect(scripts(report).map((one) => one.type)).toEqual(['application/json', '']);
   });
 
   it('carries its whole stylesheet inside itself, in one element', () => {
@@ -218,13 +306,47 @@ describe('the self-containment check, given a report that fetches anyway', () =>
       ],
     ],
     [
-      'a hosted script',
+      'a hosted script, which the element allowlist no longer refuses on its own',
       '<body><script src="https://cdn.example/chart.js"></script></body>',
       [
-        'opens <script>',
         'writes a src attribute, which fetches',
         'names a host in src="https://cdn.example/chart.js"',
       ],
+    ],
+    [
+      'a script that fetches, which no attribute in the file would show',
+      `<script>fetch('https://example.com/beacon');</script>`,
+      ['has a fetch() in its script', 'has a host named in its script'],
+    ],
+    [
+      'a module script, whose type is what makes an import possible',
+      '<script type="module">import x from "https://cdn.example/x.js";</script>',
+      ['runs a <script type="module">', 'has a host named in its script'],
+    ],
+    [
+      'markup written after the parser has finished, which no escaping covers',
+      '<script>document.body.innerHTML = data.sizes;</script>',
+      ['has markup written from its script'],
+    ],
+    [
+      'an image built at run time, which is a request with no element in the file',
+      '<script>new Image().src = candidate.url;</script>',
+      ['has an Image() in its script', 'has an assignment to a src in its script'],
+    ],
+    [
+      'a host in a string, named without a scheme',
+      `<script>const beacon = '//cdn.example/i/1080.png';</script>`,
+      ['has a protocol-relative host in its script'],
+    ],
+    [
+      'a data island that ends its own element, which is how a page would break out',
+      '<script type="application/json">{"sizes":"</script>"}</script>',
+      ['writes data that does not parse as JSON'],
+    ],
+    [
+      'a data island holding an element rather than data',
+      '<script type="application/json">{"sizes":"<img src=x>"}</script>',
+      ['writes a < inside its data'],
     ],
     [
       'an @font-face, which the design refuses whatever it points at',
@@ -318,6 +440,26 @@ describe('the self-containment check, given a report that fetches anyway', () =>
 
   it('is quiet about the markup a report actually writes', () => {
     expect(reaching('<td><span class="picked">1080w</span></td>')).toEqual([]);
+  });
+
+  it('reads a comparison and a comment as the code they are, not as markup', () => {
+    // The rule a bare `//` would have made unkeepable: every line comment in
+    // every script would read as a host, and the `<` of a loop would read as a
+    // tag nothing accounted for. Both are in the wiring the report ships.
+    const wiring = [
+      '<script>',
+      '// walk the panels the island describes',
+      'for (let i = 0; i < panels.length; i++) node.textContent = read(panels[i]);',
+      '</script>',
+    ].join('\n');
+
+    expect(reaching(wiring)).toEqual([]);
+  });
+
+  it('is quiet about a data island whose every angle bracket is escaped', () => {
+    expect(
+      reaching('<script type="application/json">{"sizes":"\\u003c/script\\u003e"}</script>'),
+    ).toEqual([]);
   });
 
   it('reads the URL in a cell as text, which is where a report puts one', () => {

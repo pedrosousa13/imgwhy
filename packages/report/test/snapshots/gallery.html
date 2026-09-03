@@ -47,7 +47,8 @@
   .id,
   .url,
   .raw,
-  .sizes {
+  .sizes,
+  .sizes-input {
     font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
     font-size: 0.85em;
   }
@@ -170,6 +171,103 @@
     background: var(--band);
   }
 
+  .lead,
+  .limit,
+  .reason {
+    max-width: 60rem;
+  }
+
+  .lead {
+    margin: 0 0 1rem;
+    color: var(--muted);
+  }
+
+  .panel {
+    margin: 0 0 1rem;
+    padding: 1rem 1.1rem;
+    border: 1px solid var(--line);
+  }
+
+  .panel h3 {
+    margin: 0 0 0.35rem;
+    font-size: 0.95rem;
+    overflow-wrap: anywhere;
+  }
+
+  .panel .from {
+    margin: 0 0 0.9rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding: 0.75rem 0.8rem;
+    background: var(--band);
+  }
+
+  .control {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+
+  .control:first-child {
+    flex: 1 1 24rem;
+  }
+
+  input {
+    padding: 0.3rem 0.4rem;
+    border: 1px solid var(--line);
+    background: var(--paper);
+    color: var(--ink);
+    font: inherit;
+  }
+
+  .limit {
+    margin: 0.6rem 0 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+
+  .sums {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.2rem 1rem;
+    margin: 1rem 0 0;
+  }
+
+  .sums dt {
+    color: var(--muted);
+  }
+
+  .sums dd {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }
+
+  .sums .picked {
+    font-weight: 600;
+  }
+
+  .panel ul.candidates {
+    margin-top: 0.9rem;
+  }
+
+  .panel .mark {
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .reason {
+    margin: 0.9rem 0 0;
+  }
+
   .notes ul {
     margin: 0;
     padding-left: 1.2rem;
@@ -202,6 +300,39 @@
 </tbody>
 </table>
 </div>
+<section class="panels">
+<h2>Each image, in full</h2>
+<p class="lead">The arithmetic behind one row, and the controls to run it again. Type a different <code>sizes</code> string, viewport width or device pixel ratio, and the selection is recomputed here — by the same code the command ran, against the candidates this page shipped.</p>
+<section class="panel"><h3 class="id">html &gt; body &gt; header &gt; img</h3><p class="reason">The page shipped no srcset, so there was nothing to select.</p></section>
+<section class="panel"><h3 class="id">html &gt; body &gt; main &gt; img:nth-of-type(1)</h3><p class="from">Starts from iPhone SE: a 375 px viewport at DPR 2.</p><div class="controls">
+<label class="control">sizes<input class="sizes-input" type="text"></label>
+<label class="control">viewport<input class="viewport-input" type="number" min="1" step="1"></label>
+<label class="control">DPR<input class="dpr-input" type="number" min="0.1" step="any"></label>
+</div>
+<p class="limit">Re-picked from the candidates this page shipped. A framework reads <code>sizes</code> at build time to decide which files exist at all, so where it would also change the candidate list, this understates the gain.</p>
+<dl class="sums">
+<dt>clause used</dt><dd class="clause">100vw</dd>
+<dt>css px</dt><dd class="css">375px</dd>
+<dt>needed</dt><dd class="needed">750px</dd>
+<dt>picked</dt><dd class="picked">1080w</dd>
+</dl>
+<ul class="candidates"><li><span class="raw">640w</span><span class="url">/i/640.png</span><span class="mark"></span></li><li><span class="raw">1080w</span><span class="url">/i/1080.png</span><span class="mark">← picked</span></li><li><span class="raw">1920w</span><span class="url">/i/1920.png</span><span class="mark"></span></li></ul>
+<p class="reason">375 css px × DPR 2 = 750 physical pixels, and 1080w is the smallest candidate at or above that.</p></section>
+<section class="panel"><h3 class="id">html &gt; body &gt; main &gt; img:nth-of-type(2)</h3><p class="from">Starts from iPhone SE: a 375 px viewport at DPR 2.</p><div class="controls">
+<label class="control">sizes<input class="sizes-input" type="text"></label>
+<label class="control">viewport<input class="viewport-input" type="number" min="1" step="1"></label>
+<label class="control">DPR<input class="dpr-input" type="number" min="0.1" step="any"></label>
+</div>
+<p class="limit">Re-picked from the candidates this page shipped. A framework reads <code>sizes</code> at build time to decide which files exist at all, so where it would also change the candidate list, this understates the gain.</p>
+<dl class="sums">
+<dt>clause used</dt><dd class="clause">x descriptors only</dd>
+<dt>css px</dt><dd class="css">—</dd>
+<dt>needed</dt><dd class="needed">—</dd>
+<dt>picked</dt><dd class="picked">2x</dd>
+</dl>
+<ul class="candidates"><li><span class="raw">1x</span><span class="url">/i/200.png</span><span class="mark"></span></li><li><span class="raw">2x</span><span class="url">/i/300.png</span><span class="mark">← picked</span></li></ul>
+<p class="reason">2x is the smallest density at or above DPR 2.</p></section>
+</section>
 <section class="notes">
 <h2>How to read this</h2>
 <ul>
@@ -211,5 +342,276 @@
 </ul>
 </section>
 </main>
+<script type="application/json">{"panels":[{"image":{"id":"html \u003e body \u003e header \u003e img","selector":"html \u003e body \u003e header \u003e img","candidates":[],"sizes":null,"sizesSource":"img","renderedWidth":120,"currentSrc":"https://example.com/i/logo.png","naturalWidth":120,"transferBytes":null,"loading":"lazy"},"device":{"id":"iphone-se","name":"iPhone SE","viewport":{"width":375,"height":667},"dpr":2}},{"image":{"id":"html \u003e body \u003e main \u003e img:nth-of-type(1)","selector":"html \u003e body \u003e main \u003e img:nth-of-type(1)","candidates":[{"url":"/i/640.png","w":640,"x":null,"raw":"640w"},{"url":"/i/1080.png","w":1080,"x":null,"raw":"1080w"},{"url":"/i/1920.png","w":1920,"x":null,"raw":"1920w"}],"sizes":"(min-width: 1000px) 50vw, 100vw","sizesSource":"img","renderedWidth":187,"currentSrc":"https://example.com/i/1080.png","naturalWidth":187,"transferBytes":118231,"loading":null},"device":{"id":"iphone-se","name":"iPhone SE","viewport":{"width":375,"height":667},"dpr":2}},{"image":{"id":"html \u003e body \u003e main \u003e img:nth-of-type(2)","selector":"html \u003e body \u003e main \u003e img:nth-of-type(2)","candidates":[{"url":"/i/200.png","w":null,"x":1,"raw":"1x"},{"url":"/i/300.png","w":null,"x":2,"raw":"2x"}],"sizes":null,"sizesSource":"img","renderedWidth":200,"currentSrc":"https://example.com/i/300.png","naturalWidth":200,"transferBytes":8210,"loading":null},"device":{"id":"iphone-se","name":"iPhone SE","viewport":{"width":375,"height":667},"dpr":2}}]}</script>
+<script>
+const isWhitespace = (c) => /\s/.test(c);
+const parseSrcset = function parseSrcset(raw) {
+    const out = [];
+    const s = raw || '';
+    let i = 0;
+    while (i < s.length) {
+        while (i < s.length && (isWhitespace(s[i]) || s[i] === ','))
+            i++;
+        if (i >= s.length)
+            break;
+        let url = '';
+        while (i < s.length && !isWhitespace(s[i])) {
+            url += s[i];
+            i++;
+        }
+        let desc = '';
+        if (url.endsWith(',')) {
+            url = url.replace(/,+$/, '');
+        }
+        else {
+            let depth = 0;
+            while (i < s.length) {
+                const c = s[i];
+                if (c === '(')
+                    depth++;
+                if (c === ')')
+                    depth--;
+                if (c === ',' && depth === 0) {
+                    i++;
+                    break;
+                }
+                desc += c;
+                i++;
+            }
+            desc = desc.trim();
+        }
+        const m = desc.match(/^([\d.]+)([wx])$/);
+        out.push({
+            url,
+            w: m && m[2] === 'w' ? parseFloat(m[1]) : null,
+            x: m && m[2] === 'x' ? parseFloat(m[1]) : m ? null : 1,
+            raw: desc || '1x',
+        });
+    }
+    return out;
+};
+const selectCandidate = function selectCandidate(candidates, sizesPx, dpr) {
+    const withDensity = candidates
+        .map((c) => ({
+        candidate: c,
+        density: c.w != null ? (sizesPx ? c.w / sizesPx : null) : c.x,
+    }))
+        .filter((c) => c.density != null)
+        .sort((a, b) => a.density - b.density);
+    if (!withDensity.length)
+        return null;
+    const picked = withDensity.find((c) => c.density >= dpr) ?? withDensity[withDensity.length - 1];
+    return picked.candidate;
+};
+const toPx = (n, u, vw) => u === 'vw' ? (n / 100) * vw : u === 'em' || u === 'rem' ? n * 16 : n;
+const splitTop = function splitTop(s) {
+    const out = [];
+    let depth = 0;
+    let cur = '';
+    for (const ch of s) {
+        if (ch === '(')
+            depth++;
+        else if (ch === ')')
+            depth--;
+        if (ch === ',' && depth === 0) {
+            out.push(cur);
+            cur = '';
+        }
+        else {
+            cur += ch;
+        }
+    }
+    if (cur.trim())
+        out.push(cur);
+    return out.map((x) => x.trim()).filter(Boolean);
+};
+const evalCond = function evalCond(cond, vw) {
+    return cond.split(/\s+and\s+/i).every((p) => {
+        const m = p.match(/\(\s*(min|max)-width\s*:\s*([\d.]+)(px|em|rem)?\s*\)/i);
+        if (!m)
+            return false;
+        const v = toPx(parseFloat(m[2]), (m[3] || 'px').toLowerCase(), vw);
+        return m[1].toLowerCase() === 'max' ? vw <= v : vw >= v;
+    });
+};
+const evalLen = function evalLen(str, vw) {
+    const s = str.trim();
+    if (/^auto$/i.test(s))
+        return { auto: true };
+    const calc = s.match(/^calc\(([\s\S]*)\)$/i);
+    const toks = (calc ? calc[1] : s).match(/[+-]?\s*[\d.]+(?:vw|px|em|rem)/gi);
+    if (!toks)
+        return null;
+    let t = 0;
+    for (const tok of toks) {
+        const m = tok.replace(/\s+/g, '').match(/^([+-]?)([\d.]+)(vw|px|em|rem)$/i);
+        if (!m)
+            return null;
+        t += (m[1] === '-' ? -1 : 1) * toPx(parseFloat(m[2]), m[3].toLowerCase(), vw);
+    }
+    return { px: t };
+};
+const asResolution = (len, clause, cond) => 'auto' in len ? { kind: 'auto', clause, cond } : { kind: 'length', px: len.px, clause, cond };
+const resolveSizes = function resolveSizes(sizesString, viewportWidth) {
+    if (!sizesString || !sizesString.trim()) {
+        return { kind: 'default', px: viewportWidth, clause: 'absent → 100vw default' };
+    }
+    for (const clause of splitTop(sizesString)) {
+        const mm = clause.match(/^(\(.*\))\s+(.+)$/);
+        if (mm) {
+            const cond = mm[1];
+            if (!evalCond(cond, viewportWidth))
+                continue;
+            const len = evalLen(mm[2], viewportWidth);
+            return len ? asResolution(len, clause, cond) : { kind: 'error', clause };
+        }
+        const len = evalLen(clause, viewportWidth);
+        return len ? asResolution(len, clause, null) : { kind: 'error', clause };
+    }
+    return { kind: 'default', px: viewportWidth, clause: 'no condition matched → 100vw default' };
+};
+const resolvedPx = (resolution, renderedWidth) => {
+    switch (resolution.kind) {
+        case 'auto':
+            return renderedWidth;
+        case 'error':
+            return null;
+        default:
+            return resolution.px;
+    }
+};
+const explainSelection = function explainSelection(image, device) {
+    const byWidth = image.candidates.some((candidate) => candidate.w != null);
+    if (!byWidth) {
+        return { kind: 'density', picked: selectCandidate(image.candidates, null, device.dpr) };
+    }
+    const resolution = resolveSizes(image.sizes, device.viewport.width);
+    const cssPx = resolvedPx(resolution, image.renderedWidth);
+    const picked = selectCandidate(image.candidates, cssPx, device.dpr);
+    if (cssPx === null)
+        return { kind: 'unreadable', resolution, picked };
+    return { kind: 'width', resolution, cssPx, neededPx: cssPx * device.dpr, picked };
+};
+
+const readPanel = function readPanel(selection, candidates, dpr) {
+  const round = (px) => `${Math.round(px)}px`;
+  const marks = (picked2) => candidates.map((candidate) => candidate === picked2 ? "← picked" : "");
+  if (candidates.length === 0) {
+    return {
+      clause: "no srcset",
+      cssPx: "—",
+      needed: "—",
+      picked: "—",
+      reason: "The page shipped no srcset, so there was nothing to select.",
+      marks: []
+    };
+  };
+  const picked = selection.picked;
+  const raw = picked === null ? "—" : picked.raw;
+  if (selection.kind === "density") {
+    const reached2 = picked !== null && picked.x !== null && picked.x >= dpr;
+    const reason2 = picked === null ? "No candidate carries a descriptor a browser can select on." : reached2 ? `${raw} is the smallest density at or above DPR ${dpr}.` : `No density reaches DPR ${dpr}, so the largest wins: ${raw}.`;
+    return {
+      clause: "x descriptors only",
+      cssPx: "—",
+      needed: "—",
+      picked: raw,
+      reason: reason2,
+      marks: marks(picked)
+    };
+  };
+  if (selection.kind === "unreadable") {
+    const reason2 = picked === null ? `The clause ${selection.resolution.clause} carries no length to read, and no candidate carries a density, so nothing could be selected.` : `The clause ${selection.resolution.clause} carries no length to read, so ${raw} won on its density alone.`;
+    return {
+      clause: selection.resolution.clause,
+      cssPx: "unreadable",
+      needed: "—",
+      picked: raw,
+      reason: reason2,
+      marks: marks(picked)
+    };
+  };
+  const needed = Math.round(selection.neededPx);
+  const reached = picked !== null && (picked.w !== null ? picked.w >= selection.neededPx : picked.x !== null && picked.x >= dpr);
+  const arithmetic = `${Math.round(selection.cssPx)} css px × DPR ${dpr} = ${needed} physical pixels`;
+  const reason = picked === null ? `${arithmetic}, and no candidate carries a descriptor a browser can select on.` : reached ? `${arithmetic}, and ${raw} is the smallest candidate at or above that.` : `${arithmetic}, and no candidate reaches that, so the largest wins: ${raw}.`;
+  return {
+    clause: selection.resolution.clause,
+    cssPx: round(selection.cssPx),
+    needed: round(selection.neededPx),
+    picked: raw,
+    reason,
+    marks: marks(picked)
+  };
+};
+
+(function () {
+  const wire = (section, panel) => {
+    const sizes = section.querySelector('.sizes-input');
+    const viewport = section.querySelector('.viewport-input');
+    const ratio = section.querySelector('.dpr-input');
+    if (!sizes || !viewport || !ratio) return;
+
+    const marks = section.querySelectorAll('.mark');
+    const write = (selector, text) => {
+      const node = section.querySelector(selector);
+      if (node) node.textContent = text;
+    };
+    const show = (readout) => {
+      write('.clause', readout.clause);
+      write('.css', readout.cssPx);
+      write('.needed', readout.needed);
+      write('.picked', readout.picked);
+      write('.reason', readout.reason);
+      for (let m = 0; m < marks.length; m++) {
+        marks[m].textContent = readout.marks[m] || '';
+      }
+    };
+    const recompute = () => {
+      const width = Number(viewport.value);
+      const dpr = Number(ratio.value);
+      if (!(width > 0) || !(dpr > 0)) {
+        show({
+          clause: '—',
+          cssPx: '—',
+          needed: '—',
+          picked: '—',
+          reason:
+            'A viewport width and a device pixel ratio decide this, ' +
+            'and both have to be above zero.',
+          marks: [],
+        });
+        return;
+      }
+      const image = Object.assign({}, panel.image, {
+        sizes: sizes.value === '' ? null : sizes.value,
+      });
+      const device = {
+        id: 'typed',
+        name: 'typed',
+        viewport: { width: width, height: panel.device.viewport.height },
+        dpr: dpr,
+      };
+      show(readPanel(explainSelection(image, device), image.candidates, dpr));
+    };
+
+    sizes.value = panel.image.sizes === null ? '' : panel.image.sizes;
+    viewport.value = String(panel.device.viewport.width);
+    ratio.value = String(panel.device.dpr);
+    sizes.addEventListener('input', recompute);
+    viewport.addEventListener('input', recompute);
+    ratio.addEventListener('input', recompute);
+  };
+
+  const island = document.querySelector('script[type="application/json"]');
+  if (island === null) return;
+  const panels = JSON.parse(island.textContent).panels;
+  const sections = document.querySelectorAll('.panel');
+
+  for (let i = 0; i < panels.length; i++) {
+    if (sections[i] && panels[i]) wire(sections[i], panels[i]);
+  }
+})();
+</script>
 </body>
 </html>

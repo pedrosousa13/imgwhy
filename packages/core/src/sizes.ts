@@ -75,3 +75,13 @@ export function resolveSizes(sizesString: string | null, viewportWidth: number):
   }
   return { kind: 'default', px: viewportWidth, clause: 'no condition matched → 100vw default' };
 }
+
+/** Every function this module is made of. `srcset.ts` says what for. */
+export const PARTS: readonly Function[] = [
+  toPx,
+  splitTop,
+  evalCond,
+  evalLen,
+  asResolution,
+  resolveSizes,
+];

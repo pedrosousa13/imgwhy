@@ -115,3 +115,77 @@ export function html(parts: TemplateStringsArray, ...values: Value[]): Html {
   }
   return new Markup(out);
 }
+
+/**
+ * The three runs of characters that leave a `<script>` element.
+ *
+ * A script element is not markup. The parser reads its content as script data
+ * and stops at `</script`, whatever an HTML escape did to the text on the way
+ * in — `&lt;/script&gt;` is `&lt;/script&gt;` to a JavaScript parser and the
+ * element it sits in has already ended. `<!--` is the other half: it moves the
+ * parser into the escaped-text state, where a following `<script` opens a
+ * nested one and `</script>` no longer closes anything.
+ *
+ * So HTML escaping is not the answer here, and neither is a variant of it.
+ * These three are refused outright.
+ */
+const BREAKOUT = /<\/script|<!--|<script/i;
+
+/** Whichever of the three above is in `text`, or null. */
+const breakout = (text: string): string | null => BREAKOUT.exec(text)?.[0].toLowerCase() ?? null;
+
+/**
+ * A `<script>` element carrying JavaScript this repo wrote.
+ *
+ * Nothing from the page reaches this. What goes in is core, as `coreSource()`
+ * hands it over, and this package's own panel code — both of them literal
+ * text, neither of them interpolated. That is the same rule the stylesheet
+ * keeps, and it is kept for the same reason: escaping buys nothing inside an
+ * element that parses its own grammar, so the answer is that nothing needing
+ * an escape goes in. The Capture reaches the page through `dataScript` below,
+ * as inert JSON the script reads.
+ *
+ * The refusal is a guarantee at render time rather than a rule someone has to
+ * remember. Core is source read out of the built package, so an `</script>` in
+ * a future core would arrive here, and a report is a file people mail to each
+ * other: better a run that fails loudly than a document that quietly stopped
+ * being one element.
+ */
+export function script(javascript: string): Html {
+  const found = breakout(javascript);
+  if (found !== null) {
+    throw new Error(`the script carries "${found}", which would end the element it sits in`);
+  }
+  return new Markup(`<script>\n${javascript}\n</script>`);
+}
+
+/**
+ * The Capture's numbers, as a `<script type="application/json">` island the
+ * page's own script reads back.
+ *
+ * This is how page content reaches the script without ever being script. The
+ * element holds data, not code: a browser runs nothing in it, and the panel
+ * reads it with `JSON.parse`, so a hostile `sizes` string is a string on the
+ * way in and a string on the way out.
+ *
+ * Every `<` and `>` is written as its JSON escape. Both are exact: a `<`
+ * outside a string is not JSON at all, so the only ones this can touch are
+ * inside a string, and `\u003c` in a JSON string *is* `<` — `JSON.parse` hands
+ * back the character that went in. What it cannot be is `</script`, `<!--` or
+ * `<script`, because none of those survives without a literal `<`.
+ *
+ * That is the whole of the escaping argument for this element, and it is
+ * checked rather than asserted: `escaping.test.ts` renders a Capture whose
+ * `sizes` string carries all three and reads the island back.
+ */
+export function dataScript(value: object): Html {
+  const json = JSON.stringify(value).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+  const found = breakout(json);
+  if (found !== null) {
+    // Unreachable: the replacement above leaves no `<` to start any of them.
+    // Held anyway, because this element carries the one thing in the document
+    // that came off the page, and a silent hole here is the whole file.
+    throw new Error(`the data carries "${found}", which would end the element it sits in`);
+  }
+  return new Markup(`<script type="application/json">${json}</script>`);
+}

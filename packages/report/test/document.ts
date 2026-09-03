@@ -37,7 +37,34 @@ const ATTRIBUTE = /([^\s=>/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
  */
 const DOCTYPE = /^<!doctype [^>]*>/i;
 
-const markup = (document: string): string => document.replace(DOCTYPE, '');
+/**
+ * A script element, its attributes, and everything between its tags.
+ *
+ * Case-insensitive and non-greedy, which is how a browser reads one: the
+ * content of a script element is not markup at all — the parser switches to
+ * script data and runs to the first `</script`, whatever the text in between
+ * looks like.
+ */
+const SCRIPT = /<script([^>]*)>([\s\S]*?)<\/script>/gi;
+
+/**
+ * The document as markup, which means without the parts that are not.
+ *
+ * The doctype is not an element. A script's content is not markup either, and
+ * taking it out is what lets everything below stay honest: `i < panels.length`
+ * inside a script is a comparison, and a scanner that read it as a tag — or as
+ * a `<` nothing accounted for — would report the report's own code as an
+ * injection and would keep reporting it until someone loosened the rule that
+ * matters.
+ *
+ * What it costs is that no rule below sees inside a script, so `scripts` hands
+ * that content back for the checks that are about a script rather than about
+ * markup. Between them: `self-contained.test.ts` reads the code for anything
+ * that fetches or writes markup, and reads a data island for a `<` — which
+ * cannot be there, because `dataScript` writes every one of them as `\\u003c`.
+ */
+const markup = (document: string): string =>
+  document.replace(DOCTYPE, '').replace(SCRIPT, (_whole, blob: string) => `<script${blob}></script>`);
 
 const attributesOf = (blob: string): Attribute[] =>
   [...blob.matchAll(ATTRIBUTE)].map((found) => ({
@@ -84,3 +111,19 @@ const STYLE = /<style[^>]*>([\s\S]*?)<\/style>/gi;
 
 export const stylesheets = (document: string): string[] =>
   [...document.matchAll(STYLE)].map((found) => found[1]);
+
+/**
+ * One script element: what the browser will do with it, and what is inside it.
+ *
+ * `type` is what tells the two kinds apart, and they answer to different
+ * rules. An empty type is a classic script and runs, so what matters is what
+ * the code can reach. `application/json` runs nothing at all — it is the
+ * report's data, and what matters is that it cannot stop being data.
+ */
+export type Script = { type: string; text: string };
+
+export const scripts = (document: string): Script[] =>
+  [...document.matchAll(SCRIPT)].map((found) => ({
+    type: (attributesOf(found[1]).find((one) => one.name === 'type')?.value ?? '').toLowerCase(),
+    text: found[2],
+  }));

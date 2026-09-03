@@ -48,3 +48,13 @@ export function parseSrcset(raw: string): Candidate[] {
   }
   return out;
 }
+
+/**
+ * Every function this module is made of.
+ *
+ * `source.ts` says what this is for: core ships into a page as source, and a
+ * function left out of this list is a function the page does not have. Add one
+ * here when you add one above — `source.test.ts` reads every module's top
+ * level and refuses a name that is missing from the list beside it.
+ */
+export const PARTS: readonly Function[] = [isWhitespace, parseSrcset];
