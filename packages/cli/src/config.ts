@@ -1,0 +1,132 @@
+import { readFileSync, realpathSync } from 'node:fs';
+import { resolve, sep } from 'node:path';
+import type { DeviceProfile } from '@imgwhy/core';
+import { DEFAULT_PROFILES } from '@imgwhy/runner';
+
+export const CONFIG_FILE = 'imgwhy.config.json';
+
+export type LoadedProfiles =
+  | { ok: true; profiles: DeviceProfile[] }
+  | { ok: false; message: string };
+
+/**
+ * Resolve a config file name against the working directory, or refuse it.
+ *
+ * imgwhy reads one file from the directory it was run in, and nothing else.
+ * The check is here rather than left implicit because the name is not the only
+ * way out of a directory: `imgwhy.config.json` can itself be a symlink, and a
+ * repository you cloned can carry one that points at your home directory. The
+ * error message quotes the file, so reading the wrong file leaks it.
+ *
+ * Both the joined path and what it really points at have to land inside the
+ * directory, which is what rules out `../`, an absolute path, and a symlink
+ * that leaves. Null means refused.
+ */
+export function configPathInside(dir: string, name: string): string | null {
+  const root = realpathSync(dir);
+  const inside = (path: string): boolean => path === root || path.startsWith(root + sep);
+
+  const target = resolve(root, name);
+  if (!inside(target)) return null;
+
+  let real: string;
+  try {
+    real = realpathSync(target);
+  } catch {
+    // Nothing there to follow. The caller's read reports the absence.
+    return target;
+  }
+  return inside(real) ? real : null;
+}
+
+/**
+ * Read the device set for a run.
+ *
+ * No config file means the default set. A config file replaces that set
+ * outright — it does not merge, because a project that names its devices has
+ * said which devices it cares about.
+ *
+ * A file that is there but unreadable is an error, never a quiet fall back to
+ * the defaults: a run that silently ignored the config would report the wrong
+ * devices and look right doing it.
+ */
+export function loadDeviceProfiles(dir: string): LoadedProfiles {
+  const path = configPathInside(dir, CONFIG_FILE);
+  if (path === null) {
+    return {
+      ok: false,
+      message: `${CONFIG_FILE} resolves outside the working directory, so imgwhy will not read it`,
+    };
+  }
+
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { ok: true, profiles: DEFAULT_PROFILES };
+    }
+    return { ok: false, message: `${CONFIG_FILE} could not be read: ${messageOf(error)}` };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    return { ok: false, message: `${CONFIG_FILE} is not valid JSON: ${messageOf(error)}` };
+  }
+
+  return readDevices(parsed);
+}
+
+const messageOf = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** A viewport of zero pixels renders nothing, so a size has to be above 0. */
+const isSize = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0;
+
+const isName = (value: unknown): value is string => typeof value === 'string' && value !== '';
+
+function readDevices(parsed: unknown): LoadedProfiles {
+  const devices = isObject(parsed) ? parsed['devices'] : undefined;
+  if (!Array.isArray(devices) || devices.length === 0) {
+    return {
+      ok: false,
+      message: `${CONFIG_FILE} must carry a "devices" array holding at least one profile`,
+    };
+  }
+
+  const profiles: DeviceProfile[] = [];
+  const seen = new Set<string>();
+
+  for (const [index, entry] of devices.entries()) {
+    const at = `${CONFIG_FILE}: devices[${index}]`;
+    const fail = (message: string): LoadedProfiles => ({ ok: false, message: `${at}${message}` });
+
+    if (!isObject(entry)) return fail(' must be an object describing one device');
+    const viewport = isObject(entry['viewport']) ? entry['viewport'] : {};
+
+    if (!isName(entry['id'])) return fail('.id must be a non-empty string');
+    if (seen.has(entry['id'])) {
+      return fail(`.id repeats "${entry['id']}", and every profile needs its own`);
+    }
+    if (!isName(entry['name'])) return fail('.name must be a non-empty string');
+    if (!isSize(viewport['width'])) return fail('.viewport.width must be a number above 0');
+    if (!isSize(viewport['height'])) return fail('.viewport.height must be a number above 0');
+    if (!isSize(entry['dpr'])) return fail('.dpr must be a number above 0');
+
+    seen.add(entry['id']);
+    profiles.push({
+      id: entry['id'],
+      name: entry['name'],
+      viewport: { width: viewport['width'], height: viewport['height'] },
+      dpr: entry['dpr'],
+    });
+  }
+
+  return { ok: true, profiles };
+}

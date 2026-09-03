@@ -1,6 +1,5 @@
 /** One image as the page reported it, before core parses the `srcset`. */
 export type RawImage = {
-  id: string;
   selector: string;
   srcset: string;
   sizes: string | null;
@@ -18,7 +17,11 @@ export type RawImage = {
  * reference anything outside itself — including core. Parsing stays in Node.
  */
 export function collectImages(): RawImage[] {
-  /** The DOM path doubles as the id, because it survives a second render. */
+  /**
+   * Where the image sat in this render. Usually the same string every render,
+   * which is why it is where an id starts; `alignImageIds` handles the renders
+   * where a responsive layout moved the element.
+   */
   const domPath = (element: Element): string => {
     const parts: string[] = [];
     let node: Element | null = element;
@@ -38,11 +41,9 @@ export function collectImages(): RawImage[] {
   return Array.from(document.images)
     .filter((img) => img.getBoundingClientRect().width > 8 || img.naturalWidth > 8)
     .map((img): RawImage => {
-      const path = domPath(img);
       const loading = img.getAttribute('loading');
       return {
-        id: path,
-        selector: path,
+        selector: domPath(img),
         srcset: img.srcset,
         sizes: img.sizes || null,
         // The `<img>` is the only source this slice reads. Issue #5 resolves a

@@ -1,11 +1,13 @@
-import type { Capture, CapturedImage, DeviceProfile } from '@imgwhy/core';
+import type { Capture, CapturedImage, DeviceProfile, DeviceRun } from '@imgwhy/core';
 import { parseSrcset } from '@imgwhy/core';
-import { type Browser, chromium } from 'playwright';
-import { collectImages } from './collect.js';
+import { type Browser, type BrowserContext, type Page, chromium } from 'playwright';
+import { alignImageIds } from './align.js';
+import { type RawImage, collectImages } from './collect.js';
 
 export type CaptureOptions = {
   url: string;
-  profile: DeviceProfile;
+  /** Rendered in order, one browser context each. */
+  profiles: DeviceProfile[];
   /**
    * Test seam: how the browser starts. A test hands back a browser it holds,
    * so it can prove the browser closes on every exit path.
@@ -14,59 +16,95 @@ export type CaptureOptions = {
 };
 
 /**
- * Render a page as one device and record what each image resolved to.
+ * Render a page as every profile and record what each image resolved to.
  *
- * The browser and its context close on every exit path, including a page that
- * never loads.
+ * One browser, one context per profile. The browser and every context close on
+ * every exit path, including a profile that fails after the others rendered.
  */
 export async function capturePage({
   url,
-  profile,
+  profiles,
   launch = () => chromium.launch(),
 }: CaptureOptions): Promise<Capture> {
   const browser = await startBrowser(launch);
   try {
-    // A fresh context carries an empty cache, so no earlier download can stand
-    // in for a selection. Issue #3 disables the HTTP cache outright.
-    const context = await browser.newContext({
-      viewport: profile.viewport,
-      deviceScaleFactor: profile.dpr,
-    });
-    try {
-      const page = await context.newPage();
-      await page.goto(url, { waitUntil: 'load' });
-      const raw = await page.evaluate(collectImages);
+    const runs: DeviceRun[] = [];
+    // Every profile lands on the same page, so the last one that got there
+    // names it. It differs from the requested URL after a redirect.
+    let landedOn = url;
 
-      const images: CapturedImage[] = raw.map((image) => ({
-        id: image.id,
-        selector: image.selector,
-        candidates: parseSrcset(image.srcset),
-        sizes: image.sizes,
-        sizesSource: image.sizesSource,
-        renderedWidth: image.renderedWidth,
-        currentSrc: image.currentSrc,
-        naturalWidth: image.naturalWidth,
-        // Real transfer bytes need the DevTools Protocol, which issue #3 wires.
-        // Unknown is reported as unknown, never guessed.
-        transferBytes: null,
-        loading: image.loading,
-      }));
-
-      return {
-        // The URL the page ended on. A redirect makes it differ from the one
-        // that was requested, and it is the base every relative candidate
-        // resolves against, so the requested URL would misplace them all.
-        url: page.url(),
-        capturedAt: new Date().toISOString(),
-        devices: [profile],
-        runs: [{ deviceId: profile.id, images }],
-      };
-    } finally {
-      await context.close();
+    for (const profile of profiles) {
+      const context = await browser.newContext({
+        viewport: profile.viewport,
+        deviceScaleFactor: profile.dpr,
+      });
+      try {
+        const page = await context.newPage();
+        await disableCache(context, page);
+        await page.goto(url, { waitUntil: 'load' });
+        const raw = await page.evaluate(collectImages);
+        landedOn = page.url();
+        runs.push({ deviceId: profile.id, images: raw.map(toCapturedImage) });
+      } finally {
+        await context.close();
+      }
     }
+
+    return {
+      // The URL the page ended on. A redirect makes it differ from the one
+      // that was requested, and it is the base every relative candidate
+      // resolves against, so the requested URL would misplace them all.
+      url: landedOn,
+      capturedAt: new Date().toISOString(),
+      devices: profiles,
+      // Assigned across the whole capture, because an id that holds only
+      // inside one run cannot align the runs against each other.
+      runs: alignImageIds(runs),
+    };
   } finally {
     await browser.close();
   }
+}
+
+const toCapturedImage = (image: RawImage): CapturedImage => ({
+  // The DOM path stands in until `alignImageIds` has seen every run. Only then
+  // is it known whether the path held.
+  id: image.selector,
+  selector: image.selector,
+  candidates: parseSrcset(image.srcset),
+  sizes: image.sizes,
+  sizesSource: image.sizesSource,
+  renderedWidth: image.renderedWidth,
+  currentSrc: image.currentSrc,
+  naturalWidth: image.naturalWidth,
+  // Real transfer bytes need the DevTools Protocol, which issue #3 wires.
+  // Unknown is reported as unknown, never guessed.
+  transferBytes: null,
+  loading: image.loading,
+});
+
+/**
+ * Take the HTTP cache out of the picture for one page.
+ *
+ * A held copy is the reason `currentSrc` stops being evidence: a browser that
+ * already has a larger variant reuses it and selection never runs at all. A
+ * fresh context starts with an empty cache, so it cannot inherit a copy from
+ * the profile before it. This closes the rest: nothing on disk from an earlier
+ * `imgwhy` run answers either, and the server sees every request the render
+ * makes rather than only the ones the cache missed.
+ *
+ * Playwright exposes no switch for it, so the DevTools Protocol does it — the
+ * same instruction the DevTools "Disable cache" checkbox sends, which is also
+ * why every request goes out carrying `Cache-Control: no-cache`.
+ *
+ * It does not reach Blink's per-render memory cache: two elements asking for
+ * one URL in the same document are still one request. That is the browser
+ * behaviour under study, not a cache to defeat.
+ */
+async function disableCache(context: BrowserContext, page: Page): Promise<void> {
+  const session = await context.newCDPSession(page);
+  await session.send('Network.enable');
+  await session.send('Network.setCacheDisabled', { cacheDisabled: true });
 }
 
 async function startBrowser(launch: () => Promise<Browser>): Promise<Browser> {
