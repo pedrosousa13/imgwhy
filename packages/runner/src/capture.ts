@@ -56,12 +56,22 @@ export async function capturePage({
             deviceId: profile.id,
             images: raw.map((image) => toCapturedImage(image, transfers)),
           });
-        } finally {
-          // Detached here rather than left to the context, so it goes on every
-          // exit path — including a page that never loaded, which reaches this
-          // with the session still attached.
-          await session.detach();
+        } catch (failure) {
+          // Detaching is attempted here too — a page that never loaded reaches
+          // this with the session still attached — but its own failure is
+          // dropped, because `detach()` can reject by itself. A crashed target
+          // is gone, and asking a gone target to detach fails. In a `finally`
+          // that rejection replaces the failure that brought the run here, so
+          // the page that would not load goes unreported and the caller is
+          // told about a session instead.
+          await session.detach().catch(() => {});
+          throw failure;
         }
+        // Nothing went wrong, so a detach that fails is the only failure there
+        // is, and it is reported. Outside a `finally` on purpose, which is why
+        // the block above has to stay straight-line: an early exit from it
+        // would leave the session attached until the context closed it.
+        await session.detach();
       } finally {
         await context.close();
       }
@@ -115,10 +125,8 @@ const toCapturedImage = (image: RawImage, transfers: TransferLog): CapturedImage
  * same instruction the DevTools "Disable cache" checkbox sends, which is also
  * why every request goes out carrying `Cache-Control: no-cache`.
  *
- * It does not reach Blink's per-render memory cache: two elements asking for
- * one URL in the same document are still one request. That is the browser
- * behaviour under study, not a cache to defeat — and it is why one recorded
- * response can be what two images each weigh.
+ * It does not reach Blink's per-render memory cache. `recordTransfers` says
+ * what that leaves, under "What the mapping cannot do".
  */
 async function disableCache(session: CDPSession): Promise<void> {
   await session.send('Network.setCacheDisabled', { cacheDisabled: true });

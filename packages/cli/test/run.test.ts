@@ -33,11 +33,16 @@ const logo = (): CapturedImage => ({
   loading: 'lazy',
 });
 
-const hero = (
-  renderedWidth: number,
-  file: string,
-  transferBytes: number | null,
-): CapturedImage => ({
+/**
+ * What one response cost, named at the call site.
+ *
+ * `null` is the case that matters most here — no transfer was recorded, so the
+ * trace has to say unknown — and as a bare third argument it read as nothing
+ * in particular.
+ */
+type Weighed = { bytes: number | null };
+
+const hero = (renderedWidth: number, file: string, { bytes }: Weighed): CapturedImage => ({
   id: 'html > body > main > img:nth-of-type(1)',
   selector: 'html > body > main > img:nth-of-type(1)',
   candidates: parseSrcset(HERO_SRCSET),
@@ -46,11 +51,11 @@ const hero = (
   renderedWidth,
   currentSrc: `https://example.com/i/${file}`,
   naturalWidth: renderedWidth,
-  transferBytes,
+  transferBytes: bytes,
   loading: null,
 });
 
-const badge = (file: string, transferBytes: number): CapturedImage => ({
+const badge = (file: string, { bytes }: Weighed): CapturedImage => ({
   id: 'html > body > main > img:nth-of-type(2)',
   selector: 'html > body > main > img:nth-of-type(2)',
   candidates: parseSrcset('/i/200.png 1x, /i/300.png 2x'),
@@ -59,21 +64,33 @@ const badge = (file: string, transferBytes: number): CapturedImage => ({
   renderedWidth: 200,
   currentSrc: `https://example.com/i/${file}`,
   naturalWidth: 200,
-  transferBytes,
+  transferBytes: bytes,
   loading: null,
 });
 
 /** The gallery as the five default profiles would have recorded it. */
 const gallery = (): Capture => {
   const runs: DeviceRun[] = [
-    { deviceId: 'iphone-se', images: [logo(), hero(187, '1080.png', 118231), badge('300.png', 8210)] },
+    {
+      deviceId: 'iphone-se',
+      images: [logo(), hero(187, '1080.png', { bytes: 118231 }), badge('300.png', { bytes: 8210 })],
+    },
     {
       deviceId: 'iphone-15-pro',
-      images: [logo(), hero(196, '1920.png', 342016), badge('300.png', 8210)],
+      images: [logo(), hero(196, '1920.png', { bytes: 342016 }), badge('300.png', { bytes: 8210 })],
     },
-    { deviceId: 'pixel-8', images: [logo(), hero(206, '1920.png', 342016), badge('300.png', 8210)] },
-    { deviceId: 'ipad', images: [logo(), hero(410, '1920.png', 342016), badge('300.png', 8210)] },
-    { deviceId: 'desktop', images: [logo(), hero(720, '1080.png', 118231), badge('200.png', 4102)] },
+    {
+      deviceId: 'pixel-8',
+      images: [logo(), hero(206, '1920.png', { bytes: 342016 }), badge('300.png', { bytes: 8210 })],
+    },
+    {
+      deviceId: 'ipad',
+      images: [logo(), hero(410, '1920.png', { bytes: 342016 }), badge('300.png', { bytes: 8210 })],
+    },
+    {
+      deviceId: 'desktop',
+      images: [logo(), hero(720, '1080.png', { bytes: 118231 }), badge('200.png', { bytes: 4102 })],
+    },
   ];
   return {
     url: 'https://example.com/gallery',
@@ -223,8 +240,8 @@ describe('run', () => {
   it('flags the row where the file that loaded is not the one picked', async () => {
     const capture = on(gallery(), 'desktop', [
       logo(),
-      hero(720, '1920.png', 342016),
-      badge('200.png', 4102),
+      hero(720, '1920.png', { bytes: 342016 }),
+      badge('200.png', { bytes: 4102 }),
     ]);
 
     const outcome = await run(['https://example.com/gallery'], returning(capture), cwd);
@@ -236,8 +253,8 @@ describe('run', () => {
   it('prints unknown in the bytes column where no transfer was recorded', async () => {
     const capture = on(gallery(), 'desktop', [
       logo(),
-      hero(720, '1080.png', null),
-      badge('200.png', 4102),
+      hero(720, '1080.png', { bytes: null }),
+      badge('200.png', { bytes: 4102 }),
     ]);
 
     const outcome = await run(['https://example.com/gallery'], returning(capture), cwd);
@@ -248,25 +265,74 @@ describe('run', () => {
     expect(cells(desktop).at(-1)).toBe('unknown');
   });
 
-  it('gives the bytes of an image that had nothing to choose from', async () => {
+  it('names the devices when an image with nothing to choose weighed different things', async () => {
     const capture = on(gallery(), 'iphone-se', [
       { ...logo(), transferBytes: 3120 },
-      hero(187, '1080.png', 118231),
-      badge('300.png', 8210),
+      hero(187, '1080.png', { bytes: 118231 }),
+      badge('300.png', { bytes: 8210 }),
     ]);
 
     const outcome = await run(['https://example.com/gallery'], returning(capture), cwd);
 
     // One line rather than a table, because there is nothing to explain — but
-    // the bytes still arrived, so they are still reported. The four remaining
-    // devices recorded none, and say so.
+    // the bytes still arrived, so they are still reported. One device measured
+    // them and four recorded none, and the line says which was which: a pair
+    // of figures with no device against either is not per-device reporting.
     expect(outcome.stdout).toContain('  no srcset, so nothing was selected — file  logo.png');
-    expect(outcome.stdout).toContain('  bytes       3120, unknown');
+    expect(outcome.stdout).toContain(
+      '  bytes       3120 on iPhone SE, unknown on iPhone 15 Pro, Pixel 8, iPad, Desktop',
+    );
+  });
+
+  it('keeps one figure for an image every device weighed the same', async () => {
+    const weighed = { ...logo(), transferBytes: 3120 };
+    let capture = gallery();
+    for (const device of DEFAULT_PROFILES) {
+      capture = on(capture, device.id, [
+        weighed,
+        hero(187, '1080.png', { bytes: 118231 }),
+        badge('300.png', { bytes: 8210 }),
+      ]);
+    }
+
+    const outcome = await run(['https://example.com/gallery'], returning(capture), cwd);
+
+    // Where the devices agree, one figure is the whole truth, and five rows
+    // saying 3120 would bury the images that do differ. That is what this
+    // branch of the trace exists to avoid, so agreement names no device.
+    expect(outcome.stdout).toContain('  bytes       3120\n');
+    expect(outcome.stdout).not.toContain('3120 on');
+  });
+
+  it('names the devices for the file too, when an image with no srcset differs', async () => {
+    // A plain `src` a script swapped per viewport: nothing selected it, and the
+    // devices still fetched different files at different weights.
+    const small = { ...logo(), currentSrc: 'https://example.com/i/100.png', transferBytes: 812 };
+    const large = { ...logo(), currentSrc: 'https://example.com/i/1920.png', transferBytes: 342016 };
+    let capture = gallery();
+    for (const device of DEFAULT_PROFILES) {
+      const narrow = device.viewport.width < 700;
+      capture = on(capture, device.id, [
+        narrow ? small : large,
+        hero(187, '1080.png', { bytes: 118231 }),
+        badge('300.png', { bytes: 8210 }),
+      ]);
+    }
+
+    const outcome = await run(['https://example.com/gallery'], returning(capture), cwd);
+
+    expect(outcome.stdout).toContain(
+      '  no srcset, so nothing was selected — file  ' +
+        '100.png on iPhone SE, iPhone 15 Pro, Pixel 8, 1920.png on iPad, Desktop',
+    );
+    expect(outcome.stdout).toContain(
+      '  bytes       812 on iPhone SE, iPhone 15 Pro, Pixel 8, 342016 on iPad, Desktop',
+    );
   });
 
   it('names the absent sizes attribute and the 100vw default that stood in', async () => {
     const desktopOnly = on(gallery(), 'desktop', [
-      { ...hero(1440, '1920.png', 342016), sizes: null },
+      { ...hero(1440, '1920.png', { bytes: 342016 }), sizes: null },
     ]);
     const capture: Capture = {
       ...desktopOnly,
@@ -304,10 +370,13 @@ describe('run', () => {
   });
 
   it('reports where an image sat when a render moved it', async () => {
-    const moved = { ...hero(187, '1080.png', 118231), selector: 'html > body > main > div > img' };
+    const moved = {
+      ...hero(187, '1080.png', { bytes: 118231 }),
+      selector: 'html > body > main > div > img',
+    };
     let capture = gallery();
     for (const deviceId of ['iphone-se', 'iphone-15-pro', 'pixel-8']) {
-      capture = on(capture, deviceId, [logo(), moved, badge('300.png', 8210)]);
+      capture = on(capture, deviceId, [logo(), moved, badge('300.png', { bytes: 8210 })]);
     }
 
     const outcome = await run(['https://example.com/gallery'], returning(capture), cwd);

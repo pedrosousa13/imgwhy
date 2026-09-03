@@ -1,8 +1,9 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
+import { parse, read, sources } from './source.js';
 
 const src = fileURLToPath(new URL('../src', import.meta.url));
 const manifest = fileURLToPath(new URL('../package.json', import.meta.url));
@@ -19,18 +20,6 @@ const manifest = fileURLToPath(new URL('../package.json', import.meta.url));
  */
 const ALLOWED = new Set(['@imgwhy/core', 'playwright']);
 
-/**
- * Every TypeScript file under `src`, so a file added later is covered by
- * default — whichever of the three extensions it is written with.
- */
-function sources(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const path = resolve(dir, entry.name);
-    if (entry.isDirectory()) return sources(path);
-    return /\.[cm]?ts$/.test(entry.name) ? [path] : [];
-  });
-}
-
 /** What one module reaches for, split by whether the reach can be checked. */
 type Reaches = {
   /** The specifiers it names, in the order they are written. */
@@ -44,20 +33,17 @@ const REFUSED_IMPORT = 'reaches a module through an import() it computes at run 
 /**
  * Read what a module reaches for out of TypeScript's own syntax tree.
  *
- * A parser rather than a regex over the source text, for two reasons a regex
- * cannot be fixed to cover. It reads the text, so `from 'chalk'` inside a doc
- * comment is a failing test in a repo that comments this much. And it reads
- * only the forms it was written for, so both of these left the package while
- * the test passed:
+ * `parse` says why a syntax tree and not a regex over the text. Both of these
+ * left the package while a regex was doing the reading:
  *
  * ```ts
  * createRequire(import.meta.url)('@imgwhy/report');
  * await import(name);
  * ```
  *
- * A syntax tree has no comments in it and holds every form a module can
- * arrive by. Two of those forms carry nothing to check against the allowlist,
- * so they are refused outright instead of read:
+ * A tree holds every form a module can arrive by. Two of those forms carry
+ * nothing to check against the allowlist, so they are refused outright instead
+ * of read:
  *
  * - `require`, under any name, including `createRequire`. This package is ESM
  *   throughout; the only thing `createRequire` does here is hand a specifier
@@ -73,12 +59,11 @@ const REFUSED_IMPORT = 'reaches a module through an import() it computes at run 
  * anyway.
  */
 function reaches(text: string): Reaches {
-  const parsed = ts.createSourceFile('module.ts', text, ts.ScriptTarget.ESNext, true);
   const specifiers: string[] = [];
   const refused: string[] = [];
 
   /** A specifier position: either a literal to check, or a refusal. */
-  const read = (node: ts.Node | undefined): void => {
+  const readSpecifier = (node: ts.Node | undefined): void => {
     if (node && ts.isStringLiteralLike(node)) specifiers.push(node.text);
     else refused.push(REFUSED_IMPORT);
   };
@@ -86,15 +71,15 @@ function reaches(text: string): Reaches {
   const visit = (node: ts.Node): void => {
     // `import …`, `import type …`, `export … from`, `export * from`.
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
-      read(node.moduleSpecifier);
+      readSpecifier(node.moduleSpecifier);
     }
     // `type X = import('…').Y`, which imports a module for its types alone.
     else if (ts.isImportTypeNode(node)) {
-      read(ts.isLiteralTypeNode(node.argument) ? node.argument.literal : node.argument);
+      readSpecifier(ts.isLiteralTypeNode(node.argument) ? node.argument.literal : node.argument);
     }
     // `import('…')`, whether awaited or not.
     else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
-      read(node.arguments[0]);
+      readSpecifier(node.arguments[0]);
     }
     // `require`, `createRequire`, `module.require` — named anywhere at all,
     // because a name is all it takes to reach a resolver this cannot read.
@@ -105,7 +90,7 @@ function reaches(text: string): Reaches {
     ts.forEachChild(node, visit);
   };
 
-  visit(parsed);
+  visit(parse(text));
   return { specifiers, refused: [...new Set(refused)] };
 }
 
@@ -127,7 +112,6 @@ function leaves(name: string, text: string): string[] {
 
 describe('the runner package boundary', () => {
   const files = sources(src);
-  const read = (file: string): string => readFileSync(file, 'utf8');
 
   it('has sources to check, so nothing below passes for want of a file', () => {
     expect(files.length).toBeGreaterThan(0);

@@ -54,6 +54,34 @@ const bytesArrived = (transferBytes: number | null): string =>
 const field = (label: string, value: string): string => `  ${label.padEnd(10)}  ${value}`;
 
 /**
+ * One value where every device agrees, or every value with the devices that
+ * measured it.
+ *
+ * For the image an image block cannot table — nothing was selected, so there
+ * is no arithmetic to lay out — this is what keeps the report per device. The
+ * devices usually agree, and five lines saying the same thing would bury the
+ * images that do differ, so agreement stays one value and names no device.
+ * Disagreement is the case that has to: a bare `12345, unknown` says two
+ * things were measured and leaves a reader with no way to tell which device
+ * measured which.
+ */
+function perDevice(sightings: Sighting[], of: (image: CapturedImage) => string): string {
+  const devicesByValue = new Map<string, string[]>();
+  for (const { device, image } of sightings) {
+    const value = of(image);
+    const measured = devicesByValue.get(value);
+    if (measured) measured.push(device.name);
+    else devicesByValue.set(value, [device.name]);
+  }
+
+  return [...devicesByValue]
+    .map(([value, measured]) =>
+      devicesByValue.size === 1 ? value : `${value} on ${measured.join(', ')}`,
+    )
+    .join(', ');
+}
+
+/**
  * One device's line of the arithmetic, keyed by the column each value prints
  * under.
  *
@@ -162,18 +190,17 @@ function imageBlock(
   // 1×1 tracking pixel to one line: the runner records every image, and the
   // ones with no choice to make say so and stop.
   if (candidates.length < 2) {
-    const files = [...new Set(sightings.map((s) => fileOf(s.image.currentSrc, base)))].join(', ');
+    const files = perDevice(sightings, (image) => fileOf(image.currentSrc, base));
     const why = candidates.length === 0 ? 'no srcset' : 'one candidate only';
     lines.push(`  ${why}, so nothing was selected — file  ${files}`);
     // Bytes still arrived for it, so they are still reported. A 1×1 tracking
     // pixel weighs what it weighs whether or not anything chose it.
     //
-    // Collapsed across the devices, the way the file above already is, because
-    // a table of near-identical rows is what this branch exists to avoid. So a
-    // lazy image still in flight when one render finished loading reads as a
-    // size and an unknown side by side; `--json` says which device was which.
-    const weights = [...new Set(sightings.map((s) => bytesArrived(s.image.transferBytes)))];
-    lines.push(field('bytes', weights.join(', ')));
+    // Per device, the way the file above is, and for the same reason: a lazy
+    // image still in flight when one render finished loading reads as a size
+    // on the devices that got it and unknown on the ones that did not, rather
+    // than as two figures with nothing to attach either of them to.
+    lines.push(field('bytes', perDevice(sightings, (image) => bytesArrived(image.transferBytes))));
     return lines;
   }
 

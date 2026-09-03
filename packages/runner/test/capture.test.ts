@@ -35,8 +35,12 @@ afterAll(async () => {
  * Playwright announces neither, and a session that outlived its context would
  * look the same from the outside as one that did not: sending on it fails
  * either way once the context is gone. The order is the observable difference.
+ *
+ * `instead` stands in for what detaching does, so a test can have it fail the
+ * way a crashed target's does. Detaching is still recorded when it fails: it
+ * was attempted, which is what the order is there to show.
  */
-function recording(order: string[]): () => Promise<Browser> {
+function recording(order: string[], instead?: () => Promise<void>): () => Promise<Browser> {
   return async () => {
     const browser = await chromium.launch();
     const openContext = browser.newContext.bind(browser);
@@ -49,7 +53,7 @@ function recording(order: string[]): () => Promise<Browser> {
         const detach = session.detach.bind(session);
         session.detach = async () => {
           order.push('detach');
-          await detach();
+          await (instead ? instead() : detach());
         };
         return session;
       };
@@ -62,6 +66,17 @@ function recording(order: string[]): () => Promise<Browser> {
     return browser;
   };
 }
+
+/**
+ * What detaching a crashed target's session does: a gone target cannot be
+ * asked to let go of anything, and Playwright says so.
+ *
+ * In a plain `finally` this rejection is the one that leaves `capturePage`,
+ * and whatever brought the run there — a page that would not load — is never
+ * reported at all.
+ */
+const crashed = (): Promise<void> =>
+  Promise.reject(new Error('cdpSession.detach: Target page, context or browser has been closed'));
 
 describe('capturePage', () => {
   it('captures the candidate a 640px viewport at DPR 1.5 downloads', async () => {
@@ -255,11 +270,9 @@ describe('capturePage', () => {
       `${server.url}/img/640.png`,
       `${server.url}/img/640.png`,
     ]);
-    // One request served both elements, which is Blink's memory cache and the
-    // browser behaviour under study rather than a cache to defeat. So the
-    // mapping cannot say which element the bytes belong to, and it does not
-    // try: both carry what the response cost. Adding this column up over a
-    // page counts a shared response once per element.
+    // One request served both elements, for the reason `recordTransfers` gives
+    // under "What the mapping cannot do". Both carry what that one response
+    // cost, so adding the column up over a page counts it once per element.
     expect(server.requests.filter((r) => r.path === '/img/640.png')).toHaveLength(1);
     expect(images[0]?.transferBytes).toBeGreaterThan(0);
     expect(images[1]?.transferBytes).toBe(images[0]?.transferBytes);
@@ -297,13 +310,47 @@ describe('capturePage', () => {
   it('detaches the CDP session when the page fails to load', async () => {
     const order: string[] = [];
 
+    // Named, not merely counted. A run that ends in some other error has not
+    // reported the page that would not load, whatever it detached on the way.
     await expect(
       capturePage({
         url: 'http://127.0.0.1:1/nothing-listens-here',
         profiles: [canonical],
         launch: recording(order),
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/net::ERR_UNSAFE_PORT/);
+
+    expect(order).toEqual(['detach', 'close']);
+  });
+
+  it('reports the failure that came first when detaching fails on top of it', async () => {
+    const order: string[] = [];
+
+    const failing = capturePage({
+      url: 'http://127.0.0.1:1/nothing-listens-here',
+      profiles: [canonical],
+      launch: recording(order, crashed),
+    });
+
+    await expect(failing).rejects.toThrow(/net::ERR_UNSAFE_PORT/);
+    await expect(failing).rejects.not.toThrow(/cdpSession\.detach/);
+    // Detaching was still attempted, and the context still closed after it.
+    expect(order).toEqual(['detach', 'close']);
+  });
+
+  it('reports a detach that fails when nothing else did, rather than swallowing it', async () => {
+    const order: string[] = [];
+
+    // Nothing else went wrong on this run, so the detach is the only failure
+    // there is to report. Preferring the first failure is not the same as
+    // having none.
+    await expect(
+      capturePage({
+        url: `${server.url}/w-descriptors.html`,
+        profiles: [canonical],
+        launch: recording(order, crashed),
+      }),
+    ).rejects.toThrow(/cdpSession\.detach/);
 
     expect(order).toEqual(['detach', 'close']);
   });
