@@ -102,6 +102,35 @@ function isDeclaredName(node: ts.Identifier): boolean {
   );
 }
 
+/**
+ * Whether `node` names a type parameter one of its own ancestors declares.
+ *
+ * `chrome.d.ts` needs this answered: `executeScript` returns whatever the
+ * function it injected returns, and saying so takes a parameter for the return
+ * type and one for the arguments. Read as names the module never binds, both
+ * arrive in `globals` — which would put `Result` in an allowlist of the outside
+ * world beside `document`, where it means nothing at all.
+ *
+ * Answered at the use rather than by collecting the names, because a type
+ * parameter is the one binding here that is not the module's. Every other name
+ * `surfaceOf` binds is declared once at a module's top level and visible
+ * throughout it, so a flat set models those exactly; a `<Held>` is visible
+ * inside one declaration and nowhere else. In the flat set it masked every
+ * `Held` in the module — and `globals` is the only list standing between this
+ * package and a global it may not reach, so a name that leaves that list by
+ * accident is a name nothing refuses.
+ */
+function isTypeParameter(node: ts.Identifier): boolean {
+  /** Any node, read for the field every declaration that has one carries. */
+  type MayDeclare = ts.Node & { typeParameters?: ts.NodeArray<ts.TypeParameterDeclaration> };
+
+  for (let held: ts.Node | undefined = node.parent; held; held = held.parent) {
+    const declared = (held as MayDeclare).typeParameters;
+    if (declared?.some((one) => one.name.text === node.text)) return true;
+  }
+  return false;
+}
+
 const ASSIGNS = new Set([ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken]);
 
 /** Whether `node` is the target of an assignment rather than a read of one. */
@@ -233,7 +262,9 @@ export function surfaceOf(text: string): Surface {
       strings.add(node.text);
     }
 
-    if (ts.isIdentifier(node) && !isDeclaredName(node)) used.add(node.text);
+    if (ts.isIdentifier(node) && !isDeclaredName(node) && !isTypeParameter(node)) {
+      used.add(node.text);
+    }
 
     ts.forEachChild(node, visit);
   };
