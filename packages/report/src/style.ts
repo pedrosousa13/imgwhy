@@ -57,7 +57,8 @@ export const STYLE: Html = html`<style>
   .id,
   .url,
   .raw,
-  .sizes {
+  .sizes,
+  .sizes-input {
     font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
     font-size: 0.85em;
   }
@@ -178,6 +179,108 @@ export const STYLE: Html = html`<style>
     padding: 1rem;
     border: 1px solid var(--line);
     background: var(--band);
+  }
+
+  .lead,
+  .limit,
+  .reason {
+    max-width: 60rem;
+  }
+
+  .lead {
+    margin: 0 0 1rem;
+    color: var(--muted);
+  }
+
+  .panel {
+    margin: 0 0 1rem;
+    padding: 1rem 1.1rem;
+    border: 1px solid var(--line);
+  }
+
+  .panel h3 {
+    margin: 0 0 0.35rem;
+    font-size: 0.95rem;
+    overflow-wrap: anywhere;
+  }
+
+  .panel .from {
+    margin: 0 0 0.9rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding: 0.75rem 0.8rem;
+    background: var(--band);
+  }
+
+  .control {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+
+  .control:first-child {
+    flex: 1 1 24rem;
+  }
+
+  input,
+  textarea {
+    padding: 0.3rem 0.4rem;
+    border: 1px solid var(--line);
+    background: var(--paper);
+    color: var(--ink);
+    font: inherit;
+  }
+
+  textarea {
+    resize: vertical;
+  }
+
+  .limit {
+    margin: 0.6rem 0 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+
+  .sums {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.2rem 1rem;
+    margin: 1rem 0 0;
+  }
+
+  .sums dt {
+    color: var(--muted);
+  }
+
+  .sums dd {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }
+
+  .sums .picked {
+    font-weight: 600;
+  }
+
+  .panel ul.candidates {
+    margin-top: 0.9rem;
+  }
+
+  .panel .mark {
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .reason {
+    margin: 0.9rem 0 0;
   }
 
   .notes ul {

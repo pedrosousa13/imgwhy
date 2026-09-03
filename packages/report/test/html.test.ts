@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { html } from '../src/html.js';
+import { dataScript, html, script } from '../src/html.js';
 
 /** What the tag produced, as the document would carry it. */
 const text = (markup: { toString: () => string }): string => markup.toString();
@@ -65,5 +65,69 @@ describe('the html tag', () => {
 
   it('writes an empty list as nothing at all', () => {
     expect(text(html`<tr>${[]}</tr>`)).toBe('<tr></tr>');
+  });
+});
+
+describe('the script tag', () => {
+  it('writes JavaScript into a script element, untouched, because it is the code', () => {
+    expect(text(script('const picked = 1080;'))).toBe(
+      '<script>\nconst picked = 1080;\n</script>',
+    );
+  });
+
+  it('leaves a comparison alone, which HTML escaping would have broken', () => {
+    // The one thing a script must not get is HTML escaping: `&lt;` is not `<`
+    // to a JavaScript parser, and core compares indexes with one.
+    expect(text(script('while (i < s.length) i++;'))).toContain('i < s.length');
+  });
+
+  it('refuses a body carrying the end tag, whatever escaping was applied to it', () => {
+    expect(() => script('const end = "</script>";')).toThrow('</script');
+  });
+
+  it('refuses the end tag in any case, because HTML reads tags case-insensitively', () => {
+    expect(() => script('const end = "</SCRIPT >";')).toThrow('</script');
+  });
+
+  it('refuses a comment opener, which changes how the parser reads the rest', () => {
+    expect(() => script('const hidden = "<!--";')).toThrow('<!--');
+  });
+
+  it('refuses a nested opening tag, the other half of the escaped-text state', () => {
+    expect(() => script('const nested = "<script>";')).toThrow('<script');
+  });
+});
+
+describe('the data script', () => {
+  const contents = (markup: { toString: () => string }): string =>
+    /<script type="application\/json">([\s\S]*)<\/script>/.exec(text(markup))?.[1] ?? '';
+
+  it('writes a value as JSON inside a script element of its own', () => {
+    expect(text(dataScript({ picked: '1080w' }))).toBe(
+      '<script type="application/json">{"picked":"1080w"}</script>',
+    );
+  });
+
+  it('escapes every < , so a page string cannot end the element it sits in', () => {
+    const island = contents(dataScript({ sizes: '</script><script>alert(1)</script>' }));
+
+    expect(island).not.toContain('<');
+    expect(island).toContain('\\u003c');
+  });
+
+  it('escapes the comment opener as well, which ends no tag and still breaks out', () => {
+    expect(contents(dataScript({ sizes: '<!--' }))).not.toContain('<');
+  });
+
+  it('hands the string back exactly, because escaping a < inside JSON changes nothing', () => {
+    const sizes = '100vw" onload="alert(1)</script><!--<script>';
+
+    const read = JSON.parse(contents(dataScript({ sizes }))) as { sizes: string };
+
+    expect(read.sizes).toBe(sizes);
+  });
+
+  it('escapes a > too, so no run of characters is left to close a comment', () => {
+    expect(contents(dataScript({ sizes: '-->' }))).toBe('{"sizes":"--\\u003e"}');
   });
 });

@@ -1,11 +1,12 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { refuseStaleBuild } from '../../../test/built.js';
 import { type FixtureServer, startFixtureServer } from '../../../test/fixture-server.js';
 
 const execFileAsync = promisify(execFile);
@@ -26,13 +27,19 @@ const bin = fileURLToPath(new URL('../dist/bin.js', import.meta.url));
  * every request it makes, and the fixture server reports every request it
  * receives — so a request the page made to the site it describes would have to
  * escape both a listener and a log to pass.
+ *
+ * What it drives is `dist/bin.js`, so `refuseStaleBuild` runs first. Removing
+ * a listener from the report's in-page wiring fails the DOM checks below —
+ * but only against a build that has the removal in it, and `npx vitest run`
+ * skips the `pretest` that would have produced one. `test/built.ts` says the
+ * rest.
  */
 let server: FixtureServer;
 let browser: Browser;
 let dir: string;
 
 beforeAll(async () => {
-  expect(existsSync(bin), `${bin} is missing — run \`npm run build\` first`).toBe(true);
+  refuseStaleBuild();
   server = await startFixtureServer();
   browser = await chromium.launch();
   dir = mkdtempSync(join(tmpdir(), 'imgwhy-report-'));
@@ -128,6 +135,144 @@ describe('imgwhy --report', () => {
     // A system font, resolved by the browser rather than fetched.
     const font = await page.evaluate(() => getComputedStyle(document.body).fontFamily);
     expect(font).toContain('-apple-system');
+
+    await context.close();
+  }, 60_000);
+
+  it('recomputes the selection in the page when a control changes, with no request at all', async () => {
+    const path = join(dir, 'controls.html');
+
+    await imgwhy('--report', path, `${server.url}/gallery.html`);
+
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const asked: string[] = [];
+    page.on('request', (request) => asked.push(request.url()));
+    page.on('requestfailed', (request) => asked.push(`failed ${request.url()}`));
+    server.requests.length = 0;
+
+    const file = pathToFileURL(path).href;
+    await page.goto(file);
+    await page.waitForLoadState('load');
+
+    // The hero: the second image on the page, and the second panel.
+    expect(await page.locator('.panel').count()).toBe(3);
+    const hero = page.locator('.panel').nth(1);
+    const sizes = hero.locator('.sizes-input');
+
+    // The controls start from what the page shipped, filled by the script out
+    // of the data island rather than written into a value attribute.
+    expect(await sizes.inputValue()).toBe('(min-width: 1000px) 50vw, 100vw');
+    expect(await hero.locator('.viewport-input').inputValue()).toBe('375');
+    expect(await hero.locator('.dpr-input').inputValue()).toBe('2');
+
+    // What the file says before anything is typed: iPhone SE, 375 at DPR 2.
+    expect(await hero.locator('.clause').textContent()).toBe('100vw');
+    expect(await hero.locator('.picked').textContent()).toBe('1080w');
+    expect(await hero.locator('.mark').allTextContents()).toEqual(['', '← picked', '']);
+
+    // A different `sizes` string, and a different candidate wins.
+    await sizes.fill('25vw');
+
+    expect(await hero.locator('.clause').textContent()).toBe('25vw');
+    expect(await hero.locator('.css').textContent()).toBe('94px');
+    expect(await hero.locator('.needed').textContent()).toBe('188px');
+    expect(await hero.locator('.picked').textContent()).toBe('640w');
+    expect(await hero.locator('.reason').textContent()).toBe(
+      '94 css px × DPR 2 = 188 physical pixels, and 640w is the smallest candidate at or above that.',
+    );
+    expect(await hero.locator('.mark').allTextContents()).toEqual(['← picked', '', '']);
+
+    // Typing the recorded string back gives the page back, which is the whole
+    // of the claim that the panel and the controls are one function.
+    await sizes.fill('(min-width: 1000px) 50vw, 100vw');
+
+    expect(await hero.locator('.clause').textContent()).toBe('100vw');
+    expect(await hero.locator('.picked').textContent()).toBe('1080w');
+
+    // A wider viewport takes the other clause, and the ratio decides again.
+    await hero.locator('.viewport-input').fill('1440');
+
+    expect(await hero.locator('.clause').textContent()).toBe('(min-width: 1000px) 50vw');
+    expect(await hero.locator('.css').textContent()).toBe('720px');
+    expect(await hero.locator('.picked').textContent()).toBe('1920w');
+
+    await hero.locator('.dpr-input').fill('1');
+
+    expect(await hero.locator('.needed').textContent()).toBe('720px');
+    expect(await hero.locator('.picked').textContent()).toBe('1080w');
+
+    // The badge chooses on density alone, and reads past sizes the way a
+    // browser does — there is no sizes control on it to read past.
+    const badge = page.locator('.panel').nth(2);
+    expect(await badge.locator('.clause').textContent()).toBe('x descriptors only');
+    await badge.locator('.dpr-input').fill('1');
+    expect(await badge.locator('.picked').textContent()).toBe('1x');
+
+    // The image with nothing to choose has a panel that says so, and no boxes.
+    const logo = page.locator('.panel').nth(0);
+    expect(await logo.locator('.reason').textContent()).toContain('no srcset');
+    expect(await logo.locator('input').count()).toBe(0);
+
+    // And through every one of those, the file asked for nothing: not a
+    // stylesheet, not a font, not a script, and nothing from the site.
+    expect(asked).toEqual([file]);
+    expect(server.requests).toEqual([]);
+
+    await context.close();
+  }, 60_000);
+
+  it('starts the sizes control from the string the page wrote, newlines and all', async () => {
+    const path = join(dir, 'wrapped.html');
+
+    await imgwhy('--report', path, `${server.url}/wrapped-sizes.html`);
+
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const asked: string[] = [];
+    page.on('request', (request) => asked.push(request.url()));
+    server.requests.length = 0;
+
+    const file = pathToFileURL(path).href;
+    await page.goto(file);
+    await page.waitForLoadState('load');
+
+    const hero = page.locator('.panel').nth(0);
+    const sizes = hero.locator('.sizes-input');
+    const wrapped = '(min-width:1000px)\n50vw, 100vw';
+
+    // The control holds what was measured. An `<input type="text">` runs the
+    // value sanitisation algorithm, which strips every line feed, so this
+    // would read `(min-width:1000px)50vw, 100vw` — a string the page never
+    // carried and the run never resolved.
+    expect(await sizes.inputValue()).toBe(wrapped);
+
+    // And the file agrees with the measurement: iPhone SE is 375 px, so the
+    // media clause did not apply and the fallback decided.
+    expect(await hero.locator('.clause').textContent()).toBe('100vw');
+    expect(await hero.locator('.css').textContent()).toBe('375px');
+    expect(await hero.locator('.needed').textContent()).toBe('750px');
+    expect(await hero.locator('.picked').textContent()).toBe('1080w');
+
+    // Typing into the control re-picks from whatever it holds. Handing it its
+    // own value back is the smallest keystroke there is, and it has to leave
+    // the panel exactly where it was — a mangled value would resolve
+    // `(min-width:1000px)50vw` as 1000px plus 50vw and pick the 1920.
+    await sizes.fill(await sizes.inputValue());
+
+    expect(await hero.locator('.clause').textContent()).toBe('100vw');
+    expect(await hero.locator('.css').textContent()).toBe('375px');
+    expect(await hero.locator('.picked').textContent()).toBe('1080w');
+
+    // A newline the reader types is a newline the selection sees, too.
+    await sizes.fill('(min-width:300px)\n25vw, 100vw');
+
+    expect(await hero.locator('.clause').textContent()).toBe('(min-width:300px)\n25vw');
+    expect(await hero.locator('.css').textContent()).toBe('94px');
+    expect(await hero.locator('.picked').textContent()).toBe('640w');
+
+    expect(asked).toEqual([file]);
+    expect(server.requests).toEqual([]);
 
     await context.close();
   }, 60_000);

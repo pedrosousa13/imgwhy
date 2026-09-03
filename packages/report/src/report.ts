@@ -1,7 +1,10 @@
 import type { Capture, CapturedImage, DeviceProfile } from '@imgwhy/core';
 import { explainSelection } from '@imgwhy/core';
-import { html } from './html.js';
+import { dataScript, html } from './html.js';
 import type { Html } from './html.js';
+import { readPanel } from './panel.js';
+import type { PageData, Panel, Readout } from './panel.js';
+import { SCRIPT } from './script.js';
 import { STYLE } from './style.js';
 
 /** Nothing at all, for a line the image in hand has no reason to carry. */
@@ -122,6 +125,136 @@ const matrix = (capture: Capture, images: Map<string, Map<string, CapturedImage>
 </div>`;
 
 /**
+ * One image and the device whose sighting of it the panel starts from.
+ *
+ * The first device that rendered the image, which is the same sighting the row
+ * heading describes. The candidates and the `sizes` string are the page's and
+ * are the same wherever it was seen; the one figure that is not is the width
+ * layout ended at, which only a `sizes: auto` reads — so the panel names the
+ * device it starts from rather than leaving a reader to wonder whose 375 that
+ * was.
+ */
+function panelsOf(capture: Capture, images: Map<string, Map<string, CapturedImage>>): Panel[] {
+  const devices = new Map(capture.devices.map((device) => [device.id, device]));
+
+  return [...images].map(([id, sightings]) => {
+    const first = [...sightings][0];
+    if (!first) throw new Error(`the capture groups image "${id}" with no sighting to explain`);
+    const [deviceId, image] = first;
+    const device = devices.get(deviceId);
+    if (!device) throw new Error(`the capture has a run for "${deviceId}" but no such device`);
+    return { image, device };
+  });
+}
+
+/**
+ * The three controls, empty.
+ *
+ * Empty in the markup and filled by the script, which is not a detail. A
+ * `value` attribute would be the first page string in an attribute anywhere in
+ * this document, and the closed list in `escaping.test.ts` — every attribute
+ * value the report writes is one of its own words — is what makes the whole
+ * escaping argument checkable. The `sizes` string a control starts from
+ * reaches the page through the JSON island instead, as text.
+ *
+ * `step="any"` on the ratio because 2.625 is a real device pixel ratio, and a
+ * control that called it invalid would be arguing with the Pixel 8.
+ *
+ * The `sizes` control is a `<textarea>` and not an `<input type="text">`,
+ * which is a correctness decision rather than a layout one. A text input runs
+ * the HTML value sanitisation algorithm over whatever is assigned to it, and
+ * that algorithm strips every carriage return and line feed. A `sizes`
+ * attribute written across lines — which is how anyone writes a long one —
+ * would then start the control at a string the page never carried:
+ * `(min-width:1000px)\nSPACE50vw` survives as two clauses, and
+ * `(min-width:1000px)\n50vw` becomes `(min-width:1000px)50vw`, one clause
+ * whose media condition no longer parses and whose lengths add up to a width
+ * nothing measured. The panel would then re-pick against a string of the
+ * browser's invention and show a failure the page never had. A textarea holds
+ * a newline, so the control cannot disagree with the measurement.
+ *
+ * It stays empty in the markup for the reason every control does, and the rule
+ * matters slightly more here: a textarea's content is text rather than markup,
+ * so `</textarea` in a page's `sizes` string would end the element. Nothing
+ * from the page is written into one — the string arrives through the island.
+ */
+const CONTROLS: Html = html`<div class="controls">
+<label class="control">sizes<textarea class="sizes-input"></textarea></label>
+<label class="control">viewport<input class="viewport-input" type="number" min="1" step="1"></label>
+<label class="control">DPR<input class="dpr-input" type="number" min="0.1" step="any"></label>
+</div>
+<p class="limit">Re-picked from the candidates this page shipped. A framework reads <code>sizes</code> at build time to decide which files exist at all, so where it would also change the candidate list, this understates the gain.</p>`;
+
+/**
+ * The four figures behind one row, whatever the image had to choose between.
+ *
+ * Written once and shown on every panel, including the one for an image with
+ * no `srcset`. `readPanel` answers all four for that case — "no srcset", and
+ * three em dashes — and the design asks a panel for "the matched clause,
+ * resolved CSS width, pixels needed, candidate list, and the selection
+ * reason". Computing an answer and then dropping it would leave four fields of
+ * a `Readout` dead on that path, which is an invitation to wire them back up
+ * wrongly later.
+ */
+const sums = (readout: Readout): Html =>
+  html`<dl class="sums">
+<dt>clause used</dt><dd class="clause">${readout.clause}</dd>
+<dt>css px</dt><dd class="css">${readout.cssPx}</dd>
+<dt>needed</dt><dd class="needed">${readout.needed}</dd>
+<dt>picked</dt><dd class="picked">${readout.picked}</dd>
+</dl>`;
+
+/**
+ * One image in full: the arithmetic behind a row of the matrix, and the three
+ * controls that run it again.
+ *
+ * The readout is `readPanel`, which is the same function the page calls when a
+ * control changes — shipped into the file as its own source. So the panel a
+ * reader types into and the panel written here cannot say the arithmetic
+ * differently, because there is only one of them.
+ *
+ * An image with no `srcset` gets the sums and the reason, and no controls and
+ * no candidate list. There is nothing to recompute — no candidate list to
+ * re-pick from — and three boxes that changed nothing would be worse than
+ * none. The sums stay because they were taken: the reading exists, and it says
+ * there was nothing to resolve.
+ */
+function panelSection({ image, device }: Panel): Html {
+  const readout = readPanel(explainSelection(image, device), image.candidates, device.dpr);
+  const heading = html`<h3 class="id">${image.id}</h3>`;
+
+  if (image.candidates.length === 0) {
+    return html`
+<section class="panel">${heading}${sums(readout)}
+<p class="reason">${readout.reason}</p></section>`;
+  }
+
+  const candidates = image.candidates.map(
+    (candidate, index) =>
+      html`<li><span class="raw">${candidate.raw}</span><span class="url">${candidate.url}</span><span class="mark">${readout.marks[index]}</span></li>`,
+  );
+
+  return html`
+<section class="panel">${heading}<p class="from">Starts from ${device.name}: a ${device.viewport.width} px viewport at DPR ${device.dpr}.</p>${CONTROLS}
+${sums(readout)}
+<ul class="candidates">${candidates}</ul>
+<p class="reason">${readout.reason}</p></section>`;
+}
+
+/**
+ * Every panel, in the order the matrix lists the rows.
+ *
+ * The same list the page is handed, walked the same way. A panel carries the
+ * image it is about, so the markup and the data cannot come apart — the script
+ * pairs the two by position, and the two are one array here.
+ */
+const panels = (data: PageData): Html =>
+  html`<section class="panels">
+<h2>Each image, in full</h2>
+<p class="lead">The arithmetic behind one row, and the controls to run it again. Type a different <code>sizes</code> string, viewport width or device pixel ratio, and the selection is recomputed here — by the same code the command ran, against the candidates this page shipped.</p>${data.panels.map(panelSection)}
+</section>`;
+
+/**
  * How to read the matrix, and the two things it will not do.
  *
  * The framework limit is here because the design asks for it in the report
@@ -155,8 +288,10 @@ const NOTES: Html = html`<section class="notes">
  */
 export function renderReport(capture: Capture): string {
   const images = groupById(capture);
+  const data: PageData = { panels: panelsOf(capture, images) };
   const body = images.size
-    ? matrix(capture, images)
+    ? html`${matrix(capture, images)}
+${panels(data)}`
     : html`<p class="empty">${capture.url} carries no &lt;img&gt; element, so there is nothing to explain.</p>`;
 
   return `${html`<!doctype html>
@@ -178,6 +313,8 @@ ${STYLE}
 ${body}
 ${NOTES}
 </main>
+${dataScript(data)}
+${SCRIPT}
 </body>
 </html>
 `}`;
