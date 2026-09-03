@@ -1,0 +1,31 @@
+{
+  // Node here and not in `tsconfig.json`, because `src` never touches one.
+  // The tests read the package's own source off disk and run the panel's text
+  // in a `node:vm` context, so they are Node programs the way every other
+  // package's tests are. DOM comes along because `dom.ts` writes out the
+  // handful of members the panel reaches for, and the shapes it stands in for
+  // are named in the panel's own annotations.
+  //
+  // `src` is included alongside `test`, which the other packages' test
+  // projects do not need to do. Theirs arrives through the imports their tests
+  // write, and so does most of this one's — `click.test.ts` imports
+  // `../src/background.js`. What does not arrive that way is
+  // `src/chrome.d.ts`: an ambient declaration is a file nothing imports, which
+  // is the whole of what makes it ambient, so a project that does not name it
+  // does not have it. Including only `test` pulled `background.ts` in through
+  // a test and left the declaration of `chrome` out, and this project failed
+  // with `Cannot find name 'chrome'` on a clean checkout while passing after a
+  // build had left a `dist` behind to resolve against.
+  //
+  // The whole directory rather than the one declaration, so the next `.d.ts`
+  // to land here is covered without anyone remembering to come back.
+  // `programs.test.ts` holds that, and holds it against the configuration that
+  // shipped.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["test", "src"]
+}

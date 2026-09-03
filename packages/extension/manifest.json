@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "imgwhy",
+  "version": "0.0.0",
+  "description": "Explain why the browser downloaded that file. Nothing runs until you click.",
+  "permissions": ["activeTab", "scripting"],
+  "action": {
+    "default_title": "imgwhy — why this image?"
+  },
+  "background": {
+    "service_worker": "dist/background.js",
+    "type": "module"
+  }
+}
