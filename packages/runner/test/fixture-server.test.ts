@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { startFixtureServer } from './fixture-server.js';
+import { startFixtureServer } from '../../../test/fixture-server.js';
 
 describe('the fixture server', () => {
   it('serves a page and real image bytes on an ephemeral port', async () => {

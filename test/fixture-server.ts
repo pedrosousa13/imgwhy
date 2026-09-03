@@ -2,6 +2,17 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { encodePng } from './png.js';
 
+/**
+ * The pages every integration test renders, on a loopback port of their own.
+ *
+ * It sits at the root, beside `source.ts`, for the same reason that one does:
+ * its readers are in two packages. The runner renders these pages to check
+ * what it captures, and the command renders them end to end to check what it
+ * prints and what it writes — and a test of the command reaching into the
+ * runner's own test directory for a server is the reach the runner's boundary
+ * check exists to refuse. A shared fixture belongs to neither package.
+ */
+
 /** One request the fixture server answered, for a test that counts them. */
 export type FixtureRequest = { path: string; cacheControl: string | undefined };
 

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Capture, CapturedImage, DeviceRun } from '@imgwhy/core';
 import { parseSrcset } from '@imgwhy/core';
+import { renderReport } from '@imgwhy/report';
 import { DEFAULT_PROFILES } from '@imgwhy/runner';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { USAGE } from '../src/args.js';
@@ -629,6 +630,138 @@ describe('run, asked for the capture itself', () => {
     expect(outcome.code).toBe(0);
     expect(JSON.parse(outcome.stdout)).toStrictEqual(empty);
     expect(outcome.stderr).toContain('carries no <img> element');
+  });
+});
+
+describe('run, asked for the report', () => {
+  it('writes the report to the path --report names', async () => {
+    const report = join(cwd, 'report.html');
+
+    const outcome = await run(
+      ['--report', report, 'https://example.com/gallery'],
+      returning(gallery()),
+      cwd,
+    );
+
+    expect(outcome.code).toBe(0);
+    // Byte for byte the report of that Capture: the command chooses the path
+    // and nothing else about the file.
+    expect(readFileSync(report, 'utf8')).toBe(renderReport(gallery()));
+  });
+
+  it('writes one HTML file and no sidecar asset beside it', async () => {
+    const report = join(cwd, 'report.html');
+
+    await run(['--report', report, 'https://example.com/gallery'], returning(gallery()), cwd);
+
+    expect(readdirSync(cwd)).toEqual(['report.html']);
+  });
+
+  it('writes no file at all when --report is not given', async () => {
+    const before = readdirSync(cwd);
+
+    await run(['https://example.com/gallery'], returning(gallery()), cwd);
+
+    expect(readdirSync(cwd)).toEqual(before);
+  });
+
+  it('still prints the trace when --report is given', async () => {
+    const report = join(cwd, 'report.html');
+
+    const outcome = await run(
+      ['--report', report, 'https://example.com/gallery'],
+      returning(gallery()),
+      cwd,
+    );
+
+    expect(outcome.stdout.startsWith('url      ')).toBe(true);
+    expect(outcome.stdout).toContain('image 2 of 3');
+  });
+
+  it('writes the Capture and the report from one run when both are asked', async () => {
+    const out = join(cwd, 'capture.json');
+    const report = join(cwd, 'report.html');
+
+    const outcome = await run(
+      ['--out', out, '--report', report, 'https://example.com/gallery'],
+      returning(gallery()),
+      cwd,
+    );
+
+    expect(outcome.code).toBe(0);
+    expect(readdirSync(cwd).sort()).toEqual(['capture.json', 'report.html']);
+    expect(JSON.parse(readFileSync(out, 'utf8'))).toEqual(gallery());
+    expect(readFileSync(report, 'utf8')).toBe(renderReport(gallery()));
+  });
+
+  it('reports a path it could not write to, rather than printing the trace', async () => {
+    const report = join(cwd, 'no-such-directory', 'report.html');
+
+    const outcome = await run(
+      ['--report', report, 'https://example.com/gallery'],
+      returning(gallery()),
+      cwd,
+    );
+
+    expect(outcome.code).toBe(1);
+    expect(outcome.stdout).toBe('');
+    expect(outcome.stderr).toContain(report);
+    expect(readdirSync(cwd)).toEqual([]);
+  });
+
+  it('writes the report of a page with no image, which is a report like any other', async () => {
+    const report = join(cwd, 'report.html');
+    const empty = withNoImages(gallery());
+
+    const outcome = await run(
+      ['--report', report, 'https://example.com/gallery'],
+      returning(empty),
+      cwd,
+    );
+
+    // The artifact was asked for and produced, so the run did its job. An
+    // image that has gone missing is the diff a kept report is for.
+    expect(outcome.code).toBe(0);
+    expect(readFileSync(report, 'utf8')).toBe(renderReport(empty));
+    expect(outcome.stdout).toBe('');
+    expect(outcome.stderr).toContain('carries no <img> element');
+  });
+
+  it('renders the report the report package renders, and does not build one itself', async () => {
+    const report = join(cwd, 'report.html');
+    const capture = on(gallery(), 'desktop', [hero(1440, '1920.png', { bytes: 342_016 })]);
+
+    await run(['--report', report, 'https://example.com/gallery'], returning(capture), cwd);
+
+    expect(readFileSync(report, 'utf8')).toBe(renderReport(capture));
+  });
+});
+
+/**
+ * The path `--report` names is the only thing that decides where the report
+ * lands, for every reason the same is true of `--out`.
+ *
+ * The report is the worse of the two to get wrong: it is the artifact people
+ * mail to each other, so a page that could choose its name could choose what
+ * a colleague opens.
+ */
+describe('run, given a URL that reads like a path, asked for a report', () => {
+  const traversal = [
+    'https://example.com/../../etc/passwd',
+    'https://../x',
+    'https://example.com/%2e%2e%2f%2e%2e%2fetc%2fpasswd',
+  ];
+
+  it.each(traversal)('writes to the path --report names, not one derived from %s', async (raw) => {
+    const report = join(cwd, 'report.html');
+    // The capture reports the URL the page ended on, which a redirect chooses.
+    const landed: Capture = { ...gallery(), url: '../../../../etc/passwd.html' };
+
+    const outcome = await run(['--report', report, raw], returning(landed), cwd);
+
+    expect(outcome.code).toBe(0);
+    expect(readdirSync(cwd)).toEqual(['report.html']);
+    expect(readFileSync(report, 'utf8')).toBe(renderReport(landed));
   });
 });
 

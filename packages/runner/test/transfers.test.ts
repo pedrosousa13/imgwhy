@@ -1,7 +1,7 @@
 import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { recordTransfers } from '../src/transfers.js';
-import { type FixtureServer, startFixtureServer } from './fixture-server.js';
+import { type FixtureServer, startFixtureServer } from '../../../test/fixture-server.js';
 
 let server: FixtureServer;
 beforeAll(async () => {

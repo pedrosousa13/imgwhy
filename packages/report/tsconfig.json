@@ -1,0 +1,15 @@
+{
+  // No `types` and no DOM lib, the way core has none. This package writes a
+  // string, so it needs neither: a Capture in, HTML out. Declaring Node types
+  // here would put `node:fs` within reach of a package whose whole contract is
+  // that it is a pure function of its input, and the file-writing end of
+  // `--report` is the command's, next to `--out`.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": [],
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src"]
+}

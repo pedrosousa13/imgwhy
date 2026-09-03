@@ -65,6 +65,23 @@ const candidates = core.namespace.parseSrcset(srcset);
 const resolution = core.namespace.resolveSizes('100vw', 640);
 const picked = core.namespace.selectCandidate(candidates, resolution.px, 1.5);
 
+// The three calls joined, which is the shape a report and an extension use.
+const explained = core.namespace.explainSelection(
+  {
+    id: 'main > img',
+    selector: 'main > img',
+    candidates,
+    sizes: '100vw',
+    sizesSource: 'img',
+    renderedWidth: 620,
+    currentSrc: '/i/a-1080.png',
+    naturalWidth: 1080,
+    transferBytes: null,
+    loading: null,
+  },
+  { id: 'bare', name: 'Bare', viewport: { width: 640, height: 800 }, dpr: 1.5 },
+);
+
 process.stdout.write(
   JSON.stringify({
     absentFromSandbox: probe.namespace.absent,
@@ -72,5 +89,11 @@ process.stdout.write(
     clause: resolution.clause,
     px: resolution.px,
     picked: picked.raw,
+    explained: {
+      clause: explained.resolution.clause,
+      cssPx: explained.cssPx,
+      neededPx: explained.neededPx,
+      picked: explained.picked.raw,
+    },
   }),
 );

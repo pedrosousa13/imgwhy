@@ -14,7 +14,7 @@ import { promisify } from 'node:util';
 import type { Capture } from '@imgwhy/core';
 import { DEFAULT_PROFILES } from '@imgwhy/runner';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { type FixtureServer, startFixtureServer } from '../../runner/test/fixture-server.js';
+import { type FixtureServer, startFixtureServer } from '../../../test/fixture-server.js';
 import { USAGE } from '../src/args.js';
 
 const run = promisify(execFile);

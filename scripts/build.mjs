@@ -13,8 +13,8 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-/** Dependency order. `@imgwhy/report` (M2) imports core, so it goes after it. */
-const BUILD_ORDER = ['@imgwhy/core', '@imgwhy/runner', 'imgwhy'];
+/** Dependency order. `imgwhy` imports every other package, so it goes last. */
+const BUILD_ORDER = ['@imgwhy/core', '@imgwhy/runner', '@imgwhy/report', 'imgwhy'];
 
 const root = new URL('../', import.meta.url);
 const packages = new URL('packages/', root);

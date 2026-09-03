@@ -1,8 +1,9 @@
 import { writeFileSync } from 'node:fs';
 import type { Capture } from '@imgwhy/core';
+import { renderReport } from '@imgwhy/report';
 import { messageOf } from './message.js';
 
-export type WrittenCapture = { ok: true } | { ok: false; message: string };
+export type WrittenFile = { ok: true } | { ok: false; message: string };
 
 /**
  * The Capture as the file and the stream both carry it.
@@ -15,7 +16,7 @@ export const serializeCapture = (capture: Capture): string =>
   `${JSON.stringify(capture, null, 2)}\n`;
 
 /**
- * Write a Capture to the path `--out` named, and to nothing else.
+ * Write text to the path an option named, and to nothing else.
  *
  * Unlike the config file, this boundary needs no confinement, and confining it
  * would be wrong. Reading is where a path check earns its place: the name
@@ -35,15 +36,35 @@ export const serializeCapture = (capture: Capture): string =>
  * no other parameter here feeds it, and adding one that derived a name from
  * the page would be the bug to watch for.
  *
+ * It is one function for both artifacts so that the property is held in one
+ * place. A second writer would be a second place to get it wrong, and the
+ * report is the artifact people mail to each other — so a page that could
+ * choose its name could choose what a colleague opens.
+ *
  * A path that cannot be written is a message, not a throw. The caller has a
  * trace to suppress: a run that failed to produce the file it was asked for
  * should not also print as if it had worked.
  */
-export function writeCapture(path: string, capture: Capture): WrittenCapture {
+function write(path: string, contents: string): WrittenFile {
   try {
-    writeFileSync(path, serializeCapture(capture), 'utf8');
+    writeFileSync(path, contents, 'utf8');
   } catch (error) {
     return { ok: false, message: `${path} could not be written: ${messageOf(error)}` };
   }
   return { ok: true };
 }
+
+/** Write a Capture to the path `--out` named. */
+export const writeCapture = (path: string, capture: Capture): WrittenFile =>
+  write(path, serializeCapture(capture));
+
+/**
+ * Write the report to the path `--report` named.
+ *
+ * One file and no sidecar asset, because the report has none: `renderReport`
+ * returns a whole document with every style inlined. The command's part is the
+ * path and the bytes reaching disk, and nothing about the markup — that is the
+ * report package's, which the command never second-guesses.
+ */
+export const writeReport = (path: string, capture: Capture): WrittenFile =>
+  write(path, renderReport(capture));

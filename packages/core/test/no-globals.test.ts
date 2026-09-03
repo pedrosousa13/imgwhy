@@ -25,6 +25,7 @@ describe('core in a context with no globals', () => {
       clause: string;
       px: number;
       picked: string;
+      explained: { clause: string; cssPx: number; neededPx: number; picked: string };
     };
 
     // Every one of these is missing from the sandbox, so any use would throw.
@@ -46,5 +47,13 @@ describe('core in a context with no globals', () => {
     expect(result.clause).toBe('100vw');
     expect(result.px).toBe(640);
     expect(result.picked).toBe('1080w');
+
+    // The joined call too, because that is the one a report ships into a page.
+    expect(result.explained).toEqual({
+      clause: '100vw',
+      cssPx: 640,
+      neededPx: 960,
+      picked: '1080w',
+    });
   });
 });
