@@ -46,6 +46,20 @@ export const hero = (renderedWidth: number, file: string, bytes: number): Captur
   loading: null,
 });
 
+/**
+ * The hero as a `<picture>` offered it to one device: the candidates and the
+ * `sizes` string off the `<source>` whose `media` matched, not off the tag.
+ *
+ * The same id, because it is the same element — one row of the matrix, whose
+ * heading has two things to say about what was offered.
+ */
+export const sourced = (renderedWidth: number, file: string, bytes: number): CapturedImage => ({
+  ...hero(renderedWidth, file, bytes),
+  candidates: parseSrcset('/i/1080.png 1080w, /i/1920.png 1920w'),
+  sizes: '50vw',
+  sizesSource: 'source',
+});
+
 export const badge = (file: string, bytes: number): CapturedImage => ({
   id: 'html > body > main > img:nth-of-type(2)',
   selector: 'html > body > main > img:nth-of-type(2)',
@@ -62,14 +76,31 @@ export const badge = (file: string, bytes: number): CapturedImage => ({
 /** Three images with three reasons to pick a file, across the five profiles. */
 export const gallery = (): Capture => {
   const runs: DeviceRun[] = [
-    { deviceId: 'iphone-se', images: [logo(), hero(187, '1080.png', 118_231), badge('300.png', 8210)] },
+    {
+      deviceId: 'iphone-se',
+      images: [logo(), hero(187, '1080.png', 118_231), badge('300.png', 8210)],
+      backgroundImageCount: 0,
+    },
     {
       deviceId: 'iphone-15-pro',
       images: [logo(), hero(196, '1920.png', 342_016), badge('300.png', 8210)],
+      backgroundImageCount: 0,
     },
-    { deviceId: 'pixel-8', images: [logo(), hero(206, '1920.png', 342_016), badge('300.png', 8210)] },
-    { deviceId: 'ipad', images: [logo(), hero(410, '1920.png', 342_016), badge('300.png', 8210)] },
-    { deviceId: 'desktop', images: [logo(), hero(720, '1080.png', 118_231), badge('200.png', 4102)] },
+    {
+      deviceId: 'pixel-8',
+      images: [logo(), hero(206, '1920.png', 342_016), badge('300.png', 8210)],
+      backgroundImageCount: 0,
+    },
+    {
+      deviceId: 'ipad',
+      images: [logo(), hero(410, '1920.png', 342_016), badge('300.png', 8210)],
+      backgroundImageCount: 0,
+    },
+    {
+      deviceId: 'desktop',
+      images: [logo(), hero(720, '1080.png', 118_231), badge('200.png', 4102)],
+      backgroundImageCount: 0,
+    },
   ];
   return {
     url: 'https://example.com/gallery',
@@ -84,3 +115,14 @@ export const on = (capture: Capture, deviceId: string, images: CapturedImage[]):
   ...capture,
   runs: capture.runs.map((run) => (run.deviceId === deviceId ? { ...run, images } : run)),
 });
+
+/** The same capture with a background image count per run, in device order. */
+export const painting = (capture: Capture, counts: number[]): Capture => {
+  if (counts.length !== capture.runs.length) {
+    throw new Error(`${capture.runs.length} runs and ${counts.length} counts to paint them with`);
+  }
+  return {
+    ...capture,
+    runs: capture.runs.map((run, index) => ({ ...run, backgroundImageCount: counts[index] })),
+  };
+};

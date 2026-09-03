@@ -75,22 +75,27 @@ const gallery = (): Capture => {
     {
       deviceId: 'iphone-se',
       images: [logo(), hero(187, '1080.png', { bytes: 118231 }), badge('300.png', { bytes: 8210 })],
+      backgroundImageCount: 0,
     },
     {
       deviceId: 'iphone-15-pro',
       images: [logo(), hero(196, '1920.png', { bytes: 342016 }), badge('300.png', { bytes: 8210 })],
+      backgroundImageCount: 0,
     },
     {
       deviceId: 'pixel-8',
       images: [logo(), hero(206, '1920.png', { bytes: 342016 }), badge('300.png', { bytes: 8210 })],
+      backgroundImageCount: 0,
     },
     {
       deviceId: 'ipad',
       images: [logo(), hero(410, '1920.png', { bytes: 342016 }), badge('300.png', { bytes: 8210 })],
+      backgroundImageCount: 0,
     },
     {
       deviceId: 'desktop',
       images: [logo(), hero(720, '1080.png', { bytes: 118231 }), badge('200.png', { bytes: 4102 })],
+      backgroundImageCount: 0,
     },
   ];
   return {
@@ -112,6 +117,17 @@ const on = (capture: Capture, deviceId: string, images: CapturedImage[]): Captur
   ...capture,
   runs: capture.runs.map((run) => (run.deviceId === deviceId ? { ...run, images } : run)),
 });
+
+/** The same capture with a background image count per run, in device order. */
+const painting = (capture: Capture, counts: number[]): Capture => {
+  if (counts.length !== capture.runs.length) {
+    throw new Error(`${capture.runs.length} runs and ${counts.length} counts to paint them with`);
+  }
+  return {
+    ...capture,
+    runs: capture.runs.map((run, index) => ({ ...run, backgroundImageCount: counts[index] })),
+  };
+};
 
 const returning =
   (capture: Capture): CaptureFn =>
@@ -370,6 +386,63 @@ describe('run', () => {
     ]);
   });
 
+  it('names the source a matching picture resolved the sizes string from', async () => {
+    const resolved: CapturedImage = {
+      ...hero(720, '1080.png', { bytes: 118231 }),
+      candidates: parseSrcset('/i/1080.png 1080w, /i/1920.png 1920w'),
+      sizes: '50vw',
+      sizesSource: 'source',
+    };
+    const capture = on(gallery(), 'desktop', [
+      logo(),
+      resolved,
+      badge('200.png', { bytes: 4102 }),
+    ]);
+
+    const outcome = await run(['https://example.com/gallery'], returning(capture), cwd);
+
+    // What the image offered is not the same on every device once a `<source>`
+    // is in play, so the block says which device offered what.
+    expect(outcome.stdout).toContain(
+      '  candidates  640w, 1080w, 1920w on iPhone SE, iPhone 15 Pro, Pixel 8, iPad',
+    );
+    expect(outcome.stdout).toContain('  candidates  1080w, 1920w on Desktop');
+    expect(outcome.stdout).toContain(
+      '  sizes       (min-width: 1000px) 50vw, 100vw on iPhone SE, iPhone 15 Pro, Pixel 8, iPad',
+    );
+    expect(outcome.stdout).toContain(
+      '  sizes       50vw from a matching <source> on Desktop',
+    );
+  });
+
+  it('says nothing about a source where every device read the img itself', async () => {
+    // Which is every page with no `<picture>` on it, so the line a reader sees
+    // most often is the one it has always been.
+    const outcome = await run(['https://example.com/gallery'], returning(gallery()), cwd);
+
+    expect(outcome.stdout).toContain('  candidates  640w, 1080w, 1920w\n');
+    expect(outcome.stdout).toContain('  sizes       (min-width: 1000px) 50vw, 100vw\n');
+    expect(outcome.stdout).not.toContain('<source>');
+  });
+
+  it('names the source once where every device resolved the same one', async () => {
+    const capture: Capture = {
+      ...gallery(),
+      runs: gallery().runs.map((deviceRun) => ({
+        ...deviceRun,
+        images: deviceRun.images.map((image): CapturedImage =>
+          image.candidates.length > 2 ? { ...image, sizesSource: 'source' } : image,
+        ),
+      })),
+    };
+
+    const outcome = await run(['https://example.com/gallery'], returning(capture), cwd);
+
+    expect(outcome.stdout).toContain(
+      '  sizes       (min-width: 1000px) 50vw, 100vw from a matching <source>\n',
+    );
+  });
+
   it('reports where an image sat when a render moved it', async () => {
     const moved = {
       ...hero(187, '1080.png', { bytes: 118231 }),
@@ -400,6 +473,50 @@ describe('run', () => {
       'iPad',
       'Desktop',
     ]);
+  });
+
+  it('counts the CSS background images and says they select nothing', async () => {
+    const painted = painting(gallery(), [4, 4, 4, 4, 4]);
+
+    const outcome = await run(['https://example.com/gallery'], returning(painted), cwd);
+
+    expect(lines(outcome.stdout)[2]).toBe(
+      'css      4 background images. A CSS background image has no selection mechanism at ' +
+        'all, so imgwhy counts them and explains nothing further.',
+    );
+  });
+
+  it('names the devices when a media query painted a different number on each', async () => {
+    // The count is a property of a render, not of a page, so one figure for
+    // the whole capture would be a figure no device produced.
+    const painted = painting(gallery(), [2, 2, 2, 2, 3]);
+
+    const outcome = await run(['https://example.com/gallery'], returning(painted), cwd);
+
+    expect(lines(outcome.stdout)[2]).toBe(
+      'css      2 background images on iPhone SE, iPhone 15 Pro, Pixel 8, iPad, ' +
+        '3 background images on Desktop. A CSS background image has no selection mechanism ' +
+        'at all, so imgwhy counts them and explains nothing further.',
+    );
+  });
+
+  it('says one background image in the singular, because one is what it counted', async () => {
+    const outcome = await run(
+      ['https://example.com/gallery'],
+      returning(painting(gallery(), [1, 1, 1, 1, 1])),
+      cwd,
+    );
+
+    expect(lines(outcome.stdout)[2]).toContain('1 background image. A CSS background image');
+  });
+
+  it('says nothing at all about backgrounds on a page whose CSS paints none', async () => {
+    const outcome = await run(['https://example.com/gallery'], returning(gallery()), cwd);
+
+    // A line reading "0 background images" on every page would bury the pages
+    // that have some.
+    expect(outcome.stdout).not.toContain('background image');
+    expect(lines(outcome.stdout)[2]).toBe('');
   });
 
   it('says plainly when the page carries no image at all', async () => {

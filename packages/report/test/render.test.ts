@@ -2,7 +2,7 @@ import type { Capture } from '@imgwhy/core';
 import { coreSource, explainSelection } from '@imgwhy/core';
 import { describe, expect, it } from 'vitest';
 import { renderReport } from '../src/index.js';
-import { DEVICES, badge, gallery, hero, logo, on } from './capture.js';
+import { DEVICES, badge, gallery, hero, logo, on, painting, sourced } from './capture.js';
 
 /** The `<td>` cells of the row whose header holds `id`, in device order. */
 const cellsOf = (report: string, id: string): string[] => {
@@ -11,6 +11,17 @@ const cellsOf = (report: string, id: string): string[] => {
   if (!row) throw new Error(`no row for ${id} in\n${report}`);
   return [...row.matchAll(/<td[^>]*>.*?<\/td>/g)].map((match) => match[0]);
 };
+
+/** The `<th class="image">` of the row whose heading holds `id`. */
+const headOf = (report: string, id: string): string => {
+  const heads = [...report.matchAll(/<th class="image"[\s\S]*?<\/th>/g)].map((match) => match[0]);
+  const head = heads.find((one) => one.includes(id));
+  if (!head) throw new Error(`no row heading for ${id} in\n${report}`);
+  return head;
+};
+
+/** The one block per distinct offer a row heading writes, where it writes any. */
+const offersIn = (head: string): string[] => head.split('<div class="offer">').slice(1);
 
 /** The `<section class="panel">` whose heading holds `id`. */
 const panelOf = (report: string, id: string): string => {
@@ -122,6 +133,61 @@ describe('renderReport', () => {
     expect(report).toContain('<span class="none">no srcset</span>');
   });
 
+  it('names no device in a row heading where every device was offered the same markup', () => {
+    // The rule the command's trace keeps: agreement is written once and names
+    // no device, so the four devices that differ nowhere read as they always
+    // did and the images that do differ are the ones that stand out.
+    const report = renderReport(gallery());
+
+    expect(report).not.toContain('class="offer"');
+    expect(report).not.toContain('class="on"');
+  });
+
+  it('names the devices where a picture put a different offer in front of each', () => {
+    // Desktop resolved the hero against a `<source>` whose `media` matched,
+    // which carries its own candidates and its own `sizes`; the four narrower
+    // devices fell through to the `<img>`. One heading for the row would be
+    // one device's markup written over the other four's — and the first
+    // sighting is the narrowest device, so it would be the `<img>`'s.
+    const differing = on(gallery(), 'desktop', [
+      logo(),
+      sourced(720, '1080.png', 118_231),
+      badge('200.png', 4102),
+    ]);
+
+    const offers = offersIn(headOf(renderReport(differing), 'nth-of-type(1)'));
+
+    expect(offers).toHaveLength(2);
+    expect(offers[0]).toContain(
+      '<span class="on">on iPhone SE, iPhone 15 Pro, Pixel 8, iPad</span>',
+    );
+    expect(offers[0]).toContain('<span class="sizes">sizes (min-width: 1000px) 50vw, 100vw</span>');
+    expect(offers[0]).toContain('<span class="raw">640w</span>');
+    expect(offers[1]).toContain('<span class="on">on Desktop</span>');
+    // The `<source>` offers two files and the tag offers three, so the 640w
+    // the block above holds is in this one nowhere.
+    expect(offers[1]).not.toContain('<span class="raw">640w</span>');
+    expect(offers[1]).toContain('<span class="raw">1920w</span>');
+  });
+
+  it('says a sizes string came off a matching source rather than off the img', () => {
+    // Which element the browser read is the finding. The attribute a reader
+    // finds on the tag is not the one that resolved, and a bare string in the
+    // heading would send them to the wrong element to check it.
+    const differing = on(gallery(), 'desktop', [
+      logo(),
+      sourced(720, '1080.png', 118_231),
+      badge('200.png', 4102),
+    ]);
+
+    const offers = offersIn(headOf(renderReport(differing), 'nth-of-type(1)'));
+
+    expect(offers[1]).toContain(
+      '<span class="sizes">sizes 50vw, read off the matching &lt;source&gt; rather than ' +
+        'the &lt;img&gt;</span>',
+    );
+  });
+
   it('marks an image the page asked the browser to defer', () => {
     const report = renderReport(gallery());
 
@@ -144,6 +210,38 @@ describe('renderReport', () => {
 
     expect(report).toContain('0 images on 5 devices');
     expect(report).toContain('carries no &lt;img&gt; element');
+  });
+
+  it('counts the CSS background images and says they select nothing', () => {
+    const report = renderReport(painting(gallery(), [4, 4, 4, 4, 4]));
+
+    expect(report).toContain(
+      '<dt>backgrounds</dt><dd>4 background images. A CSS background image has no selection ' +
+        'mechanism at all, so imgwhy counts them and explains nothing further.</dd>',
+    );
+  });
+
+  it('names the devices when a media query painted a different number on each', () => {
+    // The count is a property of a render, not of a page, so one figure for
+    // the whole capture would be a figure no device produced.
+    const report = renderReport(painting(gallery(), [2, 2, 2, 2, 3]));
+
+    expect(report).toContain(
+      '<dd>2 background images on iPhone SE, iPhone 15 Pro, Pixel 8, iPad, ' +
+        '3 background images on Desktop. A CSS background image',
+    );
+  });
+
+  it('says one background image in the singular, because one is what it counted', () => {
+    const report = renderReport(painting(gallery(), [1, 1, 1, 1, 1]));
+
+    expect(report).toContain('<dd>1 background image. A CSS background image');
+  });
+
+  it('says nothing at all about backgrounds on a page whose CSS paints none', () => {
+    // A line reading "0 background images" on every report would bury the
+    // pages that have some.
+    expect(renderReport(gallery())).not.toContain('background image');
   });
 
   it('states the framework limit the design names as a non-goal', () => {
@@ -195,8 +293,13 @@ describe('renderReport', () => {
   });
 
   it('names the device the panel starts from, so no number is unexplained', () => {
+    // The candidate list is named as that render's too, and not as the page's.
+    // A `<picture>` hands a different `<source>` to a different device, so the
+    // list a panel lays out is the one this render was offered — the row
+    // heading is where the offers are compared.
     expect(panelOf(renderReport(gallery()), 'nth-of-type(1)')).toContain(
-      '<p class="from">Starts from iPhone SE: a 375 px viewport at DPR 2.</p>',
+      '<p class="from">Starts from iPhone SE: a 375 px viewport at DPR 2, and the candidates ' +
+        'that render was offered.</p>',
     );
   });
 
@@ -277,7 +380,13 @@ describe('renderReport', () => {
   it('refuses a run whose device the capture does not describe', () => {
     const orphaned: Capture = {
       ...gallery(),
-      runs: [{ deviceId: 'nokia-3310', images: [hero(187, '1080.png', 118_231)] }],
+      runs: [
+        {
+          deviceId: 'nokia-3310',
+          images: [hero(187, '1080.png', 118_231)],
+          backgroundImageCount: 0,
+        },
+      ],
     };
 
     expect(() => renderReport(orphaned)).toThrow('"nokia-3310"');

@@ -60,6 +60,14 @@ export type CapturedImage = {
   selector: string;
   candidates: Candidate[];
   sizes: string | null;
+  /**
+   * Which element `sizes` was read off: the `<img>`, or the `<source>` of a
+   * `<picture>` whose `media` matched.
+   *
+   * `source` with a null `sizes` is a real combination and says something: a
+   * source matched and wrote no `sizes`, so the 100vw default applied and
+   * whatever the `<img>` asked for played no part.
+   */
   sizesSource: 'img' | 'source';
   renderedWidth: number;
   currentSrc: string;
@@ -73,6 +81,21 @@ export type CapturedImage = {
 export type DeviceRun = {
   deviceId: string;
   images: CapturedImage[];
+  /**
+   * How many elements this render painted a CSS background image on.
+   *
+   * On the run rather than on the Capture, because it is a property of a page
+   * as one viewport rendered it: a media query can paint a background on one
+   * device and not on the next, so a single figure for the whole capture would
+   * be a figure no render produced.
+   *
+   * A count, and nothing else. A CSS background image has no selection
+   * mechanism at all — no `srcset`, no `sizes`, nothing for a browser to choose
+   * between — so there is no arithmetic to explain and none is attempted. That
+   * is the design's non-goal: "Count them and say they have no selection
+   * mechanism. Analyze nothing further."
+   */
+  backgroundImageCount: number;
 };
 
 /**

@@ -304,6 +304,91 @@ describe('imgwhy --report', () => {
     await context.close();
   }, 60_000);
 
+  it('states in the browser that the CSS background images select nothing', async () => {
+    const path = join(dir, 'backgrounds.html');
+
+    await imgwhy('--report', path, `${server.url}/backgrounds.html`);
+
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const asked: string[] = [];
+    page.on('request', (request) => asked.push(request.url()));
+    server.requests.length = 0;
+
+    const file = pathToFileURL(path).href;
+    await page.goto(file);
+
+    expect(asked).toEqual([file]);
+    expect(server.requests).toEqual([]);
+
+    // The head names the count and says what there is to say about it. A
+    // number on its own would leave a reader looking for the row it belongs
+    // to, and there is no row: nothing selects a background image.
+    const head = await page.locator('.head').textContent();
+    expect(head).toContain('backgrounds');
+    expect(head).toContain(
+      '2 background images on iPhone SE, iPhone 15 Pro, Pixel 8, iPad, ' +
+        '3 background images on Desktop. A CSS background image has no selection mechanism at ' +
+        'all, so imgwhy counts them and explains nothing further.',
+    );
+    // And the matrix still holds only the one `<img>` the page carries, so
+    // the count is the only place the backgrounds appear at all.
+    expect(await page.locator('table tbody tr').count()).toBe(1);
+
+    await context.close();
+  }, 60_000);
+
+  it('shows what a picture offered each device in the row heading, in the browser', async () => {
+    const path = join(dir, 'picture.html');
+
+    await imgwhy('--report', path, `${server.url}/picture-sources.html`);
+
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const asked: string[] = [];
+    page.on('request', (request) => asked.push(request.url()));
+    server.requests.length = 0;
+
+    const file = pathToFileURL(path).href;
+    await page.goto(file);
+
+    expect(asked).toEqual([file]);
+    expect(server.requests).toEqual([]);
+
+    // Three elements answered for the hero across the five devices, so the
+    // heading has three things to say and says whose each of them is. The
+    // first sighting is the narrowest device, which fell through to the
+    // `<img>` — a heading written from that one alone would put its markup
+    // over the two wide devices, whose cells pick out of a list it does not
+    // hold.
+    const row = page.locator('table tbody tr').first();
+    const offers = row.locator('th.image .offer');
+    expect(await offers.count()).toBe(3);
+    expect(await offers.locator('.on').allTextContents()).toEqual([
+      'on iPhone SE, iPhone 15 Pro, Pixel 8',
+      'on iPad',
+      'on Desktop',
+    ]);
+    expect(await offers.nth(0).locator('.raw').allTextContents()).toEqual([
+      '640w',
+      '1080w',
+      '1920w',
+    ]);
+    expect(await offers.nth(1).locator('.raw').allTextContents()).toEqual(['640w', '1080w']);
+    expect(await offers.nth(2).locator('.raw').allTextContents()).toEqual(['1080w', '1920w']);
+
+    // Which element the `sizes` string came off, which is the finding the
+    // trace prints and the report used to leave out.
+    expect(await offers.nth(2).locator('.sizes').textContent()).toBe(
+      'sizes 50vw, read off the matching <source> rather than the <img>',
+    );
+
+    // And the cell for Desktop picks out of the list the Desktop block holds.
+    expect(await row.locator('td .picked').nth(4).textContent()).toBe('1080w');
+
+    await context.close();
+  }, 60_000);
+
   it('reads a weight nothing recorded as unknown, in the browser as in the file', async () => {
     const path = join(dir, 'unknown.html');
 

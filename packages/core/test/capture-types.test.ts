@@ -22,7 +22,7 @@ const hero: CapturedImage = {
   loading: 'eager',
 };
 
-const run: DeviceRun = { deviceId: 'desktop', images: [hero] };
+const run: DeviceRun = { deviceId: 'desktop', images: [hero], backgroundImageCount: 0 };
 
 const capture: Capture = {
   url: 'https://example.com',

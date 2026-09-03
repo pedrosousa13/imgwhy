@@ -138,6 +138,16 @@ export const STYLE: Html = html`<style>
     overflow-wrap: anywhere;
   }
 
+  th.image .offer + .offer {
+    margin-top: 0.7rem;
+  }
+
+  th.image .on {
+    display: block;
+    margin-top: 0.3rem;
+    font-weight: 600;
+  }
+
   ul.candidates {
     margin: 0.4rem 0 0;
     padding: 0;

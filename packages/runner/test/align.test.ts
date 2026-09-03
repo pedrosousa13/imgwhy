@@ -16,7 +16,12 @@ const imageAt = (path: string, srcset: string): CapturedImage => ({
   loading: null,
 });
 
-const runOf = (deviceId: string, ...images: CapturedImage[]): DeviceRun => ({ deviceId, images });
+/** `backgroundImageCount` plays no part in aligning ids, so it is always zero. */
+const runOf = (deviceId: string, ...images: CapturedImage[]): DeviceRun => ({
+  deviceId,
+  images,
+  backgroundImageCount: 0,
+});
 
 const HERO = '/i/hero-640.png 640w, /i/hero-1080.png 1080w';
 const PROMO = '/i/promo-640.png 640w, /i/promo-1080.png 1080w';

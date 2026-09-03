@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderReport } from '../src/index.js';
+import { gallery, painting } from './capture.js';
 import { attributes, elements, namesIn, scripts, stylesheets, unread } from './document.js';
-import { gallery } from './capture.js';
 
 /**
  * Every element a report writes.
@@ -382,6 +382,12 @@ describe('the emitted report, as a file that must load nothing', () => {
     // all there, as the text of a cell, where a browser does nothing with one.
     expect(report).toContain('<span class="url">/i/1080.png</span>');
     expect(report).toContain('<dd class="url">https://example.com/gallery</dd>');
+  });
+
+  it('stays self-contained for a page whose CSS painted files of its own', () => {
+    // The background line is the report's own words and one number, so it
+    // needs no name in either allowlist above. This is what says so.
+    expect(reaching(renderReport(painting(gallery(), [4, 4, 4, 4, 3])))).toEqual([]);
   });
 
   it('stays self-contained for a page written to break out of the report', () => {
