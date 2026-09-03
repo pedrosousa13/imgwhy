@@ -230,12 +230,17 @@ export const STYLE: Html = html`<style>
     flex: 1 1 24rem;
   }
 
-  input {
+  input,
+  textarea {
     padding: 0.3rem 0.4rem;
     border: 1px solid var(--line);
     background: var(--paper);
     color: var(--ink);
     font: inherit;
+  }
+
+  textarea {
+    resize: vertical;
   }
 
   .limit {

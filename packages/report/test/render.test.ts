@@ -203,7 +203,12 @@ describe('renderReport', () => {
   it('carries a control for the sizes string, the viewport width and the ratio', () => {
     const panel = panelOf(renderReport(gallery()), 'nth-of-type(1)');
 
-    expect(panel).toContain('<input class="sizes-input" type="text">');
+    // A textarea and not an `<input type="text">`, because a text input runs a
+    // sanitiser over its value that takes every newline out of it. A `sizes`
+    // attribute written across lines would arrive in the control as a string
+    // the page never had, and the first keystroke would re-pick against that
+    // instead of against the measurement.
+    expect(panel).toContain('<textarea class="sizes-input"></textarea>');
     expect(panel).toContain('<input class="viewport-input" type="number" min="1" step="1">');
     expect(panel).toContain('<input class="dpr-input" type="number" min="0.1" step="any">');
   });
@@ -228,6 +233,26 @@ describe('renderReport', () => {
 
     expect(panel).toContain('The page shipped no srcset, so there was nothing to select.');
     expect(panel).not.toContain('<input');
+    expect(panel).not.toContain('<textarea');
+  });
+
+  it('shows the same four sums for an image with nothing to choose, rather than none', () => {
+    // The design asks every panel for the clause, the CSS width, the pixels
+    // needed and the winner. `readPanel` answers all four for an image with no
+    // `srcset` — the answer is that there was nothing to resolve — and a panel
+    // that dropped them would be hiding a reading it had already taken.
+    const panel = panelOf(renderReport(gallery()), 'header &gt; img');
+
+    expect(panel).toContain('<dd class="clause">no srcset</dd>');
+    expect(panel).toContain('<dd class="css">—</dd>');
+    expect(panel).toContain('<dd class="needed">—</dd>');
+    expect(panel).toContain('<dd class="picked">—</dd>');
+  });
+
+  it('lists no candidates for an image that shipped none, because there is no list', () => {
+    const panel = panelOf(renderReport(gallery()), 'header &gt; img');
+
+    expect(panel).not.toContain('ul class="candidates"');
   });
 
   it('carries the panel data as one inert JSON island the script reads back', () => {

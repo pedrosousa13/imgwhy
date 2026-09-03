@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process';
 import {
-  existsSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -14,6 +13,7 @@ import { promisify } from 'node:util';
 import type { Capture } from '@imgwhy/core';
 import { DEFAULT_PROFILES } from '@imgwhy/runner';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { refuseStaleBuild } from '../../../test/built.js';
 import { type FixtureServer, startFixtureServer } from '../../../test/fixture-server.js';
 import { USAGE } from '../src/args.js';
 
@@ -69,7 +69,7 @@ let server: FixtureServer;
 let plain: string;
 
 beforeAll(async () => {
-  expect(existsSync(bin), `${bin} is missing — run \`npm run build\` first`).toBe(true);
+  refuseStaleBuild();
   server = await startFixtureServer();
   plain = mkdtempSync(join(tmpdir(), 'imgwhy-bin-'));
 });

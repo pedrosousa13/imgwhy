@@ -78,6 +78,19 @@ const PAGES: Record<string, string> = {
   src="/img/640.png" alt="hero"></main>`,
   ),
 
+  // A `sizes` attribute written across lines, which is how anyone writes a
+  // long one. The line break sits between the media condition and the length
+  // with no space after it, so a control that dropped the newline would leave
+  // `(min-width:1000px)50vw` — one clause, no condition a parser can read, and
+  // two lengths that add up to a width nothing measured.
+  '/wrapped-sizes.html': shell(
+    'wrapped sizes',
+    `<main><img class="half" sizes="(min-width:1000px)
+50vw, 100vw"
+  srcset="/img/640.png 640w, /img/1080.png 1080w, /img/1920.png 1920w"
+  src="/img/640.png" alt="hero"></main>`,
+  ),
+
   // Candidates written relative to the page, so the base a trace resolves them
   // against decides whether they land. Reached through the redirect below.
   '/nested/': shell(

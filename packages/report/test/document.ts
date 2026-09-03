@@ -1,5 +1,9 @@
+import ts from 'typescript';
+import { parse } from '../../../test/source.js';
+
 /**
- * Reading an emitted report back as elements and attributes.
+ * Reading an emitted report back as elements and attributes — and, for the one
+ * element that is not markup, as the names its code reaches for.
  *
  * Two checks need it, and both need the same thing: `escaping.test.ts` asks
  * what ended up inside an attribute, and `self-contained.test.ts` asks whether
@@ -127,3 +131,147 @@ export const scripts = (document: string): Script[] =>
     type: (attributesOf(found[1]).find((one) => one.name === 'type')?.value ?? '').toLowerCase(),
     text: found[2],
   }));
+
+/**
+ * What one script reaches for, split by the four questions worth asking of it.
+ *
+ * `reaches` in `test/source.ts` answers the same shape of question about a
+ * module, and for the same reason: a syntax tree holds every form a thing can
+ * be written in, where a pattern over the text holds the forms whoever wrote
+ * it thought of. `el.innerHTML`, `el['inner' + 'HTML']` and
+ * `Object.assign(el, { innerHTML })` are one act written three ways.
+ */
+export type Names = {
+  /** Names it uses and never binds: everything it reaches for outside itself. */
+  globals: string[];
+  /** Property names it calls. */
+  called: string[];
+  /** Property names it writes to. */
+  written: string[];
+  /** Property names it writes into an object literal. */
+  keys: string[];
+  /** Reaches this reading cannot name, one line each. */
+  refused: string[];
+};
+
+/** The name a member expression names, or null where it computes one. */
+const memberName = (
+  node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+): string | null =>
+  ts.isPropertyAccessExpression(node)
+    ? node.name.text
+    : ts.isStringLiteralLike(node.argumentExpression)
+      ? node.argumentExpression.text
+      : null;
+
+const ASSIGNS = new Set([ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken]);
+
+/** Whether `node` is the target of an assignment rather than a read of one. */
+function isWritten(node: ts.Node): boolean {
+  const parent = node.parent;
+  if (ts.isBinaryExpression(parent) && parent.left === node) {
+    const { kind } = parent.operatorToken;
+    return kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
+  }
+  if (ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent)) {
+    return ASSIGNS.has(parent.operator);
+  }
+  return false;
+}
+
+/**
+ * Every name one script reaches for, out of TypeScript's own syntax tree.
+ *
+ * A global is a name used and never bound anywhere in the script, which is the
+ * whole of what a script can reach outside itself: `fetch`, `XMLHttpRequest`,
+ * `Image`, `WebSocket`, `eval` and `importScripts` are all one of those, and
+ * so is a name a future edit invents.
+ *
+ * The other three are about what it can put onto an object it did not make.
+ * `written` and `keys` are the same act by two routes — `el.src = url` and
+ * `Object.assign(el, { src: url })` — and `called` is the third, because
+ * `insertAdjacentHTML` and `createElement` are calls rather than assignments.
+ * A property *read* is not here: reading `el.innerHTML` fetches nothing and
+ * writes nothing, and the data field names a report reads are the Capture's
+ * whole vocabulary.
+ *
+ * One route is refused rather than read. `el[whatever()] = x` names its
+ * property when it runs, and no reading of the text can say which. Nothing in
+ * the report writes one.
+ */
+export function namesIn(javascript: string): Names {
+  const bound = new Set<string>();
+  const used = new Set<string>();
+  const called = new Set<string>();
+  const written = new Set<string>();
+  const keys = new Set<string>();
+  const refused = new Set<string>();
+
+  const bind = (name: ts.BindingName): void => {
+    if (ts.isIdentifier(name)) bound.add(name.text);
+    else for (const element of name.elements) if (ts.isBindingElement(element)) bind(element.name);
+  };
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isBindingElement(node)) {
+      bind(node.name);
+    } else if (
+      (ts.isFunctionDeclaration(node) ||
+        ts.isFunctionExpression(node) ||
+        ts.isClassDeclaration(node) ||
+        ts.isClassExpression(node)) &&
+      node.name
+    ) {
+      bound.add(node.name.text);
+    } else if (ts.isImportClause(node) && node.name) {
+      bound.add(node.name.text);
+    } else if (ts.isImportSpecifier(node) || ts.isNamespaceImport(node)) {
+      bound.add(node.name.text);
+    } else if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+      const name = memberName(node);
+      const call = ts.isCallExpression(node.parent) && node.parent.expression === node;
+      if (name === null) {
+        if (isWritten(node)) refused.add('writes to a property it computes at run time');
+        else if (call) refused.add('calls a property it computes at run time');
+      } else if (call) called.add(name);
+      else if (isWritten(node)) written.add(name);
+    } else if (ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) {
+      if (ts.isIdentifier(node.name) || ts.isStringLiteralLike(node.name)) keys.add(node.name.text);
+      else refused.add('names a property it computes at run time in an object');
+    }
+
+    // A value position: an identifier that is not the name half of something.
+    // A shorthand `{ src }` is both, and is counted as both.
+    if (ts.isIdentifier(node)) {
+      const parent = node.parent;
+      const isName =
+        (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
+        (ts.isPropertyAssignment(parent) && parent.name === node) ||
+        ts.isParameter(parent) ||
+        ts.isVariableDeclaration(parent) ||
+        ts.isBindingElement(parent) ||
+        ts.isImportClause(parent) ||
+        ts.isImportSpecifier(parent) ||
+        ts.isNamespaceImport(parent) ||
+        ((ts.isFunctionDeclaration(parent) ||
+          ts.isFunctionExpression(parent) ||
+          ts.isClassDeclaration(parent) ||
+          ts.isClassExpression(parent) ||
+          ts.isMethodDeclaration(parent)) &&
+          parent.name === node);
+      if (!isName) used.add(node.text);
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(parse(javascript));
+
+  return {
+    globals: [...used].filter((name) => !bound.has(name)).sort(),
+    called: [...called].sort(),
+    written: [...written].sort(),
+    keys: [...keys].sort(),
+    refused: [...refused].sort(),
+  };
+}

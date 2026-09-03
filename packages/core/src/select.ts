@@ -1,4 +1,4 @@
-import type { Candidate } from './types.js';
+import type { Candidate, Part } from './types.js';
 
 /**
  * Pick the candidate a browser would download.
@@ -25,4 +25,4 @@ export function selectCandidate(
 }
 
 /** Every function this module is made of. `srcset.ts` says what for. */
-export const PARTS: readonly Function[] = [selectCandidate];
+export const PARTS: readonly Part[] = [selectCandidate];

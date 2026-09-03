@@ -1,7 +1,9 @@
 import vm from 'node:vm';
 import type { CapturedImage, DeviceProfile, Selection } from '@imgwhy/core';
 import { coreSource, explainSelection, parseSrcset } from '@imgwhy/core';
-import { describe, expect, it } from 'vitest';
+import { renderReport as renderBuilt } from '@imgwhy/report';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { refuseStaleBuild } from '../../../test/built.js';
 import { renderReport } from '../src/index.js';
 import { readPanel } from '../src/panel.js';
 import type { Readout } from '../src/panel.js';
@@ -149,6 +151,56 @@ describe('the script the report ships, run the way a page runs it', () => {
     expect(report).toContain(`<dd class="clause">${recomputed.clause}</dd>`);
     expect(report).toContain(`<dd class="picked">${recomputed.picked}</dd>`);
     expect(report).toContain(`<p class="reason">${recomputed.reason}</p>`);
+  });
+});
+
+/**
+ * The same script, out of the package as it is built rather than as it is
+ * written.
+ *
+ * Everything above renders through `../src`, which Vitest transforms on the
+ * way in. `String(readPanel)` is the one call in this package whose answer
+ * that changes: it reads the text of a function, so a test of it reads
+ * whatever the transform left, and a reader's file carries whatever `tsc`
+ * emitted. The two are not the same string — `tsc` re-indents the helper
+ * inside `readPanel` — and nothing here would have noticed if they had also
+ * stopped meaning the same thing.
+ *
+ * They can. The two compilers do not target the same language: this package
+ * builds to ES2022 and Vite's transform targets whatever the running Node
+ * understands. A syntax `tsc` downlevels — a private field, a decorator, an
+ * operator newer than the target — arrives in `dist` as a call to a helper
+ * `tsc` wrote at the top of the module, which is exactly the kind of name that
+ * does not come over with a function. Vite would have left the syntax alone,
+ * so the source-side check above would pass while a reader's file threw.
+ *
+ * `vitest.config.ts` externalises `packages/report/dist` so this import is the
+ * built file rather than another transform of the source, and
+ * `refuseStaleBuild` refuses a `dist` older than the `src` beside it, because
+ * a stale build would make every check below a check of last week's code.
+ *
+ * That is why the whole difference is checked by behaviour rather than by
+ * text. The bytes are allowed to differ; the answers are not.
+ */
+describe('the script the built package ships, which is the copy a reader gets', () => {
+  beforeAll(refuseStaleBuild);
+
+  it('brings core and the readout over, the same five names the source does', () => {
+    expect(Object.keys(inPage(renderBuilt(gallery()))).sort()).toEqual([
+      'explainSelection',
+      'parseSrcset',
+      'readPanel',
+      'resolveSizes',
+      'selectCandidate',
+    ]);
+  });
+
+  it.each(TYPED)('recomputes %s exactly as the source does', (_case, image, device) => {
+    const page = inPage(renderBuilt(gallery()));
+    const explain = page.explainSelection as typeof explainSelection;
+    const read = page.readPanel as typeof readPanel;
+
+    expect(read(explain(image, device), image.candidates, device.dpr)).toEqual(here(image, device));
   });
 });
 

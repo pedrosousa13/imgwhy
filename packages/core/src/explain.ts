@@ -1,4 +1,4 @@
-import type { Candidate, CapturedImage, DeviceProfile, Resolution } from './types.js';
+import type { Candidate, CapturedImage, DeviceProfile, Part, Resolution } from './types.js';
 import { selectCandidate } from './select.js';
 import { resolveSizes } from './sizes.js';
 
@@ -91,4 +91,4 @@ export function explainSelection(image: CapturedImage, device: DeviceProfile): S
 }
 
 /** Every function this module is made of. `srcset.ts` says what for. */
-export const PARTS: readonly Function[] = [resolvedPx, explainSelection];
+export const PARTS: readonly Part[] = [resolvedPx, explainSelection];

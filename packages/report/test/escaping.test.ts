@@ -103,7 +103,6 @@ const OWN_VALUES = new Set([
   'needed',
   'mark',
   'reason',
-  'text',
   'number',
   'any',
   '1',
@@ -120,7 +119,6 @@ describe('a report of a page written to break out of it', () => {
     // there are none — it is that there are exactly the two, in the order this
     // package writes them, and that nothing the page asked for opened a third.
     expect(scripts(report).map((one) => one.type)).toEqual(['application/json', '']);
-    expect(report).not.toContain("<script>alert");
     expect(report).not.toContain('<!--');
   });
 
@@ -220,7 +218,9 @@ describe('a report of a page written to break out of it', () => {
 
     const report = renderReport(empty);
 
-    expect(report).not.toContain("<script>alert");
+    // The same two checks, and for the same reason: a search for one payload
+    // would pass for a page that wrote a different one.
+    expect(scripts(report).map((one) => one.type)).toEqual(['application/json', '']);
     expect(unread(report)).toEqual([]);
   });
 });

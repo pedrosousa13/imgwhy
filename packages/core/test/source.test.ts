@@ -10,14 +10,14 @@
  * being rewritten, and `no-globals.test.ts` reads the build for the same
  * reason.
  */
-import { readFileSync, readdirSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import type { CapturedImage, DeviceProfile } from '@imgwhy/core';
 import { coreSource, explainSelection, parseSrcset } from '@imgwhy/core';
+import { parse, read, sources } from '../../../test/source.js';
 
 const src = fileURLToPath(new URL('../src', import.meta.url));
 
@@ -37,8 +37,8 @@ const src = fileURLToPath(new URL('../src', import.meta.url));
  */
 function inBareContext(source: string): Record<string, unknown> {
   const context = vm.createContext(Object.create(null));
-  const read = '\n;({ parseSrcset, resolveSizes, selectCandidate, explainSelection })';
-  return vm.runInContext(source + read, context) as Record<string, unknown>;
+  const trailing = '\n;({ parseSrcset, resolveSizes, selectCandidate, explainSelection })';
+  return vm.runInContext(source + trailing, context) as Record<string, unknown>;
 }
 
 /** One image, as a Capture holds it, around a `srcset` and a `sizes`. */
@@ -72,6 +72,26 @@ const DENSITIES = '/i/200.png 1x, /i/300.png 2x';
  * `calc()` reaches `splitTop`'s parenthesis counting, the media clauses reach
  * `evalCond`, `em` reaches `toPx`'s other unit, `auto` reaches the rendered
  * width, and the unreadable clause reaches the error branch.
+ *
+ * ## This table is load-bearing. Do not trim it.
+ *
+ * It looks like coverage of the algorithm, and the algorithm is covered
+ * already — `explain.test.ts`, `sizes.test.ts` and `select.test.ts` each ask
+ * these questions of the imported functions. What runs here is the *shipped*
+ * copy, in a context with no globals, and that is a different question: it
+ * asks whether every branch of the shipped copy can still run when its module
+ * is gone from around it.
+ *
+ * The completeness check below reads names out of core's own top level. So it
+ * answers for a name core declares and forgot to ship, and it cannot answer
+ * for a name core never declared — a global that Node has and a page does not,
+ * reached from inside one function. Nothing sees that until the branch holding
+ * it runs somewhere with no globals, which is here, and only for the branches
+ * in this table.
+ *
+ * A case dropped from it is a branch that could start reaching for `process`
+ * or `require` without anything failing until a reader opened the report. Add
+ * one when you add a branch; take none away.
  */
 const CASES: [string, CapturedImage, DeviceProfile][] = [
   ['a width descriptor at DPR 2', imageOf(WIDTHS, '100vw', 375), deviceOf(375, 2)],
@@ -96,39 +116,83 @@ const CASES: [string, CapturedImage, DeviceProfile][] = [
   ['nothing to select at all', imageOf('', null, 120), deviceOf(1440, 1)],
 ];
 
-/** Every function one core module declares at its top level, by name. */
+/**
+ * The one name a core module declares that does not ship: the list itself.
+ *
+ * `source.ts` reads every module's `PARTS` to build the string, so the list is
+ * how the shipping happens rather than a thing that is shipped. A page handed
+ * one would hold an array naming modules it does not have.
+ */
+const NOT_SHIPPED = 'PARTS';
+
+/**
+ * Every value one core module binds at its top level, by name.
+ *
+ * Every binding, not every function, and that is the point of it. The earlier
+ * shape of this read function declarations and a `const` holding an arrow or a
+ * function expression, which let two things through — `const memo = wrap(() =>
+ * …)`, whose initializer is a call, and `const ROOT_FONT_PX = 16`, which is
+ * not callable at all. Both are names a shipped function can reach for and a
+ * page would not have.
+ *
+ * So the question asked is "what does this module's top level bind", and the
+ * answer is checked against what ships. A non-function up there cannot go into
+ * a `readonly Part[]`, so the check fails and stays failed until the value is
+ * inlined or made a function. That is the intended outcome: `PARTS` ships
+ * functions, and a core module that needs a top-level constant needs a
+ * different shape.
+ *
+ * The walk descends through blocks and control flow, because `var` and a
+ * function declaration inside one are still module scope, and stops at every
+ * function and class — a helper declared inside a function comes over with it
+ * and has no business in a list.
+ */
 function declaredIn(text: string): string[] {
-  const file = ts.createSourceFile('module.ts', text, ts.ScriptTarget.ESNext, true);
   const names: string[] = [];
-  for (const statement of file.statements) {
-    if (ts.isFunctionDeclaration(statement) && statement.name) {
-      names.push(statement.name.text);
+
+  const bind = (name: ts.BindingName): void => {
+    if (ts.isIdentifier(name)) names.push(name.text);
+    else for (const element of name.elements) if (ts.isBindingElement(element)) bind(element.name);
+  };
+
+  const walk = (node: ts.Node): void => {
+    if (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) {
+      if (node.name) names.push(node.name.text);
+      return;
     }
-    if (ts.isVariableStatement(statement)) {
-      for (const declaration of statement.declarationList.declarations) {
-        const initializer = declaration.initializer;
-        const isFunction =
-          initializer !== undefined &&
-          (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer));
-        if (isFunction && ts.isIdentifier(declaration.name)) names.push(declaration.name.text);
-      }
+    if (ts.isVariableStatement(node)) {
+      for (const declaration of node.declarationList.declarations) bind(declaration.name);
+      return;
     }
-  }
-  return names;
+    // Anything that is not a function or a class may still hold one of the
+    // two above at module scope: a `var` in an `if`, a hoisted declaration in
+    // a block. Statements only — an expression cannot bind a module name.
+    if (ts.isFunctionLike(node) || ts.isClassLike(node)) return;
+    ts.forEachChild(node, (child) => {
+      if (ts.isStatement(child) || ts.isSourceFile(child)) walk(child);
+    });
+  };
+
+  walk(parse(text));
+  return names.filter((name) => name !== NOT_SHIPPED);
 }
 
 /**
- * Every function core is made of, by name.
+ * Every name core binds at the top level of a module, by name.
  *
- * `source.ts` is left out, and it is the only thing that is: it assembles the
+ * `sources` recurses, so a helper written into `src/<subdir>/` is read too. A
+ * flat listing was what this had before, and it would have let a whole
+ * directory of unshipped helpers past the check.
+ *
+ * `source.ts` is left out, and it is the only file that is: it assembles the
  * shipped copy rather than being part of one. A page has nothing to do with a
  * function that hands out source, and shipping it would put a `PARTS` list in
  * a page with no modules for it to name.
  */
 const declaredInCore = (): string[] =>
-  readdirSync(src)
-    .filter((name) => name.endsWith('.ts') && name !== 'source.ts')
-    .flatMap((name) => declaredIn(readFileSync(resolve(src, name), 'utf8')));
+  sources(src)
+    .filter((file) => basename(file) !== 'source.ts')
+    .flatMap((file) => declaredIn(read(file)));
 
 /** Every name the shipped source declares. */
 const declaredBy = (source: string): string[] =>
@@ -137,7 +201,7 @@ const declaredBy = (source: string): string[] =>
 describe('core, shipped as source', () => {
   const source = coreSource();
 
-  it('declares every function core is made of, so no helper is left behind', () => {
+  it('declares every name core binds at a module top level, so nothing is left behind', () => {
     // A helper reached only through one branch would otherwise go missing, and
     // the branch that needed it would throw in the page rather than here.
     expect(declaredBy(source).sort()).toEqual(declaredInCore().sort());
@@ -191,5 +255,51 @@ describe('the shipped source, given a helper left out of it', () => {
       'toPx',
       'splitTop',
     ]);
+  });
+});
+
+/**
+ * The reading of a module's top level, against the shapes a helper arrives in.
+ *
+ * Every source below binds a name a shipped function could reach for, and the
+ * first three are the ones the earlier reading missed: it looked for a
+ * function declaration or a `const` holding an arrow, so a `const` holding a
+ * call, a value that is not callable, and a `var` inside a block all passed
+ * the completeness check and would have thrown in a reader's browser.
+ *
+ * The last two are the boundary on the other side: what a helper *inside* a
+ * function is, which is part of that function's own text and no business of a
+ * list, and `PARTS`, which is how the shipping happens rather than a thing
+ * that ships.
+ */
+describe('what a core module binds at its top level', () => {
+  const cases: [string, string, string[]][] = [
+    ['a const holding a call', 'const memo = wrap(() => 1);', ['memo']],
+    ['a const holding no function at all', 'const ROOT_FONT_PX = 16;', ['ROOT_FONT_PX']],
+    ['a var inside a block, which is module scope anyway', '{ var cache = new Map(); }', ['cache']],
+    ['a let and a class', 'let seen = 0;\nclass Reader {}', ['seen', 'Reader']],
+    ['a name out of a destructuring', 'const { floor, ceil } = Math;', ['floor', 'ceil']],
+    ['a function declaration, as before', 'function splitTop(s) {\n  return [s];\n}', ['splitTop']],
+    ['an arrow in a const, as before', 'const toPx = (n) => n;', ['toPx']],
+    [
+      'a helper inside a function, which travels with it',
+      'function a() {\n  const b = 1;\n  return b;\n}',
+      ['a'],
+    ],
+    [
+      'a helper inside an arrow, for the same reason',
+      'const a = () => {\n  const b = 1;\n  return b;\n};',
+      ['a'],
+    ],
+    [
+      'PARTS, which is the list rather than a part',
+      'const f = () => 1;\nexport const PARTS = [f];',
+      ['f'],
+    ],
+    ['a type, which binds no value', 'type Length = { px: number };', []],
+  ];
+
+  it.each(cases)('reads %s', (_shape, source, expected) => {
+    expect(declaredIn(source)).toEqual(expected);
   });
 });

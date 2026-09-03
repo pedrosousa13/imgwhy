@@ -1,3 +1,23 @@
+/**
+ * One function a module ships into a page as its own source.
+ *
+ * `source.ts` says what for, and every module's `PARTS` is a list of these.
+ * The type is here rather than there because a module that exports a `PARTS`
+ * already imports this file, and importing `source.ts` for a type would be a
+ * cycle back through the module that reads every list.
+ *
+ * Not `Function`, which is TypeScript's weakest callable type: it stands for
+ * anything callable at all and is assignable from a class constructor, so a
+ * list typed with it says only "not a number". This says the two things
+ * `coreSource()` actually needs — a `name` to declare the constant with, and a
+ * call signature, so a value that is not a function cannot arrive.
+ *
+ * `never[]` parameters and an `unknown` return are what make every shape of
+ * function assignable to it; nothing here ever calls a `Part`, it only reads
+ * its name and its text.
+ */
+export type Part = { readonly name: string } & ((...args: never[]) => unknown);
+
 /** One entry of a `srcset` attribute. */
 export type Candidate = {
   url: string;

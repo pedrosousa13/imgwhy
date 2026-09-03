@@ -1,14 +1,14 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { refuseStaleBuild } from '../../../test/built.js';
 
 const runner = fileURLToPath(new URL('./bare-context-runner.mjs', import.meta.url));
 const entry = fileURLToPath(new URL('../dist/index.js', import.meta.url));
 
 describe('core in a context with no globals', () => {
   it('runs the whole trace inside an empty vm context', () => {
-    expect(existsSync(entry), `${entry} is missing — run \`npm run build\` first`).toBe(true);
+    refuseStaleBuild();
 
     const run = spawnSync(
       process.execPath,

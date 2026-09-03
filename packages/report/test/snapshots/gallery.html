@@ -220,12 +220,17 @@
     flex: 1 1 24rem;
   }
 
-  input {
+  input,
+  textarea {
     padding: 0.3rem 0.4rem;
     border: 1px solid var(--line);
     background: var(--paper);
     color: var(--ink);
     font: inherit;
+  }
+
+  textarea {
+    resize: vertical;
   }
 
   .limit {
@@ -303,9 +308,15 @@
 <section class="panels">
 <h2>Each image, in full</h2>
 <p class="lead">The arithmetic behind one row, and the controls to run it again. Type a different <code>sizes</code> string, viewport width or device pixel ratio, and the selection is recomputed here — by the same code the command ran, against the candidates this page shipped.</p>
-<section class="panel"><h3 class="id">html &gt; body &gt; header &gt; img</h3><p class="reason">The page shipped no srcset, so there was nothing to select.</p></section>
+<section class="panel"><h3 class="id">html &gt; body &gt; header &gt; img</h3><dl class="sums">
+<dt>clause used</dt><dd class="clause">no srcset</dd>
+<dt>css px</dt><dd class="css">—</dd>
+<dt>needed</dt><dd class="needed">—</dd>
+<dt>picked</dt><dd class="picked">—</dd>
+</dl>
+<p class="reason">The page shipped no srcset, so there was nothing to select.</p></section>
 <section class="panel"><h3 class="id">html &gt; body &gt; main &gt; img:nth-of-type(1)</h3><p class="from">Starts from iPhone SE: a 375 px viewport at DPR 2.</p><div class="controls">
-<label class="control">sizes<input class="sizes-input" type="text"></label>
+<label class="control">sizes<textarea class="sizes-input"></textarea></label>
 <label class="control">viewport<input class="viewport-input" type="number" min="1" step="1"></label>
 <label class="control">DPR<input class="dpr-input" type="number" min="0.1" step="any"></label>
 </div>
@@ -319,7 +330,7 @@
 <ul class="candidates"><li><span class="raw">640w</span><span class="url">/i/640.png</span><span class="mark"></span></li><li><span class="raw">1080w</span><span class="url">/i/1080.png</span><span class="mark">← picked</span></li><li><span class="raw">1920w</span><span class="url">/i/1920.png</span><span class="mark"></span></li></ul>
 <p class="reason">375 css px × DPR 2 = 750 physical pixels, and 1080w is the smallest candidate at or above that.</p></section>
 <section class="panel"><h3 class="id">html &gt; body &gt; main &gt; img:nth-of-type(2)</h3><p class="from">Starts from iPhone SE: a 375 px viewport at DPR 2.</p><div class="controls">
-<label class="control">sizes<input class="sizes-input" type="text"></label>
+<label class="control">sizes<textarea class="sizes-input"></textarea></label>
 <label class="control">viewport<input class="viewport-input" type="number" min="1" step="1"></label>
 <label class="control">DPR<input class="dpr-input" type="number" min="0.1" step="any"></label>
 </div>

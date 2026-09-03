@@ -1,3 +1,4 @@
+import type { Part } from './types.js';
 import { PARTS as EXPLAIN } from './explain.js';
 import { PARTS as SELECT } from './select.js';
 import { PARTS as SRCSET } from './srcset.js';
@@ -11,7 +12,7 @@ import { PARTS as SIZES } from './sizes.js';
  * them are bound. Reading order is the algorithm's own — parse, select,
  * resolve, then the joins between them.
  */
-const PARTS: readonly Function[] = [...SRCSET, ...SELECT, ...SIZES, ...EXPLAIN];
+const PARTS: readonly Part[] = [...SRCSET, ...SELECT, ...SIZES, ...EXPLAIN];
 
 /**
  * Core, as JavaScript a page can run.
@@ -38,10 +39,20 @@ const PARTS: readonly Function[] = [...SRCSET, ...SELECT, ...SIZES, ...EXPLAIN];
  *
  * A helper added to a module and left out of its list is the failure to watch
  * for, and it would show as a `ReferenceError` in someone's browser rather
- * than here. So `source.test.ts` reads each module's own top level and refuses
- * a name that is not in the list beside it, then runs the whole of this in a
- * context with no globals and checks every branch against the imported
- * functions.
+ * than here. Two checks in `source.test.ts` stand between it and a reader,
+ * and neither covers the other's ground:
+ *
+ * - It reads every top-level binding every core module declares — whatever
+ *   keyword or shape it was written with — and refuses any name the string
+ *   below does not declare. That is the whole of the module's own top level,
+ *   so the rule it enforces is that a core module may declare nothing up there
+ *   but functions and its own `PARTS`: a constant cannot be in a list of
+ *   functions, and the check fails until it is inlined or made one.
+ * - It runs the whole of this in a context with no globals and compares every
+ *   branch against the imported functions. That is the only instrument for a
+ *   name no core module declares at all — something reached through a global
+ *   that Node has and a page does not — and it reaches a branch only if the
+ *   `CASES` table there covers it.
  *
  * This adds nothing to core's dependencies. `Function.prototype.toString` and
  * `Array.prototype.join` are language, not host: the string below is built the

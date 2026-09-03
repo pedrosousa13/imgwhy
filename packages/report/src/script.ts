@@ -29,6 +29,12 @@ import { readPanel } from './panel.js';
  * - It writes text and never markup. `textContent` and `value` only — no
  *   `innerHTML`, no `createElement`, no `setAttribute` — so nothing off the
  *   page can become an element or an attribute after the document has loaded.
+ *
+ * Both are checked as allowlists over the names this script reaches for, so
+ * neither is a list of spellings to avoid: a name used here and not named
+ * there is a finding whatever it is called. Adding a global, a called method
+ * or an object key to the code below means adding it to that test as well, and
+ * that is the deliberate act rather than the friction.
  */
 const WIRING = `(function () {
   const wire = (section, panel) => {

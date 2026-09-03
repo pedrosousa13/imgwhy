@@ -1,11 +1,12 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { type Browser, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { refuseStaleBuild } from '../../../test/built.js';
 import { type FixtureServer, startFixtureServer } from '../../../test/fixture-server.js';
 
 const execFileAsync = promisify(execFile);
@@ -26,13 +27,19 @@ const bin = fileURLToPath(new URL('../dist/bin.js', import.meta.url));
  * every request it makes, and the fixture server reports every request it
  * receives — so a request the page made to the site it describes would have to
  * escape both a listener and a log to pass.
+ *
+ * What it drives is `dist/bin.js`, so `refuseStaleBuild` runs first. Removing
+ * a listener from the report's in-page wiring fails the DOM checks below —
+ * but only against a build that has the removal in it, and `npx vitest run`
+ * skips the `pretest` that would have produced one. `test/built.ts` says the
+ * rest.
  */
 let server: FixtureServer;
 let browser: Browser;
 let dir: string;
 
 beforeAll(async () => {
-  expect(existsSync(bin), `${bin} is missing — run \`npm run build\` first`).toBe(true);
+  refuseStaleBuild();
   server = await startFixtureServer();
   browser = await chromium.launch();
   dir = mkdtempSync(join(tmpdir(), 'imgwhy-report-'));
@@ -209,6 +216,61 @@ describe('imgwhy --report', () => {
 
     // And through every one of those, the file asked for nothing: not a
     // stylesheet, not a font, not a script, and nothing from the site.
+    expect(asked).toEqual([file]);
+    expect(server.requests).toEqual([]);
+
+    await context.close();
+  }, 60_000);
+
+  it('starts the sizes control from the string the page wrote, newlines and all', async () => {
+    const path = join(dir, 'wrapped.html');
+
+    await imgwhy('--report', path, `${server.url}/wrapped-sizes.html`);
+
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const asked: string[] = [];
+    page.on('request', (request) => asked.push(request.url()));
+    server.requests.length = 0;
+
+    const file = pathToFileURL(path).href;
+    await page.goto(file);
+    await page.waitForLoadState('load');
+
+    const hero = page.locator('.panel').nth(0);
+    const sizes = hero.locator('.sizes-input');
+    const wrapped = '(min-width:1000px)\n50vw, 100vw';
+
+    // The control holds what was measured. An `<input type="text">` runs the
+    // value sanitisation algorithm, which strips every line feed, so this
+    // would read `(min-width:1000px)50vw, 100vw` — a string the page never
+    // carried and the run never resolved.
+    expect(await sizes.inputValue()).toBe(wrapped);
+
+    // And the file agrees with the measurement: iPhone SE is 375 px, so the
+    // media clause did not apply and the fallback decided.
+    expect(await hero.locator('.clause').textContent()).toBe('100vw');
+    expect(await hero.locator('.css').textContent()).toBe('375px');
+    expect(await hero.locator('.needed').textContent()).toBe('750px');
+    expect(await hero.locator('.picked').textContent()).toBe('1080w');
+
+    // Typing into the control re-picks from whatever it holds. Handing it its
+    // own value back is the smallest keystroke there is, and it has to leave
+    // the panel exactly where it was — a mangled value would resolve
+    // `(min-width:1000px)50vw` as 1000px plus 50vw and pick the 1920.
+    await sizes.fill(await sizes.inputValue());
+
+    expect(await hero.locator('.clause').textContent()).toBe('100vw');
+    expect(await hero.locator('.css').textContent()).toBe('375px');
+    expect(await hero.locator('.picked').textContent()).toBe('1080w');
+
+    // A newline the reader types is a newline the selection sees, too.
+    await sizes.fill('(min-width:300px)\n25vw, 100vw');
+
+    expect(await hero.locator('.clause').textContent()).toBe('(min-width:300px)\n25vw');
+    expect(await hero.locator('.css').textContent()).toBe('94px');
+    expect(await hero.locator('.picked').textContent()).toBe('640w');
+
     expect(asked).toEqual([file]);
     expect(server.requests).toEqual([]);
 

@@ -1,4 +1,4 @@
-import type { Resolution } from './types.js';
+import type { Part, Resolution } from './types.js';
 
 type Length = { auto: true } | { px: number };
 
@@ -77,7 +77,7 @@ export function resolveSizes(sizesString: string | null, viewportWidth: number):
 }
 
 /** Every function this module is made of. `srcset.ts` says what for. */
-export const PARTS: readonly Function[] = [
+export const PARTS: readonly Part[] = [
   toPx,
   splitTop,
   evalCond,
