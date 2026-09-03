@@ -1,0 +1,29 @@
+{
+  "name": "@imgwhy/runner",
+  "version": "0.0.0",
+  "description": "Drive Playwright. Render a page as one device profile and produce a Capture.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@imgwhy/core": "*",
+    "playwright": "^1.50.0"
+  }
+}

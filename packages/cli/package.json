@@ -1,0 +1,24 @@
+{
+  "name": "imgwhy",
+  "version": "0.0.0",
+  "description": "Explain which file a browser downloads from a srcset, and why.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "imgwhy": "./dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@imgwhy/core": "*",
+    "@imgwhy/runner": "*"
+  }
+}

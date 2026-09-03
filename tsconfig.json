@@ -1,0 +1,13 @@
+{
+  // The editor's fallback project. Each package's own tsconfig is what
+  // `npm run typecheck` runs, and tsserver prefers those for `src`; this file
+  // exists so the `test` directories, which no package tsconfig.json includes,
+  // resolve their imports instead of falling back to compiler defaults.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["packages/*/src", "packages/*/test"]
+}
