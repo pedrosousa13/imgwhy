@@ -38,6 +38,18 @@ const lines = (stdout: string): string[] => stdout.split('\n');
 /** A table row, read back as its cells. Two or more spaces separate them. */
 const cells = (line: string): string[] => line.trim().split(/\s{2,}/);
 
+/**
+ * A table row without its last cell.
+ *
+ * The bytes that arrived are a real measurement of a real response, headers
+ * and all, so the number is not one this file can name. It is checked for
+ * being a number, separately, by `arrived` below.
+ */
+const withoutBytes = (rows: string[][]): string[][] => rows.map((row) => row.slice(0, -1));
+
+/** The bytes column of every data row, as written. */
+const arrived = (rows: string[][]): string[] => rows.slice(1).map((row) => row[row.length - 1]);
+
 const tableUnder = (stdout: string, header: string): string[][] => {
   const all = lines(stdout);
   const start = all.findIndex((line) => line.includes(header));
@@ -83,7 +95,8 @@ describe('the imgwhy command', () => {
     // The hero, under a media clause only the desktop viewport matches.
     expect(ran.stdout).toContain('  candidates  640w, 1080w, 1920w');
     expect(ran.stdout).toContain('  sizes       (min-width: 1000px) 50vw, 100vw');
-    expect(tableUnder(ran.stdout, 'image 2 of 3')).toEqual([
+    const hero = tableUnder(ran.stdout, 'image 2 of 3');
+    expect(withoutBytes(hero)).toEqual([
       ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'file'],
       ['iPhone SE', '375×667', '2', '100vw', '375px', '750px', '1080w', '1080.png'],
       ['iPhone 15 Pro', '393×852', '3', '100vw', '393px', '1179px', '1920w', '1920.png'],
@@ -102,8 +115,15 @@ describe('the imgwhy command', () => {
       ],
     ]);
 
+    // Every row carries the weight of the response that arrived for it. The
+    // 1920 file is heavier than the 1080 one, which is the whole point of the
+    // column, and no row reports the zero an in-page tool would.
+    expect(arrived(hero).every((cell) => /^[1-9][0-9]*$/.test(cell))).toBe(true);
+    const [phone, pro] = arrived(hero);
+    expect(Number(pro)).toBeGreaterThan(Number(phone));
+
     // The badge, where `sizes` plays no part at all.
-    expect(tableUnder(ran.stdout, 'image 3 of 3')).toEqual([
+    expect(withoutBytes(tableUnder(ran.stdout, 'image 3 of 3'))).toEqual([
       ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'file'],
       ['iPhone SE', '375×667', '2', 'x descriptors only', '—', '—', '2x', '300.png'],
       ['iPhone 15 Pro', '393×852', '3', 'x descriptors only', '—', '—', '2x', '300.png'],
@@ -122,7 +142,7 @@ describe('the imgwhy command', () => {
     // redirect landed on.
     expect(lines(ran.stdout)[0]).toBe(`url      ${server.url}/nested/`);
     expect(ran.stdout).not.toContain('differs');
-    expect(tableUnder(ran.stdout, 'image 1 of 1')).toEqual([
+    expect(withoutBytes(tableUnder(ran.stdout, 'image 1 of 1'))).toEqual([
       ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'file'],
       ['iPhone SE', '375×667', '2', '100vw', '375px', '750px', '1080w', '1080.png'],
       ['iPhone 15 Pro', '393×852', '3', '100vw', '393px', '1179px', '1920w', '1920.png'],
@@ -152,6 +172,17 @@ describe('the imgwhy command', () => {
     expect(ran.stdout).toContain('  no srcset, so nothing was selected — file  1080.png');
   }, 120_000);
 
+  it('says unknown for an image whose weight nothing recorded', async () => {
+    const ran = await imgwhy(plain, `${server.url}/unknown-bytes.html`);
+
+    expect(ran.stderr).toBe('');
+    expect(ran.code).toBe(0);
+    // One image arrived inside the document and one never arrived at all.
+    // Neither is a transfer, and neither is guessed at from its pixels.
+    expect(ran.stdout).toContain('images   2 on 5 devices');
+    expect(ran.stdout.match(/^ {2}bytes {7}unknown$/gm)).toHaveLength(2);
+  }, 120_000);
+
   it('exits non-zero on a page carrying no image at all', async () => {
     const ran = await imgwhy(plain, `${server.url}/no-images.html`);
 
@@ -175,7 +206,8 @@ describe('the imgwhy command', () => {
     expect(ran.stderr).toBe('');
     expect(ran.code).toBe(0);
     expect(ran.stdout).toContain('images   3 on 1 devices');
-    expect(tableUnder(ran.stdout, 'image 2 of 3')).toEqual([
+    const hero = tableUnder(ran.stdout, 'image 2 of 3');
+    expect(withoutBytes(hero)).toEqual([
       ['device', 'viewport', 'DPR', 'clause used', 'css px', 'needed', 'picked', 'file'],
       // 1024 matches the media clause, so half of it at DPR 1 needs 512.
       ['Kiosk', '1024×1280', '1', '(min-width: 1000px) 50vw', '512px', '512px', '640w', '640.png'],
@@ -251,8 +283,17 @@ describe('the imgwhy command, asked for the capture itself', () => {
     expect(capture.devices.map((device) => device.id)).toEqual(DEFAULT_PROFILES.map((d) => d.id));
     expect(capture.runs.map((deviceRun) => deviceRun.images.length)).toEqual([3, 3, 3, 3, 3]);
     expect(new Date(capture.capturedAt).toISOString()).toBe(capture.capturedAt);
-    // #3 wires real transfer bytes. Until then unknown is reported as unknown.
-    expect(capture.runs.flatMap((r) => r.images).every((i) => i.transferBytes === null)).toBe(true);
+    // The load event waits for an eager image, so every render finished with
+    // the hero and the badge in hand and carries the real size of each
+    // response — two images across five devices. The logo is `loading=lazy`
+    // and nothing waited for it, so a render can end with it still in flight
+    // and no size to report, which is a genuine unknown rather than a zero.
+    const eager = capture.runs
+      .flatMap((r) => r.images)
+      .filter((image) => image.loading !== 'lazy')
+      .map((image) => image.transferBytes);
+    expect(eager).toHaveLength(10);
+    expect(eager.every((size) => typeof size === 'number' && size > 0)).toBe(true);
   }, 120_000);
 
   it('writes the capture to the file --out names, and writes no other file', async () => {

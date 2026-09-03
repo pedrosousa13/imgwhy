@@ -1,8 +1,9 @@
 import type { Capture, CapturedImage, DeviceProfile, DeviceRun } from '@imgwhy/core';
 import { parseSrcset } from '@imgwhy/core';
-import { type Browser, type BrowserContext, type Page, chromium } from 'playwright';
+import { type Browser, type CDPSession, chromium } from 'playwright';
 import { alignImageIds } from './align.js';
 import { type RawImage, collectImages } from './collect.js';
+import { type TransferLog, recordTransfers } from './transfers.js';
 
 export type CaptureOptions = {
   url: string;
@@ -40,11 +41,37 @@ export async function capturePage({
       });
       try {
         const page = await context.newPage();
-        await disableCache(context, page);
-        await page.goto(url, { waitUntil: 'load' });
-        const raw = await page.evaluate(collectImages);
-        landedOn = page.url();
-        runs.push({ deviceId: profile.id, images: raw.map(toCapturedImage) });
+        // One session per page, opened before anything navigates: it carries
+        // both the instruction that empties the cache and the record of what
+        // every response cost, and neither reaches a request already sent.
+        const session = await context.newCDPSession(page);
+        try {
+          await session.send('Network.enable');
+          await disableCache(session);
+          const transfers = recordTransfers(session);
+          await page.goto(url, { waitUntil: 'load' });
+          const raw = await page.evaluate(collectImages);
+          landedOn = page.url();
+          runs.push({
+            deviceId: profile.id,
+            images: raw.map((image) => toCapturedImage(image, transfers)),
+          });
+        } catch (failure) {
+          // Detaching is attempted here too — a page that never loaded reaches
+          // this with the session still attached — but its own failure is
+          // dropped, because `detach()` can reject by itself. A crashed target
+          // is gone, and asking a gone target to detach fails. In a `finally`
+          // that rejection replaces the failure that brought the run here, so
+          // the page that would not load goes unreported and the caller is
+          // told about a session instead.
+          await session.detach().catch(() => {});
+          throw failure;
+        }
+        // Nothing went wrong, so a detach that fails is the only failure there
+        // is, and it is reported. Outside a `finally` on purpose, which is why
+        // the block above has to stay straight-line: an early exit from it
+        // would leave the session attached until the context closed it.
+        await session.detach();
       } finally {
         await context.close();
       }
@@ -66,7 +93,7 @@ export async function capturePage({
   }
 }
 
-const toCapturedImage = (image: RawImage): CapturedImage => ({
+const toCapturedImage = (image: RawImage, transfers: TransferLog): CapturedImage => ({
   // The DOM path stands in until `alignImageIds` has seen every run. Only then
   // is it known whether the path held.
   id: image.selector,
@@ -77,9 +104,10 @@ const toCapturedImage = (image: RawImage): CapturedImage => ({
   renderedWidth: image.renderedWidth,
   currentSrc: image.currentSrc,
   naturalWidth: image.naturalWidth,
-  // Real transfer bytes need the DevTools Protocol, which issue #3 wires.
-  // Unknown is reported as unknown, never guessed.
-  transferBytes: null,
+  // The response `currentSrc` names, at the size the protocol reported for it.
+  // Null where nothing was recorded: unknown is reported as unknown, and never
+  // guessed at from the pixels the image turned out to have.
+  transferBytes: transfers.bytesFor(image.currentSrc),
   loading: image.loading,
 });
 
@@ -97,13 +125,10 @@ const toCapturedImage = (image: RawImage): CapturedImage => ({
  * same instruction the DevTools "Disable cache" checkbox sends, which is also
  * why every request goes out carrying `Cache-Control: no-cache`.
  *
- * It does not reach Blink's per-render memory cache: two elements asking for
- * one URL in the same document are still one request. That is the browser
- * behaviour under study, not a cache to defeat.
+ * It does not reach Blink's per-render memory cache. `recordTransfers` says
+ * what that leaves, under "What the mapping cannot do".
  */
-async function disableCache(context: BrowserContext, page: Page): Promise<void> {
-  const session = await context.newCDPSession(page);
-  await session.send('Network.enable');
+async function disableCache(session: CDPSession): Promise<void> {
   await session.send('Network.setCacheDisabled', { cacheDisabled: true });
 }
 

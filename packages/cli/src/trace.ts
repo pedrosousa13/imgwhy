@@ -40,8 +40,46 @@ const resolvedPx = (resolution: Resolution, renderedWidth: number): number | nul
   }
 };
 
+/**
+ * The weight of the response that arrived, as the runner recorded it.
+ *
+ * Unknown stays unknown. Nothing here turns a dimension into a weight: a
+ * guess would read exactly like a measurement in this column, which is the
+ * design's non-goal — "where `transferBytes` is null, report it as unknown".
+ */
+const bytesArrived = (transferBytes: number | null): string =>
+  transferBytes === null ? 'unknown' : String(transferBytes);
+
 /** `label` and value, on the label column every image block shares. */
 const field = (label: string, value: string): string => `  ${label.padEnd(10)}  ${value}`;
+
+/**
+ * One value where every device agrees, or every value with the devices that
+ * measured it.
+ *
+ * For the image an image block cannot table — nothing was selected, so there
+ * is no arithmetic to lay out — this is what keeps the report per device. The
+ * devices usually agree, and five lines saying the same thing would bury the
+ * images that do differ, so agreement stays one value and names no device.
+ * Disagreement is the case that has to: a bare `12345, unknown` says two
+ * things were measured and leaves a reader with no way to tell which device
+ * measured which.
+ */
+function perDevice(sightings: Sighting[], of: (image: CapturedImage) => string): string {
+  const devicesByValue = new Map<string, string[]>();
+  for (const { device, image } of sightings) {
+    const value = of(image);
+    const measured = devicesByValue.get(value);
+    if (measured) measured.push(device.name);
+    else devicesByValue.set(value, [device.name]);
+  }
+
+  return [...devicesByValue]
+    .map(([value, measured]) =>
+      devicesByValue.size === 1 ? value : `${value} on ${measured.join(', ')}`,
+    )
+    .join(', ');
+}
 
 /**
  * One device's line of the arithmetic, keyed by the column each value prints
@@ -59,6 +97,7 @@ type Row = {
   needed: string;
   picked: string;
   file: string;
+  'bytes arrived': string;
 };
 
 /** The columns, left to right. */
@@ -71,6 +110,7 @@ const COLUMNS: (keyof Row)[] = [
   'needed',
   'picked',
   'file',
+  'bytes arrived',
 ];
 
 /**
@@ -150,9 +190,17 @@ function imageBlock(
   // 1×1 tracking pixel to one line: the runner records every image, and the
   // ones with no choice to make say so and stop.
   if (candidates.length < 2) {
-    const files = [...new Set(sightings.map((s) => fileOf(s.image.currentSrc, base)))].join(', ');
+    const files = perDevice(sightings, (image) => fileOf(image.currentSrc, base));
     const why = candidates.length === 0 ? 'no srcset' : 'one candidate only';
     lines.push(`  ${why}, so nothing was selected — file  ${files}`);
+    // Bytes still arrived for it, so they are still reported. A 1×1 tracking
+    // pixel weighs what it weighs whether or not anything chose it.
+    //
+    // Per device, the way the file above is, and for the same reason: a lazy
+    // image still in flight when one render finished loading reads as a size
+    // on the devices that got it and unknown on the ones that did not, rather
+    // than as two figures with nothing to attach either of them to.
+    lines.push(field('bytes', perDevice(sightings, (image) => bytesArrived(image.transferBytes))));
     return lines;
   }
 
@@ -215,16 +263,23 @@ function row(base: string, { device, image }: Sighting, byWidth: boolean): Row {
   };
 }
 
-/** The picked descriptor and the file the browser went and got, which should agree. */
+/**
+ * The picked descriptor, the file the browser went and got — which should
+ * agree — and what that file cost on the wire.
+ */
 function chosen(
   base: string,
   image: CapturedImage,
   picked: Candidate | null,
-): Pick<Row, 'picked' | 'file'> {
+): Pick<Row, 'picked' | 'file' | 'bytes arrived'> {
   const file = image.currentSrc ? fileOf(image.currentSrc, base) : '(none)';
   // The cache is disabled for every render, so a disagreement is not a held
   // copy standing in. It is the prediction to question.
   const differs =
     picked !== null && image.currentSrc !== '' && absolute(picked.url, base) !== image.currentSrc;
-  return { picked: picked ? picked.raw : '—', file: differs ? `${file} ← differs` : file };
+  return {
+    picked: picked ? picked.raw : '—',
+    file: differs ? `${file} ← differs` : file,
+    'bytes arrived': bytesArrived(image.transferBytes),
+  };
 }
