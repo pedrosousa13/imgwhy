@@ -66,7 +66,7 @@ parseSrcset(raw): Candidate[]
 
 A measured result and a hypothetical result use the same call. The CLI passes numbers it recorded. The report passes numbers you typed into a control. The extension passes numbers it read from the live DOM. None of them reimplements the algorithm, so none of them can disagree with the others.
 
-The reference implementation exists. `imgwhy.js` in this repo holds these functions and passes 13 unit tests, including the 640 at DPR 1.5 case that produced 1080w. Porting it to typed `core` is the first task, not a rewrite.
+The reference implementation exists. `imgwhy.js` in this repo holds these functions, including the 640 at DPR 1.5 case that produced 1080w. It carries no test suite, so the port writes one. Porting it to typed `core` is the first task, not a rewrite.
 
 ### Capture is the seam
 
@@ -164,10 +164,10 @@ Each item below is a deliberate exclusion, not an oversight.
 - **CSS background images.** Count them and say they have no selection mechanism. Analyze nothing further.
 - **Estimated bytes.** Where `transferBytes` is null, report it as unknown. Do not guess from pixel dimensions.
 
-## Open questions for planning
+## Decisions taken at planning
 
-1. Which device profiles ship as the default set, and does a project override them from a file?
-2. Does the M1 command emit machine-readable JSON as well as human-readable text?
+1. **Default device set.** Five profiles ship built in: iPhone SE 375 at DPR 2, iPhone 15 Pro 393 at DPR 3, Pixel 8 412 at DPR 2.625, iPad 820 at DPR 2, Desktop 1440 at DPR 1. A project replaces the set from `imgwhy.config.json`. An override replaces, it does not merge.
+2. **M1 output.** Human-readable text is the default. `--json` prints the Capture to stdout, `--out <file>` writes it.
 
 ## Security
 
