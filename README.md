@@ -1,53 +1,111 @@
 # imgwhy
 
-A Chrome extension that answers one question about any image on a page: **why did the browser download *that* file?**
+Answers one question about any image on a page: **why did the browser download *that* file?**
 
-DevTools shows you intrinsic size next to rendered size. Lighthouse tells you how many kilobytes you wasted. Neither tells you the reason. `imgwhy` recomputes the browser's own selection algorithm against the page's real `srcset`, real `sizes`, and your real device pixel ratio, then shows the arithmetic step by step.
+DevTools shows you intrinsic size next to rendered size. Lighthouse tells you how many kilobytes you wasted. Neither tells you the reason. `imgwhy` runs the browser's own selection algorithm against the page's real `srcset`, real `sizes` and a real device pixel ratio, then shows the arithmetic step by step.
 
-It also lets you change the inputs. Type a different `sizes` string, a different viewport width, a different DPR, and watch which candidate wins — without touching the codebase.
+There are three ways to ask, and they share one implementation of the algorithm — `@imgwhy/core`, which none of them reimplements, so none of them can disagree with the others.
 
-## Install
+| Ask this way | You get | It measures |
+| --- | --- | --- |
+| **Command line** | Every image traced across five devices, with the bytes that really arrived | Yes |
+| **HTML report** | The same run as one self-contained file, with controls to type different inputs | Yes, then predicts |
+| **Chrome extension** | The page you are looking at, explained in place | No — it explains and predicts |
 
-No store listing. Load it unpacked:
+Only the command line can measure, and the difference is not a detail. It drives a real browser with the HTTP cache off and records transfer sizes over the DevTools Protocol. The extension reads a page the browser has already loaded, where a cached variant may mean selection never ran at all.
+
+## Build it first
+
+One npm workspace, TypeScript throughout, no runtime dependencies beyond Playwright for the command line.
+
+```bash
+npm install
+npm run build
+```
+
+## Command line
+
+```bash
+# trace every image across the five default devices
+node packages/cli/dist/bin.js https://example.com
+
+# write a self-contained HTML report
+node packages/cli/dist/bin.js https://example.com --report report.html
+
+# the raw Capture, to stdout or to a file
+node packages/cli/dist/bin.js https://example.com --json
+node packages/cli/dist/bin.js https://example.com --out capture.json
+```
+
+The five default devices are iPhone SE (375×667, DPR 2), iPhone 15 Pro (393×852, DPR 3), Pixel 8 (412×915, DPR 2.625), iPad (820×1180, DPR 2) and Desktop (1440×900, DPR 1). Each renders in its own browser context with the cache disabled, so one device's download never explains another's. Drop an `imgwhy.config.json` beside the page you are working on to name a different set.
+
+Output is one block per image. An image with `w` descriptors gets the arithmetic laid out per device, because that is where the devices disagree:
+
+```
+url      https://web.dev/
+images   10 on 5 devices
+css      2 background images. A CSS background image has no selection mechanism at all,
+         so imgwhy counts them and explains nothing further.
+
+image 4 of 10  html > body > … > figure > a > picture > img   loading=lazy
+  candidates  36w, 48w, 72w, 96w, 480w, 720w, 856w, 960w, 1440w, 1920w, 2880w
+  sizes       (max-width: 840px) 50vw, 464px
+
+  device         viewport  DPR    clause used              css px  needed  picked  file                bytes arrived
+  iPhone SE      375×667   2      (max-width: 840px) 50vw  188px   375px   480w    ai-feature_480.png  11883
+  iPhone 15 Pro  393×852   3      (max-width: 840px) 50vw  197px   590px   720w    ai-feature_720.png  11573
+  Pixel 8        412×915   2.625  (max-width: 840px) 50vw  206px   541px   720w    ai-feature_720.png  11573
+  iPad           820×1180  2      (max-width: 840px) 50vw  410px   820px   856w    ai-feature_856.png  11573
+```
+
+That is a real run. Where nothing was selected — no `srcset`, or one candidate — there is no table to lay out, so the block says why and reports the bytes per device instead. Where every device agrees on a figure it is written once and names no device; where they differ, each value names the devices that measured it.
+
+## HTML report
+
+`--report` writes one file that opens from disk, loads no remote resource and tells no third party you opened it. It holds a matrix of every image against every device, and under each image the arithmetic in full.
+
+Every panel carries three controls — a `sizes` string, a viewport width, a DPR — and changing any of them re-picks from the candidates that page actually shipped. That is the counterfactual: the same `core` call the measurement used, with numbers you typed.
+
+One honest limit is printed on the page: a framework reads `sizes` at build time to decide which files exist at all, so where it would also change the candidate list, the counterfactual understates the gain.
+
+## Chrome extension
+
+Nothing runs until you click. No content script, no host permissions, and a service worker holding exactly one listener — the toolbar click.
+
+```bash
+npm run build
+```
 
 1. Open `chrome://extensions`
 2. Turn on **Developer mode**
-3. Click **Load unpacked** and select this folder
-4. Click the toolbar icon on any page. Press `Esc` to close the panel.
+3. Click **Load unpacked** and select `packages/extension`
+4. Click the toolbar icon on any page. **Click it again to close the panel.**
 
-To use it without installing anything, paste the contents of `imgwhy.js` into the DevTools console. The console is exempt from Content Security Policy, so this works on sites that block bookmarklets.
+There is no icon art, so the toolbar shows a letter. `packages/extension/README.md` covers loading it in more detail, and how to confirm the dormancy by hand in DevTools.
 
-## What the panel shows
-
-Images are listed worst-waste first. Each row gives the rendered CSS width, the physical pixels the display can actually resolve, and what arrived.
-
-Open a row for the trace:
+The panel lists every image in the order the page holds them, each with its arithmetic:
 
 ```
-sizes (max-width: 768px) 100vw, 33vw
-  clause used  (max-width: 768px) 100vw
-  resolves to  640px at viewport 640
-  × DPR 1.5  =  960 physical pixels needed
-  smallest candidate ≥ that  →  1080w
-predicted  hero-1080.webp
-actual     hero-1920.webp   ← differs: a larger variant was already cached, so no new pick ran
+sizes         (max-width: 768px) 100vw, 33vw
+clause used   33vw
+css px        475px
+needed        950px
+candidates    640w, 1080w, 1920w
+picked        1080w  /i/hero-1080.png
+loaded        /i/hero-1920.png            cache
+bytes         unknown
 ```
 
-That last line is the part other tools cannot give you. When the prediction and `currentSrc` disagree, selection never ran — the browser found a bigger variant in cache and reused it. This is why resizing a window and reloading so often fails to reproduce what users see.
+### What a `cache` mark means
 
-Also flagged:
+A marked figure is what the browser **has**, not what it chose. The extension cannot measure, for two reasons the design states exactly:
 
-- `sizes="auto"`, where the browser measures real laid-out width instead of trusting your promise
-- a `<source>` element overriding the `<img>` inside a `<picture>`
-- `sizes` strings this parser cannot evaluate
-- images decoded below the requested width, meaning the source was too small and no upscale happened
-- elements with only a CSS `background-image`, which have no selection mechanism at all
+- A browser holding a larger variant reuses it. Selection never runs, so `currentSrc` disagrees with the arithmetic through no fault of the markup. This is why resizing a window and reloading so often fails to reproduce what users see.
+- `PerformanceResourceTiming.transferSize` returns zero for cross-origin responses without `Timing-Allow-Origin`, and most image CDNs do not send it.
 
-## Simulating
+So bytes are always `unknown` in the panel — never estimated from pixel dimensions, because guessed kilobytes would not be honest. For real weight, use the command line.
 
-Every open row carries three controls: a `sizes` field, a viewport width, and a DPR dropdown. Changing any of them recomputes the pick against that image's real candidate list.
-
-**Apply sizes to live element** writes the string to the actual DOM node so you can watch the Network panel. Note that a smaller choice usually will not refetch, because the larger file is already cached.
+`sizes="auto"` carries the mark too, and the reason is worth stating: `auto` resolves against the element's laid-out width, which for an intrinsically-sized image *is* the width of whichever file the browser already held. The arithmetic then agrees with the loaded file because the cache produced both halves of it. The panel says so rather than presenting the coincidence as a confirmation.
 
 ## How selection works
 
@@ -55,7 +113,7 @@ Two stages, and people usually only know about the second.
 
 **Stage one, build time.** A framework decides which files exist. Next.js greps your `sizes` string for `vw` tokens, takes the smallest percentage, and drops every candidate below `640 × ratio`. So `sizes` shapes the menu before any browser sees it. A string like `calc(100vw - 2rem)` matches nothing, because Next's regex wants a space or the string start before the digits and finds an opening bracket instead — the filter silently does not run and all sixteen candidates ship.
 
-**Stage two, runtime.** The browser resolves `sizes` against the viewport (never against the element — that measurement does not exist yet when the preload scanner reads the tag), multiplies by device pixel ratio, and takes the smallest candidate at or above that number.
+**Stage two, runtime.** The browser resolves `sizes` against the viewport — never against the element, because that measurement does not exist yet when the preload scanner reads the tag — multiplies by device pixel ratio, and takes the smallest candidate at or above that number.
 
 ```
 sizes → CSS pixels × devicePixelRatio = physical pixels needed
@@ -66,20 +124,45 @@ A 640px viewport at DPR 1.5 needs 960 physical pixels, so it downloads the 1080w
 
 ## Limits
 
-- `<picture>` type negotiation (AVIF versus WebP) is not evaluated. Only `media` is.
-- `vh` units in `sizes` are not resolved.
-- Media conditions support `min-width` and `max-width` joined by `and`.
-- Byte sizes are not reported. `PerformanceResourceTiming.transferSize` returns zero for cross-origin responses without `Timing-Allow-Origin`, and most image CDNs do not send it. Pixel ratios are honest; guessed kilobytes would not be.
+Each of these is a deliberate exclusion, not an oversight.
 
-## Files
+- **`<picture>` type negotiation is not evaluated.** Only `media` is. AVIF against WebP support is not modelled, and no code path reads a `type` attribute — a test enforces that by allowlisting the whole DOM surface the page-side code may touch.
+- **CSS background images are counted and nothing more.** They reach the browser as a URL in a stylesheet with no `srcset` beside them, so there is nothing to select between and no arithmetic to show.
+- **Bytes are never guessed.** Where transfer size is unavailable it reads `unknown`.
+- **The report does not model framework generation.** It re-picks from the candidates a page shipped; it does not predict what Next.js would emit for a different `sizes` string.
+- **The extension's panel is not a simulator.** Typed inputs live in the report.
 
-| File | Role |
-| --- | --- |
-| `imgwhy.js` | The whole tool. Injected as a content script, or pasted into the console. Renders into a shadow root so page CSS cannot reach it. |
-| `bg.js` | Service worker. Injects `imgwhy.js` when the toolbar icon is clicked. |
-| `manifest.json` | Manifest V3. Permissions are `scripting` and `activeTab` only — nothing runs until you click. |
+## Packages
 
-No dependencies, no build step, no network calls.
+| Package | Role | Depends on |
+| --- | --- | --- |
+| `@imgwhy/core` | Parse `srcset`, resolve `sizes`, select a candidate. Pure functions, no imports, no DOM and no Node built-ins — it runs unchanged in Node, in a page and in a service worker. | nothing |
+| `@imgwhy/runner` | Drive Playwright, produce a Capture. | core, playwright |
+| `imgwhy` | Command line entry point. | core, runner, report |
+| `@imgwhy/report` | Turn a Capture into one self-contained HTML file. | core |
+| `@imgwhy/extension` | Manifest V3 extension. Explain the page you are looking at. | core |
+
+A Capture is the seam: `runner` writes one, `report` reads one, and neither knows about the other.
+
+`imgwhy.js`, `bg.js`, `manifest.json` and `icons/` at the repo root are the original single-file implementation, kept as the reference the typed packages were ported from. They carry no test suite and are **not** what ships — the extension lives in `packages/extension`.
+
+## Privacy
+
+The project collects nothing, and that is a constraint on the design rather than a policy page.
+
+- No telemetry in any package.
+- The report inlines every style, script and font, so opening one tells no third party that you opened it.
+- The extension holds `activeTab` only. It stores no page data and sends nothing anywhere. Structural tests refuse the APIs that would let it.
+- The command line writes only to the path you name.
+
+## Development
+
+```bash
+npm test        # builds first, then runs the suite
+npm run typecheck
+```
+
+`AGENTS.md` points at the conventions in `docs/agents/`.
 
 ## License
 
