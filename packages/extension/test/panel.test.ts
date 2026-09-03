@@ -3,25 +3,65 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { refuseStaleBuild } from '../../../test/built.js';
-import { togglePanel } from '../src/panel.js';
+import type { Panel } from '../src/explain.js';
+import { panelOf } from '../src/explain.js';
+import { renderPanel } from '../src/panel.js';
 import type { El, Page } from './dom.js';
 import { page } from './dom.js';
+import { image, reading } from './reading.js';
 
-/** The id the panel gives its host, which is how the second click finds it. */
+/** The id the panel gives its host, which is how the next click finds it. */
 const HOST_ID = '__imgwhy_host__';
 
 /**
+ * A panel of two images: one whose prediction and loaded file agree, and one
+ * where they do not.
+ *
+ * Built through `panelOf` rather than written out, so what the renderer is
+ * handed is what the worker actually produces. A hand-written literal would
+ * drift from the worker's shape and the drift would look like a passing test.
+ */
+const PANEL: Panel = panelOf(
+  reading({
+    images: [
+      image({
+        selector: 'html > body > img:nth-of-type(1)',
+        srcset: '/i/640.png 640w, /i/1080.png 1080w',
+        sizes: '33vw',
+        renderedWidth: 475,
+        currentSrc: 'https://example.com/i/640.png',
+      }),
+      image({
+        selector: 'html > body > img:nth-of-type(2)',
+        srcset: '/i/640.png 640w, /i/1080.png 1080w',
+        sizes: '33vw',
+        renderedWidth: 475,
+        currentSrc: 'https://example.com/i/1080.png',
+        loading: 'lazy',
+      }),
+    ],
+    backgroundImageCount: 2,
+  }),
+);
+
+/**
  * The panel, run the way Chrome runs it: the text of the function, evaluated
- * in a context holding a `document` and nothing else.
+ * in a context holding a `document` and nothing else, with its argument
+ * serialised on the way in.
  *
  * The header of `src/panel.ts` says why that is the only honest way to run it
- * — `executeScript` sends the source, not the function. Calling `togglePanel`
+ * — `executeScript` sends the source, not the function. Calling `renderPanel`
  * directly would prove nothing about the copy a page gets.
  * `report/test/in-page.test.ts` ships core into a document by the same route.
+ *
+ * `JSON.stringify` is not a convenience either. `executeScript` serialises its
+ * `args`, so anything in a panel that did not survive a round trip through
+ * JSON is something the page would never receive — which is what makes the
+ * `Panel` type strings and booleans and nothing else.
  */
-const inPage = (source: string, host: Page): unknown => {
+const inPage = (source: string, host: Page, panel: Panel = PANEL): unknown => {
   const context = vm.createContext({ document: host });
-  return vm.runInContext(`(${source})()`, context);
+  return vm.runInContext(`(${source})(${JSON.stringify(panel)})`, context);
 };
 
 /**
@@ -40,7 +80,10 @@ const inPage = (source: string, host: Page): unknown => {
 function shipped(): string {
   const text = readFileSync(fileURLToPath(new URL('../dist/panel.js', import.meta.url)), 'utf8');
   const context = vm.createContext({});
-  return vm.runInContext(`${text.replace(/^export /gm, '')}\n;String(togglePanel)`, context) as string;
+  return vm.runInContext(
+    `${text.replace(/^export /gm, '')}\n;String(renderPanel)`,
+    context,
+  ) as string;
 }
 
 /**
@@ -240,56 +283,51 @@ const stylesheetIn = (host: Page): string => {
   return style.textContent;
 };
 
+/** Every node the panel made, in the order it made them. */
+const nodesIn = (host: Page): El[] => {
+  const element = host.getElementById(HOST_ID);
+  if (element === null) throw new Error('the panel added no host element');
+  return host.shadow(element);
+};
+
 /**
- * The panel, checked as a toggle and as a boundary.
+ * Every grid the panel made, each as its own children in the order it appended
+ * them, one line per node.
  *
- * The toggle reads its state off the page rather than out of anything the
- * extension keeps, which is the design's privacy constraint doing work rather
- * than a stylistic choice: an extension that remembered which tabs were open
- * would be storing page data, and there is nowhere to put that which is not
- * `chrome.storage`. Asking the page cannot go stale — the page reloaded, the
- * panel went with it, and the next click opens.
+ * The children rather than the `dt`s and the `dd`s collected separately, and
+ * that is the whole point of it. A `dl` in two columns pairs by position: a
+ * `dd` that arrived between two `dt`s puts every value after it against the
+ * wrong label, and two `filter` passes counted against each other cannot see
+ * that — the counts match either way. Walking the children in order can.
+ */
+const gridsIn = (host: Page): string[][] =>
+  nodesIn(host)
+    .filter((node) => node.name === 'dl')
+    .map((grid) => grid.children.map((node) => `${node.name}: ${node.textContent}`));
+
+/** One node per line, as `tag: the words it holds`. */
+const said = (host: Page): string[] =>
+  nodesIn(host)
+    .filter((node) => node.name !== 'style' && node.textContent !== '')
+    .map((node) => `${node.name}: ${node.textContent}`);
+
+/**
+ * The panel, checked as a rendering of an already-computed arithmetic.
+ *
+ * There is no arithmetic in this file, and that is the point of the split. The
+ * renderer is handed strings and booleans and puts them in nodes; the numbers
+ * are `explain.test.ts`'s, and the numbers came from core. What is left to
+ * check here is what only a rendering can get wrong: an element per figure, a
+ * mark on every held one, and the boundary holding while it does that.
  */
 describe('the panel a click injects', () => {
-  const source = String(togglePanel);
+  const source = String(renderPanel);
 
-  it('opens on the first call and says so', () => {
+  it('opens and says so', () => {
     const host = page();
 
     expect(inPage(source, host)).toBe('opened');
     expect(host.getElementById(HOST_ID)).not.toBeNull();
-  });
-
-  it('removes itself on the second call, leaving the page as it found it', () => {
-    const host = page();
-    const before = host.light().map((node) => node.name);
-
-    inPage(source, host);
-    expect(host.light().map((node) => node.name)).toEqual([...before, 'div']);
-
-    expect(inPage(source, host)).toBe('removed');
-    expect(host.getElementById(HOST_ID)).toBeNull();
-    expect(host.light().map((node) => node.name)).toEqual(before);
-  });
-
-  it('opens again after that, because the state it reads is the page itself', () => {
-    const host = page();
-
-    expect([inPage(source, host), inPage(source, host), inPage(source, host)]).toEqual([
-      'opened',
-      'removed',
-      'opened',
-    ]);
-  });
-
-  it('reads its state off the page, so a reload leaves nothing to get wrong', () => {
-    // A fresh page is a fresh document, and the panel is gone with the old
-    // one. The next click has to open rather than close, and it does, because
-    // nothing outside the page remembers that a panel was ever there.
-    const first = page();
-    inPage(source, first);
-
-    expect(inPage(source, page())).toBe('opened');
   });
 
   it('hangs the host off the document element rather than the body', () => {
@@ -303,16 +341,122 @@ describe('the panel a click injects', () => {
     expect(host.getElementById(HOST_ID)?.parent?.name).toBe('html');
   });
 
-  it('says very little, and says it as text rather than as markup', () => {
+  it('writes the head, one item per image, and the footer', () => {
     const host = page();
     inPage(source, host);
-    const element = host.getElementById(HOST_ID);
-    const said = host.shadow(element as El).map((node) => node.textContent);
+    const nodes = nodesIn(host);
 
+    expect(nodes.filter((node) => node.name === 'li')).toHaveLength(2);
+    expect(nodes.filter((node) => node.name === 'h2').map((node) => node.textContent)).toEqual([
+      'html > body > img:nth-of-type(1)',
+      'html > body > img:nth-of-type(2)   loading=lazy',
+    ]);
+    expect(said(host)).toContain('p: viewport 1440×900 · DPR 1 · 2 images');
+  });
+
+  it('writes a term and then its own description, all the way down the grid', () => {
+    const host = page();
+    inPage(source, host);
+    const [first] = gridsIn(host);
+
+    // The pairing asserted as an order rather than as two counts, because the
+    // grid pairs by position: the label a reader reads a value against is the
+    // node before it, and nothing about the number of each kind says which one
+    // that was.
+    //
+    // `loaded` comes back as the file and the mark's word run together, and
+    // that is a real `textContent` read rather than a quirk of the stub: the
+    // mark is a child of the `dd`, and reading a node's text concatenates its
+    // descendants. It is what says the mark is inside the value it qualifies.
+    expect(first).toEqual([
+      'dt: candidates',
+      'dd: 640w, 1080w',
+      'dt: sizes',
+      'dd: 33vw',
+      'dt: clause used',
+      'dd: 33vw',
+      'dt: css px',
+      'dd: 475px',
+      'dt: needed',
+      'dd: 475px',
+      'dt: picked',
+      'dd: 640w  /i/640.png',
+      'dt: loaded',
+      'dd: /i/640.pngcache',
+      'dt: bytes',
+      'dd: unknown',
+    ]);
+  });
+
+  it('marks every figure a held copy could explain, and marks nothing else', () => {
+    // The design's requirement as a rendering rather than as a field: a mark
+    // is drawn beside the value it qualifies, so a reader sees which figures
+    // it covers without reading the footer first.
+    const host = page();
+    inPage(source, host);
+    const marks = nodesIn(host).filter((node) => node.name === 'mark');
+
+    expect(marks.map((node) => node.textContent)).toEqual(['cache', 'cache']);
+    expect(marks.map((node) => node.parent?.name)).toEqual(['dd', 'dd']);
+    // The figure and the mark's word as one string, which is what a real
+    // `textContent` read of the `dd` returns — the mark is a child of it, and
+    // reading a node's text concatenates its descendants. Asserting the figure
+    // alone here would be asserting that the mark is not in the `dd`, and it
+    // is the write order in `renderPanel` that keeps it there: `textContent`
+    // removes every existing child, so the value has to be written before the
+    // mark is appended and never after.
+    expect(marks.map((node) => node.parent?.textContent)).toEqual([
+      '/i/640.pngcache',
+      '/i/1080.pngcache',
+    ]);
+  });
+
+  it('says why the second image loaded a file the arithmetic did not pick', () => {
+    const host = page();
+    inPage(source, host);
+
+    expect(said(host).some((line) => line.includes('not necessarily a bug'))).toBe(true);
+  });
+
+  it('says bytes are unknown, and shows no figure in their place', () => {
+    const host = page();
+    inPage(source, host);
+    const values = nodesIn(host)
+      .filter((node) => node.name === 'dd')
+      .map((node) => node.textContent);
+
+    expect(values.filter((value) => value === 'unknown')).toHaveLength(2);
+    expect(said(host).some((line) => line.includes('never guesses a weight from pixels'))).toBe(
+      true,
+    );
+  });
+
+  it('says how many CSS background images it counted, and no more about them', () => {
+    const host = page();
+    inPage(source, host);
+
+    expect(said(host)).toContain(
+      'p: 2 elements on this page paint a CSS background image. A CSS background image has no ' +
+        'selection mechanism at all, so imgwhy counts them and explains nothing further.',
+    );
+  });
+
+  it('renders a page with no image at all, and claims nothing about one', () => {
+    const host = page();
+    inPage(source, host, panelOf(reading()));
+
+    expect(nodesIn(host).filter((node) => node.name === 'li')).toEqual([]);
+    expect(said(host)).toContain('p: viewport 1440×900 · DPR 1 · 0 images');
+  });
+
+  it('says every word as text rather than as markup', () => {
     // Every word arrives through `textContent`, so a page cannot get a tag out
-    // of it however the words are chosen. The stylesheet is the only node
-    // carrying anything long, and this slice's panel says one thing.
-    expect(said.some((text) => text.includes('imgwhy'))).toBe(true);
+    // of it however the words are chosen. `escaping.test.ts` holds that
+    // against a page written to try.
+    const host = page();
+    inPage(source, host);
+
+    expect(said(host).some((line) => line.startsWith('h1: imgwhy'))).toBe(true);
   });
 });
 
@@ -338,13 +482,13 @@ describe('the panel a click injects', () => {
  *   `#__imgwhy_host__` makes the first click remove that element and open no
  *   panel, because the toggle reads its state off the page and the page is
  *   lying. It is the page's own element and its own footgun, it costs a
- *   visitor nothing, and it is the price of the state decision in
- *   `panel.ts` — which is the right decision, because the alternative is
- *   storing something. A marker only the extension could recognise would
- *   have to be kept somewhere, and there is nowhere.
+ *   visitor nothing, and it is the price of the state decision in `read.ts` —
+ *   which is the right decision, because the alternative is storing something.
+ *   A marker only the extension could recognise would have to be kept
+ *   somewhere, and there is nowhere.
  */
 describe('the panel, checked as a boundary against page styles', () => {
-  const source = String(togglePanel);
+  const source = String(renderPanel);
 
   it('is reachable from the page by no route at all', () => {
     const host = page();
@@ -410,6 +554,19 @@ describe('the panel, checked as a boundary against page styles', () => {
     expect(css).not.toContain('@font-face');
     expect(css).not.toContain('url(');
   });
+
+  it('selects on tag names alone, so the panel writes no class to any element', () => {
+    // Which is why the elements are semantic ones. `privacy.test.ts` allows
+    // this package two written properties — an id and the words it says — and
+    // a class name would be a third for no gain a `dl` does not already give.
+    const host = page();
+    inPage(source, host);
+
+    // A selector, not a full stop: `rgba(16, 18, 22, 0.18)` has one of those
+    // and is not a class. What this refuses is a rule whose selector opens
+    // with a dot, which is the only shape a class selector takes.
+    expect(stylesheetIn(host)).not.toMatch(/^\s*\.[a-z]/im);
+  });
 });
 
 /**
@@ -423,7 +580,7 @@ describe('the panel as the built module ships it, which is the copy a page gets'
     const host = page();
 
     expect(inPage(shipped(), host)).toBe('opened');
-    expect(inPage(shipped(), host)).toBe('removed');
+    expect(nodesIn(host).filter((node) => node.name === 'li')).toHaveLength(2);
   });
 
   it('holds its boundary, the same as the source does', () => {
@@ -448,8 +605,6 @@ describe('the isolation checks, given panels that do not isolate', () => {
     [
       'a panel appended straight to the page, with no shadow root anywhere',
       `function () {
-        const open = document.getElementById('${HOST_ID}');
-        if (open !== null) { open.remove(); return 'removed'; }
         const host = document.createElement('div');
         host.id = '${HOST_ID}';
         host.appendChild(document.createElement('section'));
@@ -464,8 +619,6 @@ describe('the isolation checks, given panels that do not isolate', () => {
     [
       'an open shadow root, which the page reads through element.shadowRoot',
       `function () {
-        const open = document.getElementById('${HOST_ID}');
-        if (open !== null) { open.remove(); return 'removed'; }
         const host = document.createElement('div');
         host.id = '${HOST_ID}';
         host.attachShadow({ mode: 'open' }).appendChild(document.createElement('section'));
@@ -477,8 +630,6 @@ describe('the isolation checks, given panels that do not isolate', () => {
     [
       'a shadow root with the panel next to it rather than inside it',
       `function () {
-        const open = document.getElementById('${HOST_ID}');
-        if (open !== null) { open.remove(); return 'removed'; }
         const host = document.createElement('div');
         host.id = '${HOST_ID}';
         host.attachShadow({ mode: 'closed' });
@@ -555,7 +706,7 @@ describe('the isolation checks, given panels that do not isolate', () => {
 
   it('is quiet about the boundary that ships', () => {
     const host = page();
-    inPage(String(togglePanel), host);
+    inPage(String(renderPanel), host);
 
     expect(weak(stylesheetIn(host))).toEqual([]);
     expect(reshapable(stylesheetIn(host), HOSTILE)).toEqual([]);

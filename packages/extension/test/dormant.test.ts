@@ -214,10 +214,24 @@ describe('the dormancy check, given an extension that wakes on its own', () => {
   it('is quiet about the arrangement that ships', () => {
     expect(
       worker([
-        "import { togglePanel } from './panel.js';",
+        "import { panelOf } from './explain.js';",
+        "import { renderPanel } from './panel.js';",
+        "import { readPage } from './read.js';",
         'chrome.action.onClicked.addListener((tab) => {',
         '  if (tab.id === undefined) return;',
-        '  void chrome.scripting.executeScript({ target: { tabId: tab.id }, func: togglePanel });',
+        '  const tabId = tab.id;',
+        '  chrome.scripting',
+        '    .executeScript({ target: { tabId }, func: readPage })',
+        '    .then((results) => {',
+        '      const reading = results[0]?.result ?? null;',
+        '      if (reading === null) return;',
+        '      return chrome.scripting.executeScript({',
+        '        target: { tabId },',
+        '        func: renderPanel,',
+        '        args: [panelOf(reading)],',
+        '      });',
+        '    })',
+        '    .catch(() => {});',
         '});',
       ]),
     ).toEqual([]);
@@ -283,8 +297,8 @@ describe('the dormancy check, given an extension that wakes on its own', () => {
     [
       'work done at load, with no listener anywhere in it',
       [
-        "import { togglePanel } from './panel.js';",
-        'const source = String(togglePanel);',
+        "import { renderPanel } from './panel.js';",
+        'const source = String(renderPanel);',
         'chrome.action.onClicked.addListener(() => { void source; });',
       ],
       ['initialises source with something that runs at its top level'],

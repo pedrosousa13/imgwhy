@@ -12,19 +12,18 @@ const src = fileURLToPath(new URL('../src', import.meta.url));
  * | `@imgwhy/extension` | Manifest V3 extension. Explain the page you are
  * looking at. | core |
  *
- * One entry, and nothing imports it yet. This slice's panel says very little
- * and needs no arithmetic to say it, so the package declares no dependency at
- * all — an entry in `package.json` that nothing imports is an install for
- * nobody, and the next slice adds it in the same commit as the first `import`.
- * The name is allowed here rather than left out until then because a check
- * that has to be loosened before a legitimate change can land is a check
- * someone will loosen without reading it.
+ * One entry, and `explain.ts` imports it. It arrived in the same commit as
+ * that `import`, which is what the previous slice said would happen: an entry
+ * in `package.json` that nothing imports is an install for nobody, and the
+ * name was allowed here before the dependency existed because a check that has
+ * to be loosened before a legitimate change can land is a check someone will
+ * loosen without reading it.
  *
- * Which is also why nothing below asserts that `package.json` declares no
- * dependency today. That is true, and it is true for a reason that expires:
- * the assertion would fail the moment #10 writes its first `import` and the
- * contributor's move would be to delete it. A check whose own argument
- * predicts its removal is not worth writing.
+ * `explain.ts` is the only module that may name it, and not by this check's
+ * doing: `executeScript` sends `String(func)`, so an `import` in either of the
+ * two injected modules is a name the page does not have.
+ * `through-core.test.ts` holds that half, and holds the other half of the same
+ * claim — that the arithmetic is core's and there is no copy of it here.
  *
  * An allowlist rather than a list of packages to refuse, for the reason the
  * runner's mirror of this gives: a name that does not exist yet cannot be

@@ -18,12 +18,49 @@ const src = fileURLToPath(new URL('../src', import.meta.url));
  * refuses everything not named, so a way out cannot arrive by being
  * forgotten. Adding a name is the deliberate act.
  *
- * Four names is the whole of the outside world this package sees. `chrome` is
- * the two extension calls `dormant.test.ts` allowlists. `document` is the page
- * the panel builds itself in. `Promise` is the return type of `executeScript`,
- * and `undefined` is what a tab without an id is compared against.
+ * Fourteen names is the whole of the outside world this package sees, and they
+ * group into four things.
+ *
+ * `chrome` is the two extension calls `dormant.test.ts` allowlists. `document`
+ * is the page both injected functions work in.
+ *
+ * `innerWidth`, `innerHeight`, `devicePixelRatio`, `matchMedia` and
+ * `getComputedStyle` are the browser the page is being looked at in, and they
+ * are why this list grew from four: the panel now explains a live render, and
+ * a render is a viewport, a ratio, the `<source>` a `media` condition picked
+ * and the backgrounds this viewport painted. Every one of them is a read. None
+ * of them can name a destination, which is what makes them safe to allow and
+ * what the shorter list below still refuses.
+ *
+ * `Element`, `HTMLImageElement` and `HTMLSourceElement` are types and nothing
+ * else — erased before `tsc` emits a line — and they are how the reader says
+ * what it is reading. `undefined` is what a tab without an id is compared
+ * against, and `Promise` is the return type of `executeScript`.
+ *
+ * `Math` and `URL` are the worker's two, and they are the two worth an
+ * argument. `Math.round` is presentation: core returns exact numbers and a
+ * panel shows whole pixels. `URL` parses, and parsing is the opposite of
+ * fetching — it is what makes a relative candidate comparable with an absolute
+ * `currentSrc`, which is the comparison the whole cache-honesty requirement
+ * rests on. Neither reaches the network, and `DESTINATIONS` below is what says
+ * no string in this package could give either of them somewhere to go.
  */
-const GLOBALS = new Set(['chrome', 'document', 'Promise', 'undefined']);
+const GLOBALS = new Set([
+  'Element',
+  'HTMLImageElement',
+  'HTMLSourceElement',
+  'Math',
+  'Promise',
+  'URL',
+  'chrome',
+  'devicePixelRatio',
+  'document',
+  'getComputedStyle',
+  'innerHeight',
+  'innerWidth',
+  'matchMedia',
+  'undefined',
+]);
 
 /**
  * Every property this package calls.
@@ -33,20 +70,59 @@ const GLOBALS = new Set(['chrome', 'document', 'Promise', 'undefined']);
  * as innocent as it gets — and `caches.open` or `chrome.storage.local.set`
  * would name none either if their objects were ever allowed.
  *
- * Eight names is the whole of what the extension does: find, build, attach,
- * append, remove, register, inject — and swallow the one rejection an
- * injection can produce, which is `catch` and is here because saying nothing
- * has to be said out loud. `background.ts` explains why.
+ * Twenty-three names, and the list is longer than it was because the panel says
+ * more than it did. It still groups into four things and nothing else.
+ *
+ * The extension's own work: register, inject, and swallow the one rejection an
+ * injection can produce — `addListener`, `executeScript`, `then`, `catch`.
+ * `catch` is here because saying nothing has to be said out loud, and
+ * `background.ts` explains why.
+ *
+ * Building the panel: `createElement`, `attachShadow`, `appendChild`,
+ * `getElementById`, `remove`.
+ *
+ * Reading the page: `closest`, `getAttribute`, `getBoundingClientRect`,
+ * `querySelectorAll`. Four reads, no writes — nothing in this package changes
+ * a page it was injected into, which is not something an allowlist of calls
+ * can say on its own and is exactly what `WRITTEN` below says.
+ *
+ * Lists, strings and one rounding: `filter`, `map`, `join`, `includes`,
+ * `indexOf`, `slice`, `startsWith`, `toLowerCase`, `unshift`, `round`. Not one
+ * of them can reach anything, which is why a list this long still holds: the
+ * question a call allowlist answers is whether a name that leaves the machine
+ * got in, and the rules below refuse those by name whatever this list has
+ * grown to.
+ *
+ * `startsWith` is the newest and it replaced two. `explain.ts` used to reduce a
+ * URL to the last segment of its path — a `split` and a `pop` — and rendered
+ * two candidates that differed only in a directory as one file. It shows the
+ * path now, and asks `startsWith` the one question that separates a path from a
+ * `data:` payload: whether it opens with a slash.
  */
 const CALLED = new Set([
   'addListener',
   'appendChild',
   'attachShadow',
   'catch',
+  'closest',
   'createElement',
   'executeScript',
+  'filter',
+  'getAttribute',
+  'getBoundingClientRect',
   'getElementById',
+  'includes',
+  'indexOf',
+  'join',
+  'map',
+  'querySelectorAll',
   'remove',
+  'round',
+  'slice',
+  'startsWith',
+  'then',
+  'toLowerCase',
+  'unshift',
 ]);
 
 /**
@@ -57,6 +133,13 @@ const CALLED = new Set([
  * anything: `img.src = 'https://…/?' + location.href` is a request, made by
  * assignment, with no name any list of dangerous APIs would hold. Two names is
  * the whole panel: the host's id, and the words it says.
+ *
+ * Two, still, and that is the one number in this file that did not move when
+ * the panel started explaining a page. It is also why the panel's elements are
+ * semantic ones and its stylesheet selects on tag names: a class name would be
+ * a third written property for nothing a `dl` does not already give, and
+ * `innerHTML` would be a third that undoes the whole of the escaping story.
+ * `escaping.test.ts` refuses that one by name as well as by absence.
  */
 const WRITTEN = new Set(['id', 'textContent']);
 
@@ -65,7 +148,8 @@ const WRITTEN = new Set(['id', 'textContent']);
  *
  * Short on purpose. The allowlists above already refuse everything they do not
  * name, so a long catalogue of dangerous APIs would be guarding code that
- * cannot exist while four names is the whole outside world. What these rules
+ * cannot exist while every name this package reaches for is written out above.
+ * What these rules
  * are for is the edit that widens an allowlist — a contributor who allowed one
  * name because the call in front of them seemed harmless — so each names the
  * route rather than every spelling of it, and the failing line says which list
@@ -169,19 +253,26 @@ describe('the extension, checked against storing or sending anything', () => {
   const modules = modulesIn(src);
 
   it('has sources to check, so nothing below passes for want of a file', () => {
-    expect(Object.keys(modules).sort()).toEqual(['background.ts', 'chrome.d.ts', 'panel.ts']);
+    expect(Object.keys(modules).sort()).toEqual([
+      'background.ts',
+      'chrome.d.ts',
+      'explain.ts',
+      'panel.ts',
+      'read.ts',
+    ]);
     // The check reads the modules it meant to read, rather than passing on
     // renamed files whose surface happens to be empty.
     expect(surfaceOf(modules['panel.ts'] ?? '').globals).toContain('document');
+    expect(surfaceOf(modules['read.ts'] ?? '').globals).toContain('matchMedia');
   });
 
-  it('reaches four names outside itself, and no others', () => {
+  it('reaches fourteen names outside itself, and no others', () => {
     const reached = new Set(Object.values(modules).flatMap((text) => surfaceOf(text).globals));
 
     expect([...reached].sort()).toEqual([...GLOBALS].sort());
   });
 
-  it('calls eight properties, and no others', () => {
+  it('calls twenty-three properties, and no others', () => {
     const calls = new Set(Object.values(modules).flatMap((text) => surfaceOf(text).called));
 
     expect([...calls].sort()).toEqual([...CALLED].sort());
@@ -245,5 +336,36 @@ describe('the privacy check, given an extension that keeps or sends something', 
       'reaches fetch, which is a way to make a request',
     );
     expect(refused('reaches', 'document', loosened, LEAKS)).toBeNull();
+  });
+
+  it('reads a type parameter as a name the module binds, not as one it reaches for', () => {
+    // `chrome.d.ts` declares `executeScript` with two of them, because the
+    // result it returns is whatever the function it injected returned. Left
+    // unbound, both arrived in `globals` — so `Result` would have had to go in
+    // the allowlist of the outside world, beside `document`, where it means
+    // nothing at all and where the next reader would have to work out that it
+    // is not a global.
+    const declared = 'export const of = <Held>(one: Held): Held[] => [one];';
+
+    expect(surfaceOf(declared).globals).toEqual([]);
+    // And a name that is not declared is still reached, which is what says the
+    // line above binds one rather than dropping every type reference.
+    expect(surfaceOf('export const of = (one: Held): Held[] => [one];').globals).toEqual(['Held']);
+  });
+
+  it('binds a type parameter inside its own declaration and nowhere else', () => {
+    // The other half of the line above, and the half that matters here: this
+    // list is the only thing standing between the package and a global it may
+    // not reach, so a name that leaves it by accident is a name nothing
+    // refuses. A type parameter is scoped to the declaration that introduces
+    // it — every other binding this reading collects is a module-level one —
+    // and putting one in the same flat set lets a `<Held>` on one line mask a
+    // reach for `Held` on another.
+    const masked = [
+      'export const of = <Held>(one: Held): Held[] => [one];',
+      'export const send = (what: string) => Held.reach(what);',
+    ].join('\n');
+
+    expect(surfaceOf(masked).globals).toEqual(['Held']);
   });
 });

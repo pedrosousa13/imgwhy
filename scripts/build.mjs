@@ -10,14 +10,16 @@
 // cannot be silently skipped the way `--workspaces` would skip nothing and
 // build it too early.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { cpSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
  * Dependency order. `imgwhy` imports every other package, so it goes last.
  *
  * `@imgwhy/extension` sits after core because the design's table gives it that
- * one dependency, even though nothing in it imports core yet.
+ * one dependency, and `src/explain.ts` imports it — and because the step below
+ * copies core's build into the extension's, which needs core built first.
  */
 const BUILD_ORDER = [
   '@imgwhy/core',
@@ -53,3 +55,59 @@ execFileSync('npm', ['run', 'build', '--if-present', ...build], {
   cwd: fileURLToPath(root),
   stdio: 'inherit',
 });
+
+// The extension's emitted output, made resolvable by the one thing that loads
+// it.
+//
+// A Manifest V3 service worker resolves no bare specifier. There is no import
+// map for an extension worker to resolve one against, so `from '@imgwhy/core'`
+// in the emitted worker's import graph is a worker that fails at load — and a
+// toolbar click that does nothing, which is the whole of the extension. Node
+// resolves it through the workspace and `tsc` resolves it through
+// `package.json`, so nothing before this point notices.
+//
+// The source keeps naming the package, because that is what the typecheck and
+// the dependency table read and the specifier is a build-time concern. It is
+// rewritten here, into a path inside the directory Chrome is handed.
+//
+// Copying core's emitted JavaScript wholesale is what gives the rewrite
+// somewhere to point. Core's own imports are already relative, so the copy
+// resolves against itself and nothing in it has to be rewritten too. No
+// bundler, and no dependency: a copy and a string replacement is the whole of
+// it. `packages/extension/test/emitted.test.ts` walks every import out of the
+// worker and fails on the first one that is bare or missing.
+const CORE = '@imgwhy/core';
+
+const rootPath = fileURLToPath(root);
+const dist = resolve(rootPath, 'packages/extension/dist');
+const copy = resolve(dist, 'core');
+
+/** Every emitted `.js` file under `dir`, the copy of core excluded. */
+function emitted(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = resolve(dir, entry.name);
+    if (path === copy) return [];
+    if (entry.isDirectory()) return emitted(path);
+    return entry.name.endsWith('.js') ? [path] : [];
+  });
+}
+
+// `.js` alone. The declarations are for `tsc`, which reads core through the
+// workspace, and a source map copied here would name `.ts` files that are not.
+cpSync(resolve(rootPath, 'packages/core/dist'), copy, {
+  recursive: true,
+  filter: (path) => statSync(path).isDirectory() || path.endsWith('.js'),
+});
+
+for (const file of emitted(dist)) {
+  const text = readFileSync(file, 'utf8');
+  if (!text.includes(`'${CORE}'`) && !text.includes(`"${CORE}"`)) continue;
+
+  // Relative to the file rather than a fixed `./core/index.js`, so a module
+  // emitted into a subdirectory of `dist` is rewritten correctly rather than
+  // rewritten to a path that does not exist.
+  const to = relative(dirname(file), resolve(copy, 'index.js')).split(sep).join('/');
+  const at = to.startsWith('.') ? to : `./${to}`;
+
+  writeFileSync(file, text.replaceAll(`'${CORE}'`, `'${at}'`).replaceAll(`"${CORE}"`, `"${at}"`));
+}

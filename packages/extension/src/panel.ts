@@ -1,7 +1,9 @@
+import type { Panel } from './explain.js';
+
 /**
- * The panel, and the one function a click sends into the page.
+ * The panel, and the one function a click sends into the page second.
  *
- * Everything below is inside `togglePanel`, including the strings and the
+ * Everything below is inside `renderPanel`, including the strings and the
  * stylesheet, and that is a requirement rather than a style. `executeScript`
  * does not send the function: it sends `String(func)` and the page evaluates
  * that text. A constant declared beside the function, a helper it called, an
@@ -10,36 +12,40 @@
  * text in a context holding a `document` and nothing else, which is the only
  * arrangement that can catch it.
  *
+ * The `import type` above is the one exception, and it is not an exception at
+ * all: a type is erased before `tsc` emits anything, so `dist/panel.js` holds
+ * one function declaration and no import statement. What it buys is the shape
+ * of the argument being checked at the seam rather than described in a
+ * comment — `explain.ts` builds a `Panel` and this takes one, so a field added
+ * to one and not read by the other fails to compile.
+ *
  * The other consequence is that this module has no top level worth speaking
- * of: one function declaration, no imports, no constants. `dormant.test.ts`
- * asks for that of every module here, because the worker imports this one and
- * an effect at its top level would run when the worker wakes.
+ * of: one function declaration, no runtime imports, no constants.
+ * `dormant.test.ts` asks for that of every module here, because the worker
+ * imports this one and an effect at its top level would run when the worker
+ * wakes.
+ *
+ * Nothing here decides anything either. Every figure the panel shows arrives
+ * in `panel`, already worded by `explain.ts`, which asked core. A renderer
+ * that computed a number would be arithmetic in the one place core cannot
+ * reach, which is the whole reason the click is three steps.
  */
 
 /**
- * Show the panel, or take it away if it is already there.
+ * Put the panel in the page, with the arithmetic already worked out.
  *
- * The state is the page. There is no flag anywhere in the extension saying
- * which tabs have a panel open, and there is nowhere to put one that is not
- * `chrome.storage` — which the design rules out:
- *
- * > The extension holds `activeTab` only. It stores no page data and sends
- * > nothing anywhere.
- *
- * Reading the page instead is not a workaround. It is the only answer that
- * cannot go stale: the page navigated, the panel went with it, and the next
- * click opens rather than trying to close something that is no longer there.
+ * `readPage` is what takes it away again: the closing click never gets this
+ * far, because the state is the page and the page is what answers. So there is
+ * one return value here, and it is the one the worker never reads — the panel
+ * appearing is the report.
  */
-export function togglePanel(): 'opened' | 'removed' {
+export function renderPanel(panel: Panel): 'opened' {
   // Underscored and prefixed, because it lands in the page's id namespace and
   // has to not collide with anything a site happens to have called its own.
+  // Declared twice, here and in `read.ts`, because neither copy can see the
+  // other: a shared constant is exactly the kind of name that does not come
+  // over with a stringified function.
   const HOST_ID = '__imgwhy_host__';
-
-  const open = document.getElementById(HOST_ID);
-  if (open !== null) {
-    open.remove();
-    return 'removed';
-  }
 
   const host = document.createElement('div');
   host.id = HOST_ID;
@@ -86,7 +92,11 @@ export function togglePanel(): 'opened' | 'removed' {
   //
   // Rules for the panel's own elements need none of this. A page selector
   // cannot match a node in a shadow tree, so the only route in was
-  // inheritance and the `:host` rule has already closed it.
+  // inheritance and the `:host` rule has already closed it. They select on
+  // tag names alone, which is not a shortcut: a class name is a property
+  // written to an element, and `privacy.test.ts` allows this package two
+  // written properties — an id and the words it says. Semantic elements cost
+  // nothing and keep that list at two.
   style.textContent = `
     :host {
       all: initial !important;
@@ -97,16 +107,18 @@ export function togglePanel(): 'opened' | 'removed' {
       bottom: 16px !important;
       z-index: 2147483647 !important;
       display: block !important;
-      width: 320px !important;
+      width: 440px !important;
       max-width: calc(100vw - 32px) !important;
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif !important;
-      font-size: 13px !important;
+      font-size: 12px !important;
       line-height: 1.5 !important;
       color: #16181d !important;
     }
     section {
       box-sizing: border-box;
-      display: block;
+      display: flex;
+      flex-direction: column;
+      max-height: min(74vh, 760px);
       padding: 12px 14px;
       background: #ffffff;
       border: 1px solid #d5d8de;
@@ -114,40 +126,145 @@ export function togglePanel(): 'opened' | 'removed' {
       box-shadow: 0 6px 24px rgba(16, 18, 22, 0.18);
     }
     h1 {
-      margin: 0 0 4px;
-      font-size: 13px;
-      font-weight: 600;
-    }
-    p {
       margin: 0;
-      color: #545a66;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #767d8a;
     }
-    p + p {
-      margin-top: 6px;
+    h1 + p {
+      margin: 2px 0 0;
+      font-variant-numeric: tabular-nums;
+    }
+    ol {
+      flex: 1 1 auto;
+      overflow: auto;
+      margin: 8px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+    li {
+      padding: 8px 0;
+      border-top: 1px solid #e6e8ec;
+    }
+    h2 {
+      margin: 0 0 4px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #545a66;
+      overflow-wrap: anywhere;
+    }
+    dl {
+      display: grid;
+      grid-template-columns: 78px minmax(0, 1fr);
+      margin: 0;
+      column-gap: 10px;
+      row-gap: 1px;
+    }
+    dt {
+      color: #767d8a;
+    }
+    dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+      font-variant-numeric: tabular-nums;
+    }
+    mark {
+      margin-left: 6px;
+      padding: 0 4px;
+      border-radius: 3px;
+      background: #f1e7fd;
+      color: #6b21a8;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+    }
+    li p {
+      margin: 6px 0 0;
+      color: #8a3b12;
+    }
+    footer {
+      margin: 8px 0 0;
+      padding-top: 8px;
+      border-top: 1px solid #e6e8ec;
+    }
+    footer p {
+      margin: 0;
+      color: #767d8a;
+      font-size: 11px;
+    }
+    footer p + p {
+      margin-top: 4px;
     }
   `;
   root.appendChild(style);
 
-  const panel = document.createElement('section');
+  const section = document.createElement('section');
 
   const title = document.createElement('h1');
   title.textContent = 'imgwhy';
-  panel.appendChild(title);
+  section.appendChild(title);
 
-  // Every word arrives through `textContent`. Nothing here builds markup from
-  // a string, so nothing a page could arrange gets reinterpreted as a tag —
-  // and the panel has no page content in it yet in any case, which is the
-  // next slice's problem and worth already having the habit for.
-  const first = document.createElement('p');
-  first.textContent = 'Nothing ran on this page until you clicked. That is the point.';
-  panel.appendChild(first);
+  // Every word the page supplied arrives through `textContent`, and that is
+  // the whole of the escaping story. Nothing here builds markup from a string,
+  // so a selector, a `sizes` attribute, a descriptor or a candidate URL cannot
+  // be reinterpreted as a tag however the page wrote it — there is no parser
+  // in the path to reinterpret it. `escaping.test.ts` holds that as behaviour
+  // and refuses the properties that would undo it.
+  const head = document.createElement('p');
+  head.textContent = panel.head;
+  section.appendChild(head);
 
-  const second = document.createElement('p');
-  second.textContent =
-    'The arithmetic behind each image comes next. Click the toolbar icon again to close.';
-  panel.appendChild(second);
+  const list = document.createElement('ol');
 
-  root.appendChild(panel);
+  for (const row of panel.rows) {
+    const item = document.createElement('li');
+
+    const heading = document.createElement('h2');
+    heading.textContent = row.heading;
+    item.appendChild(heading);
+
+    const fields = document.createElement('dl');
+    for (const line of row.lines) {
+      const label = document.createElement('dt');
+      label.textContent = line.label;
+      fields.appendChild(label);
+
+      const value = document.createElement('dd');
+      value.textContent = line.value;
+      // The design's requirement, as an element rather than a sentence: a
+      // figure the cache could have contaminated is marked where it is shown,
+      // and the footer says once what the mark means. `mark` is the element
+      // the platform already has for a figure flagged for reference, so the
+      // flag needs no class of its own.
+      if (line.held) {
+        const flag = document.createElement('mark');
+        flag.textContent = 'cache';
+        value.appendChild(flag);
+      }
+      fields.appendChild(value);
+    }
+    item.appendChild(fields);
+
+    for (const note of row.notes) {
+      const said = document.createElement('p');
+      said.textContent = note;
+      item.appendChild(said);
+    }
+
+    list.appendChild(item);
+  }
+  section.appendChild(list);
+
+  const footer = document.createElement('footer');
+  for (const line of panel.footer) {
+    const said = document.createElement('p');
+    said.textContent = line;
+    footer.appendChild(said);
+  }
+  section.appendChild(footer);
+
+  root.appendChild(section);
 
   // The document element rather than the body. `position: fixed` resolves
   // against the nearest ancestor that established a containing block, and a
