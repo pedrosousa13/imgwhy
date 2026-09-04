@@ -41,11 +41,24 @@ const DESCRIPTOR = "</dd><mark>cache</mark><script>alert('descriptor')</script>"
  * markup; `currentSrc` is a URL the page chose; and `baseURI` is what a
  * `<base>` tag says. None of it is imgwhy's to trust.
  *
- * Three images, because a page that breaks out once breaks out three times.
- * The second is the one whose prediction and loaded file disagree, which is the
- * row that writes a note as well as a grid. The third is the one whose
- * descriptor is the payload, which is the field that reaches the panel without
- * ever having been a URL.
+ * Four images, because a page that breaks out once breaks out four times. The
+ * second is the one whose prediction and loaded file disagree, which is the row
+ * that writes a note as well as a grid. The third is the one whose descriptor
+ * is the payload, which is the field that reaches the panel without ever having
+ * been a URL.
+ *
+ * The fourth is the row two paths in this panel had never been walked with page
+ * content in them, which on a fixture whose premise is a *closed* list of
+ * attribute values means two paths the list did not actually cover:
+ *
+ * - **The row headline.** It is a `code` token holding the descriptor of the
+ *   file that loaded, and on the three rows above it reads `src`, `src` and
+ *   `—` — imgwhy's own literals every one. Here the pick is the forged
+ *   descriptor and the file loaded, so the page's own text is the headline.
+ * - **The collapsed one-file statement.** A `srcset` whose every candidate
+ *   resolves to one URL renders one line in place of the list, and no row above
+ *   reached it. Both candidates here name one `javascript:` URL, which is also
+ *   what the file name beside the headline then reads as.
  */
 const hostile = () =>
   reading({
@@ -80,6 +93,19 @@ const hostile = () =>
         srcset: `/i/400.png 400w, /i/800.png ${DESCRIPTOR}`,
         sizes: '800px',
         renderedWidth: 800,
+      }),
+      image({
+        selector: 'html > body > figure > img',
+        // One URL under two descriptors, so every candidate names one file and
+        // the row collapses them into a sentence. The forged descriptor wins
+        // the pick — no `w` and no `x`, so `parseSrcset` reads it as 1x and a
+        // ratio of 1 takes it over 400w at 800px — and the file it names is the
+        // file that loaded, which is what puts page text in the headline.
+        srcset: `javascript:alert(4) 400w, javascript:alert(4) ${DESCRIPTOR}`,
+        sizes: '800px',
+        renderedWidth: 800,
+        renderedHeight: 450,
+        currentSrc: 'javascript:alert(4)',
       }),
     ],
     backgroundImageCount: 2,
@@ -232,6 +258,67 @@ describe('the panel, given a page written to break out of it', () => {
     expect(nodes.filter((node) => node.srcset !== '')).toEqual([]);
   });
 
+  it('heads a row with a descriptor the page invented, as the text of a code token', () => {
+    // The headline is the one place a `code` element holds page content, and on
+    // a page that writes its own descriptors that content is whatever stood
+    // where a `640w` should have. A token, not markup: the `<mark>` and the
+    // `<script>` in it are words in a `code`, and the count of elements the
+    // panel made is what says so.
+    const { nodes } = rendered();
+    const headlines = nodes.filter((node) => node.name === 'code');
+
+    expect(headlines.map((node) => node.textContent)).toEqual(['src', 'src', '—', DESCRIPTOR]);
+  });
+
+  it('collapses a page’s many descriptors onto its one file, as one sentence of text', () => {
+    // The `srcset` whose every candidate resolves to one URL, which is a
+    // statement rather than a list — and the URL in it is the page's. The
+    // label is the count, which is imgwhy's; the value is the page's, whole.
+    const { nodes } = rendered();
+    const words = nodes.map((node) => node.textContent);
+
+    expect(words).toContain('2 candidates');
+    expect(words).toContain('one file: javascript:alert(4)');
+    expect(words).toContain(
+      'All 2 candidates name one file, so your device made no difference here — the descriptors ' +
+        'differ and the bytes do not.',
+    );
+  });
+
+  it('names each row after the page’s own file name, however little of one there is', () => {
+    // The `small` beside each headline, which is page content on every row and
+    // was asserted on none. A `data:text/html,<script>` URL has no path to take
+    // a name from, so the scheme is what a reader gets; a `javascript:` URL is
+    // the same shape; the ordinary one is a file name; and a row that loaded
+    // nothing is named by the verdict beside it rather than by a file.
+    const { nodes } = rendered();
+    const names = nodes.filter((node) => node.name === 'small');
+
+    expect(names.map((node) => node.textContent)).toEqual([
+      "data:text/html,<script>alert('current src')</script>",
+      '300.png',
+      '',
+      'javascript:alert(4)',
+    ]);
+  });
+
+  it('says what the page called the image in the thumbnail’s own alt, and nowhere else', () => {
+    // `alt` is page content that reaches the panel twice, and the second of the
+    // two is the one nothing asserted: the thumbnail's own `alt`, which is what
+    // a reader is read out where the picture will not draw. The first image's
+    // is markup, and it lands as an attribute value that no browser parses.
+    const { nodes } = rendered();
+    const thumbs = nodes.filter((node) => node.name === 'img');
+    const live = hostile().images;
+
+    expect(thumbs.map((node) => node.alt)).toEqual([
+      live[0].alt,
+      '300.png',
+      'nothing loaded',
+      'javascript:alert(4)',
+    ]);
+  });
+
   it('hands a hostile currentSrc to a thumbnail whole, and it stays a broken image', () => {
     // The narrowed rule, read against a page written to abuse it. The first
     // image's `currentSrc` is `data:text/html,<script>…`, which is not a URL a
@@ -246,7 +333,15 @@ describe('the panel, given a page written to break out of it', () => {
     const thumbs = nodes.filter((node) => node.name === 'img');
     const live = hostile().images;
 
-    expect(thumbs.map((node) => node.src)).toEqual([live[0].currentSrc, live[1].currentSrc, '']);
+    expect(thumbs.map((node) => node.src)).toEqual([
+      live[0].currentSrc,
+      live[1].currentSrc,
+      '',
+      live[3].currentSrc,
+    ]);
+    // And the row that loaded nothing is pointed at nothing at all rather than
+    // at the empty string, which a browser resolves against the document.
+    expect(thumbs[2]?.srcAttribute).toBeNull();
     expect(thumbs[2]?.alt).toBe('nothing loaded');
   });
 
@@ -256,15 +351,16 @@ describe('the panel, given a page written to break out of it', () => {
     // it lands on the candidates line, in the sentence, and as the label of a
     // file. The count of marks is what says the forgery made no element: two
     // rows loaded a file and carry a chip in the heading and a chip on the
-    // `loaded` URL, the third loaded nothing and carries none, and the
-    // `<mark>` the page asked for is a word in a `dd`.
+    // `loaded` URL, one loaded nothing and carries none, and the
+    // `<mark>` the page asked for is a word in a `dd`. Three rows loaded a
+    // file, so six is two chips each and none of them the page's.
     const { nodes } = rendered();
     const words = nodes.map((node) => node.textContent);
 
     expect(words).toContain(`400w, ${DESCRIPTOR} (picked)`);
     expect(words).toContain(DESCRIPTOR);
     expect(words.some((word) => word.startsWith(`Nothing has loaded yet; when it does, the arithmetic picks ${DESCRIPTOR} —`))).toBe(true);
-    expect(nodes.filter((node) => node.name === 'mark')).toHaveLength(4);
+    expect(nodes.filter((node) => node.name === 'mark')).toHaveLength(6);
   });
 
   it('says the sentence with the page’s hostile sizes string in it, as text', () => {
@@ -274,7 +370,7 @@ describe('the panel, given a page written to break out of it', () => {
     const { nodes } = rendered();
     const sentences = nodes.filter((node) => node.name === 'p' && node.parent?.name === 'header');
 
-    expect(sentences).toHaveLength(3);
+    expect(sentences).toHaveLength(4);
     expect(sentences[1]?.textContent).toBe(
       "The sizes clause <script>alert('source sizes')</script> could not be read as a length, so " +
         'there is no width to select against and nothing was picked; fix the sizes attribute.',

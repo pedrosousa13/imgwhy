@@ -228,6 +228,32 @@ describe('the reader a click sends into the page', () => {
     ]);
   });
 
+  it('reads the src attribute as written, and tells an absent one from an empty one', () => {
+    // Two states the `src` *property* cannot report, because it reflects a
+    // resolved URL: an absent attribute reads as the empty string there, and an
+    // empty one resolves against the document and reads as the page's own
+    // address — which is the request the panel's thumbnail guard exists to
+    // prevent. The attribute has the three states HTML's candidate rule is
+    // written against, so the attribute is what is read.
+    const host = page();
+    img(host, body(host), { src: 'https://example.com/one.png' });
+    img(host, body(host), { src: '' });
+    img(host, body(host));
+
+    expect(read(host).images.map((one) => one.srcAttribute)).toEqual([
+      'https://example.com/one.png',
+      '',
+      '',
+    ]);
+    // The property beside it, which is what the two empty cases differ on: a
+    // page, and nothing at all.
+    expect(host.images.map((one) => one.src)).toEqual([
+      'https://example.com/one.png',
+      'https://example.com/',
+      '',
+    ]);
+  });
+
   it('prefers the file the browser chose to the src the page wrote', () => {
     // The two differ on exactly the images this panel exists to explain: an
     // `<img srcset>` carries a `src` as the fallback for a browser that reads
@@ -389,7 +415,16 @@ describe('the reader as the built module ships it, which is the copy a page gets
     const host = page();
     const picture = el(host, body(host), 'picture');
     el(host, picture, 'source', { media: '(min-width: 1000px)', srcset: '/i/mid.png 1200w' });
-    img(host, picture, { srcset: '/i/fallback.png 400w', sizes: '120px', rect: box({ width: 475, height: 317 }) });
+    img(host, picture, {
+      srcset: '/i/fallback.png 400w',
+      // The `src` a `<picture>`'s `<img>` carries for a browser that reads no
+      // `srcset` at all, which is also the candidate a densities-only `srcset`
+      // offers alongside itself — so the built copy is run over an attribute
+      // that is there rather than only over one that is not.
+      src: 'https://example.com/i/fallback.png',
+      sizes: '120px',
+      rect: box({ width: 475, height: 317 }),
+    });
     el(host, body(host), 'div', { background: 'url("https://example.com/hero.jpg")' });
 
     // The whole reading rather than one field of it, because a name the module
@@ -409,7 +444,8 @@ describe('the reader as the built module ships it, which is the copy a page gets
           renderedWidth: 475,
           renderedHeight: 317,
           alt: null,
-          currentSrc: '',
+          srcAttribute: 'https://example.com/i/fallback.png',
+          currentSrc: 'https://example.com/i/fallback.png',
           loading: null,
           baseURI: 'https://example.com/',
         },

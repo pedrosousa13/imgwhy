@@ -421,9 +421,10 @@ describe('the panel a click injects', () => {
       'Your screen is 1440 px wide at DPR 1 (standard); sizes gives it 33vw, which is 475 px, so ' +
         'it needs 475 device pixels — and 640w is the smallest file that covers that.',
       'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
-        'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser already held ' +
-        '1080w and reused it rather than choosing again; an empty cache is the only way to see ' +
-        'the real pick.',
+        'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser loaded 1080w, ' +
+        'which is larger. A held copy reused rather than chosen again is the likeliest cause, ' +
+        'and a viewport that shrank after load or script that rewrote sizes or srcset would read ' +
+        'the same; an empty cache is the only way to see the real pick.',
     ]);
   });
 

@@ -101,7 +101,7 @@ const GLOBALS = new Set([
  * a page it was injected into, which is not something an allowlist of calls
  * can say on its own and is exactly what `WRITTEN` below says.
  *
- * Lists, strings and one rounding: `filter`, `map`, `join`, `includes`,
+ * Lists, strings and one rounding: `filter`, `map`, `some`, `join`, `includes`,
  * `indexOf`, `slice`, `startsWith`, `toLowerCase`, `unshift`, `round`. Not one
  * of them can reach anything, which is why a list this long still holds: the
  * question a call allowlist answers is whether a name that leaves the machine
@@ -165,6 +165,7 @@ const CALLED = new Set([
   'round',
   'scrollTo',
   'slice',
+  'some',
   'split',
   'startsWith',
   'test',
@@ -394,7 +395,7 @@ describe('the extension, checked against storing or sending anything', () => {
     expect([...reached].sort()).toEqual([...GLOBALS].sort());
   });
 
-  it('calls thirty properties, and no others', () => {
+  it('calls thirty-one properties, and no others', () => {
     const calls = new Set(Object.values(modules).flatMap((text) => surfaceOf(text).called));
 
     expect([...calls].sort()).toEqual([...CALLED].sort());

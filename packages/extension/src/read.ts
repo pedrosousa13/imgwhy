@@ -103,6 +103,35 @@ export type RawImage = {
    * — it reads `''` for both — so the attribute is read instead.
    */
   alt: string | null;
+  /**
+   * The `src` attribute as the page wrote it, or the empty string where it
+   * wrote none.
+   *
+   * Read as well as `currentSrc` below, because the two answer different
+   * questions and the panel needs both. `currentSrc` is the file that loaded.
+   * This is a *candidate*: HTML's select-an-image-source appends the `src` to
+   * the source set when no candidate carries a `w` descriptor and none is
+   * already 1x, so on a densities-only `srcset` the ratio decides between the
+   * `src` and whatever else is offered. A panel that read only the loaded file
+   * told such a row that its device made no difference, which is false at every
+   * ratio.
+   *
+   * The attribute rather than the `src` property, and the difference is the
+   * whole of what makes this readable. The property reflects a *resolved* URL,
+   * so an absent attribute and an attribute set to the empty string both come
+   * back as something: absent reads `''`, and empty resolves against the
+   * document and reads the page's own address. The attribute has the three
+   * states the spec's condition is written against, and `getAttribute` is what
+   * reports them.
+   *
+   * Not named `src`. `privacy.test.ts` holds that anything given to a `src`
+   * arrived whole and unmodified through the reading, and it holds it on the
+   * name — a field called `src` here would ask that rule to widen for a value
+   * that is not a request at all. This is the text of an attribute; the one
+   * value that ever becomes a request is `row.file`, and it still comes from
+   * `currentSrc` alone.
+   */
+  srcAttribute: string;
   currentSrc: string;
   loading: 'lazy' | 'eager' | null;
   /**
@@ -296,6 +325,11 @@ export function readPage(): Reading | null {
       renderedWidth: box.width || img.width || 0,
       renderedHeight: box.height || img.height || 0,
       alt: img.getAttribute('alt'),
+      // The attribute and not the property, because the property reflects a
+      // resolved URL and resolves an empty one against the document — so an
+      // `<img>` that was never given a `src` and one given an empty one are
+      // one value there and two findings here.
+      srcAttribute: img.getAttribute('src') ?? '',
       currentSrc: img.currentSrc || img.src,
       loading: loading === 'lazy' ? 'lazy' : loading === 'eager' ? 'eager' : null,
       baseURI: img.baseURI,

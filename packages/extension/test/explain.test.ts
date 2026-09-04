@@ -366,12 +366,16 @@ describe('the sentence that says which file loaded and why', () => {
     );
   });
 
-  it('width-selected and a larger file loaded: says the pick, then the held copy, then the cure', () => {
+  it('width-selected and a larger file loaded: says the pick, then the likely cause, then the cure', () => {
+    // The cause is named as a likelihood rather than as a fact, because a
+    // larger file than the pick is equally consistent with a viewport that
+    // shrank after load and with script that rewrote either attribute.
     expect(at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' })).toBe(
       'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
-        'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser already held ' +
-        '1080w and reused it rather than choosing again; an empty cache is the only way to see ' +
-        'the real pick.',
+        'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser loaded 1080w, ' +
+        'which is larger. A held copy reused rather than chosen again is the likeliest cause, ' +
+        'and a viewport that shrank after load or script that rewrote sizes or srcset would read ' +
+        'the same; an empty cache is the only way to see the real pick.',
     );
   });
 
@@ -383,11 +387,12 @@ describe('the sentence that says which file loaded and why', () => {
     );
   });
 
-  it('width-selected and a smaller file loaded: says it is stretched, and where to look', () => {
+  it('width-selected and a smaller file loaded: says what it falls short of, and where to look', () => {
     expect(at({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' })).toBe(
       'The arithmetic picks 1080w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
         'it 100vw, which is 1440 px, so it needs 1440 device pixels — but the browser loaded ' +
-        '640w, which is smaller, so the image is stretched to fit; check what set this src.',
+        '640w, which does not cover the pixels needed above, so the image is upscaled wherever ' +
+        'the page draws it at that size; check what set this src.',
     );
   });
 
@@ -445,8 +450,10 @@ describe('the sentence that says which file loaded and why', () => {
   it('density-selected and a denser file loaded: says the pick, then the held copy', () => {
     expect(at({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' })).toBe(
       'The arithmetic picks 1x — your screen is DPR 1 (standard) and no candidate carries a ' +
-        'width, so the ratio decided alone — but the browser already held 2x and reused it ' +
-        'rather than choosing again; an empty cache is the only way to see the real pick.',
+        'width, so the ratio decided alone — but the browser loaded 2x, which is larger. A held ' +
+        'copy reused rather than chosen again is the likeliest cause, and a viewport that shrank ' +
+        'after load or script that rewrote sizes or srcset would read the same; an empty cache ' +
+        'is the only way to see the real pick.',
     );
   });
 
@@ -568,6 +575,219 @@ describe('the verdict a row leads with', () => {
       expect(row.verdict.tone).toBe('warn');
       expect(row.why).toMatch(/; (?:an empty cache is the only way|add a candidate|check what set)/);
     }
+  });
+});
+
+/**
+ * The six readings the review of #24 found the verdict confidently wrong about.
+ *
+ * Each is written as the reviewer reproduced it — a call into `panelOf` and the
+ * whole reading it produced — because the defect in every one of them was the
+ * wording rather than the arithmetic. Core picked the file a browser picks in
+ * all six; what was wrong was what the panel said about the pick, and a verdict
+ * is the first thing a reader takes from a row.
+ *
+ * The order is the issue's, worst first.
+ */
+describe('the verdict, where a reading could confirm itself or blame the wrong thing', () => {
+  it('does not confirm an auto width with the file that produced it', () => {
+    // Finding 1. The held file laid the image out, that width became `needed`,
+    // and `needed` produced the pick — so a pick agreeing with the loaded file
+    // agrees because one produced the other. The marks and the note were both
+    // there and the verdict still read plain good, which is the panel being
+    // quietest exactly where it knows least.
+    const row = rowOf({
+      srcset: TWO,
+      sizes: 'auto',
+      renderedWidth: 1080,
+      currentSrc: 'https://example.com/i/1080.png',
+    });
+
+    expect([row.verdict.word, row.verdict.tone]).toEqual(['circular', 'quiet']);
+    expect(row.why).toBe(
+      'Your screen is 1440 px wide at DPR 1 (standard); sizes is auto, and the width came from ' +
+        'layout: 1080 px, so it needs 1080 device pixels — and 1080w is the smallest file that ' +
+        'covers that. But that width came from layout, and for an image the page gives no width ' +
+        'of its own the layout width is the width of the file the browser already held — so the ' +
+        'pick may agree with the loaded file because one produced the other; an empty cache is ' +
+        'the only way to tell.',
+    );
+  });
+
+  it('counts the src attribute as the 1x candidate HTML says it is', () => {
+    // Finding 2. Select-an-image-source appends `src` to the source set when no
+    // candidate carries a `w` descriptor and none is already 1x, so there were
+    // two candidates here and the device ratio decided between them alone. The
+    // row read `no choice` — "your device made no difference here" — which is
+    // false at DPR 1 and false at DPR 2.
+    const offered = {
+      srcset: '/i/hi.png 2x',
+      srcAttribute: '/i/lo.png',
+      currentSrc: 'https://example.com/i/lo.png',
+    };
+
+    const one = rowOf(offered);
+    expect([one.verdict.word, one.verdict.tone]).toEqual(['fit', 'good']);
+    expect(one.loaded).toBe('src (1x)');
+    expect(one.why).toBe(
+      'Your screen is DPR 1 (standard) and no candidate carries a width, so the ratio decided ' +
+        'alone — and src (1x) is the smallest density at or above it.',
+    );
+    expect(said(one.steps)).toEqual([
+      'clause used  x descriptors only',
+      'needed  DPR 1 (standard)',
+      'candidates  2x, src (1x) (picked)',
+    ]);
+
+    // The same tag on a retina screen, where the ratio picks the other one.
+    const two = rowOf(offered, 2);
+    expect([two.verdict.word, two.verdict.tone]).toEqual(['undersized', 'warn']);
+    expect(two.why).toBe(
+      'The arithmetic picks 2x — your screen is DPR 2 (retina) and no candidate carries a ' +
+        'width, so the ratio decided alone — but the browser loaded src (1x), which does not ' +
+        'cover the pixels needed above, so the image is upscaled wherever the page draws it at ' +
+        'that size; check what set this src.',
+    );
+  });
+
+  it('leaves a src attribute out where the srcset already answers for it', () => {
+    // The other half of the same rule, and the half a careless reading breaks.
+    // A `w` descriptor anywhere means a browser reads past `src` entirely; a
+    // candidate already at 1x means the src is not appended either; and a page
+    // with no `srcset` at all still gets the sentence that names where its one
+    // file came from rather than a candidate list of one.
+    expect(
+      said(
+        rowOf({
+          srcset: TWO,
+          sizes: '100vw',
+          srcAttribute: '/i/fallback.png',
+          currentSrc: 'https://example.com/i/1080.png',
+        }).steps,
+      ),
+    ).toContain('candidates  640w, 1080w (picked)');
+    expect(
+      said(
+        rowOf({
+          srcset: '/i/a.png 1x, /i/b.png 2x',
+          srcAttribute: '/i/a.png',
+          currentSrc: 'https://example.com/i/a.png',
+        }).steps,
+      ),
+    ).toContain('candidates  1x (picked), 2x');
+    expect(
+      rowOf({ srcAttribute: '/i/one.png', currentSrc: 'https://example.com/i/one.png' }).why,
+    ).toBe(
+      'No srcset, so your device made no difference here; the src attribute is the only file on ' +
+        'offer.',
+    );
+  });
+
+  it('says a zero width is a box this render drew, and blames no descriptor for it', () => {
+    // Finding 3. A `sizesPx` of zero is unknown to core, so nothing is picked —
+    // and the row read `unknown` with "fix the srcset", which is a lazy image
+    // below the fold being told its perfectly good `srcset` is broken.
+    const row = rowOf({ srcset: TWO, sizes: 'auto', renderedWidth: 0, loading: 'lazy' });
+
+    expect([row.verdict.word, row.verdict.tone]).toEqual(['no width', 'quiet']);
+    expect(row.why).toBe(
+      'Sizes is auto, and the width came from layout: 0 px, so there was no width to select ' +
+        'against and nothing was picked — an image this render drew no box for, such as a lazy ' +
+        'one below the fold, is the ordinary cause. The srcset is not what to look at here.',
+    );
+    // And the same for a page that wrote the zero itself, which is the other
+    // way core arrives at no width at all.
+    expect(rowOf({ srcset: TWO, sizes: '0px' }).why).toBe(
+      'Sizes gives it 0px, so there was no width to select against and nothing was picked — an ' +
+        'image this render drew no box for, such as a lazy one below the fold, is the ordinary ' +
+        'cause. The srcset is not what to look at here.',
+    );
+  });
+
+  it('names a held copy as the likely cause of a larger file rather than as the cause', () => {
+    // Finding 4's first half. A larger file than the pick is equally consistent
+    // with a viewport that shrank after load, with script that rewrote `sizes`
+    // or `srcset`, and with a layout that changed — so the sentence says what
+    // is known and names the likeliest cause as a likelihood.
+    expect(
+      rowOf({
+        srcset: TWO,
+        sizes: '33vw',
+        renderedWidth: 475,
+        currentSrc: 'https://example.com/i/1080.png',
+      }).why,
+    ).toBe(
+      'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
+        'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser loaded 1080w, ' +
+        'which is larger. A held copy reused rather than chosen again is the likeliest cause, ' +
+        'and a viewport that shrank after load or script that rewrote sizes or srcset would read ' +
+        'the same; an empty cache is the only way to see the real pick.',
+    );
+  });
+
+  it('claims a stretch only where the loaded file falls short of the figure above', () => {
+    // Finding 4's second half. "So the image is stretched to fit" was asserted
+    // of a smaller file without saying against what: the pixels needed are what
+    // `sizes` asked for, not what the page drew, so the honest claim names the
+    // figure the row already shows and says the upscale follows from it.
+    expect(
+      rowOf({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' }).why,
+    ).toBe(
+      'The arithmetic picks 1080w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
+        'it 100vw, which is 1440 px, so it needs 1440 device pixels — but the browser loaded ' +
+        '640w, which does not cover the pixels needed above, so the image is upscaled wherever ' +
+        'the page draws it at that size; check what set this src.',
+    );
+  });
+
+  it('ranks two candidates at one descriptor as neither larger nor smaller', () => {
+    // Finding 5. `>` with an else made equal fall through to "smaller, so the
+    // image is stretched to fit" — same width, no stretch. Two files at one
+    // descriptor are the same number of pixels whichever the browser took.
+    const row = rowOf({
+      srcset: '/i/a.png 640w, /i/b.png 640w',
+      sizes: '320px',
+      currentSrc: 'https://example.com/i/b.png',
+    });
+
+    expect([row.verdict.word, row.verdict.tone]).toEqual(['fit', 'good']);
+    expect(row.why).toBe(
+      'Your screen is 1440 px wide at DPR 1 (standard); sizes gives it 320px, so it needs 320 ' +
+        'device pixels — and 640w is the smallest file that covers that. The browser loaded ' +
+        '640w, which is a different file at the same descriptor, so the pixels are the same ' +
+        'either way.',
+    );
+
+    // And where neither of the two covers the need, the stretch is the
+    // srcset's and not the browser's — the tie is still a tie.
+    const short = rowOf({
+      srcset: '/i/a.png 640w, /i/b.png 640w',
+      sizes: '100vw',
+      currentSrc: 'https://example.com/i/a.png',
+    });
+    expect([short.verdict.word, short.verdict.tone]).toEqual(['undersized', 'warn']);
+    expect(short.why).toBe(
+      'Your screen is 1440 px wide at DPR 1 (standard); sizes gives it 100vw, which is 1440 px, ' +
+        'so it needs 1440 device pixels — no file covers that, so 640w, the largest on offer, is ' +
+        'stretched to fit; add a candidate above 640w. The browser loaded 640w, which is a ' +
+        'different file at the same descriptor, so the pixels are the same either way.',
+    );
+  });
+
+  it('is fit for a coarse candidate list, because the browser chose correctly', () => {
+    // Finding 6, resolved by the maintainer as a narrowing rather than a code
+    // change: 640w genuinely is the smallest candidate covering 100 px, so as a
+    // verdict on the browser's choice `fit` is correct. The 6.4× oversupply is
+    // the page's, and detecting it needs a ratio — a division the extension is
+    // forbidden. So `oversized` means only "a larger candidate than the pick
+    // loaded", and this reading is pinned as right rather than fixed.
+    const row = rowOf({ srcset: TWO, sizes: '100px', currentSrc: 'https://example.com/i/640.png' });
+
+    expect([row.verdict.word, row.verdict.tone]).toEqual(['fit', 'good']);
+    expect(row.why).toBe(
+      'Your screen is 1440 px wide at DPR 1 (standard); sizes gives it 100px, so it needs 100 ' +
+        'device pixels — and 640w is the smallest file that covers that.',
+    );
   });
 });
 
