@@ -648,8 +648,9 @@ describe('the collapsed row, at the measure the stylesheet gives it', () => {
           image({ srcset: '/i/1920.png 1920w, /i/2880.png 2880w', sizes: '100vw', currentSrc: 'https://example.com/i/2880.png' }),
           // undersized: the loaded file is smaller than the pick.
           image({ srcset: '/i/1920.png 1920w, /i/4320.png 4320w', sizes: '100vw', currentSrc: 'https://example.com/i/1920.png' }),
-          // can't tell: the width the pick was made against came from layout.
-          image({ srcset: '/i/4320.png 4320w, /i/5760.png 5760w', sizes: 'auto', renderedWidth: 1440, currentSrc: 'https://example.com/i/4320.png' }),
+          // can't tell: lazy, so the browser read `auto`, and the page declares
+          // no width — so the box may be the loaded file's own.
+          image({ srcset: '/i/4320.png 4320w, /i/5760.png 5760w', sizes: 'auto', loading: 'lazy', renderedWidth: 1440, naturalWidth: 1440, currentSrc: 'https://example.com/i/4320.png' }),
           // not loaded.
           image({ srcset: '/i/4320.png 4320w, /i/5760.png 5760w', sizes: '100vw' }),
           // unknown: the loaded file is not on offer.

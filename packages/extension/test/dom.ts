@@ -240,6 +240,29 @@ export class El {
   open = false;
   /** The computed `background-image`, which is a string and often `none`. */
   background = 'none';
+  /**
+   * The intrinsic width of the file the browser decoded, in CSS pixels.
+   *
+   * Zero until something loads, the way a browser reports it, and the reader
+   * treats a zero as "no pixels to compare" rather than as a width.
+   */
+  naturalWidth = 0;
+  /**
+   * The inline style, which here is the one property the reader asks for.
+   *
+   * An object rather than a string, because `img.style.width` is how a page
+   * declares a width inline and how the reader finds one. Empty is a page that
+   * declared none.
+   */
+  style: { width: string } = { width: '' };
+  /**
+   * The computed `aspect-ratio`, which is `auto` unless the page set one.
+   *
+   * Chrome reports `auto 3 / 2` for an element carrying `width` and `height`
+   * attributes, so a fixture that means "the page declared a ratio" sets this
+   * to anything but `auto`.
+   */
+  aspectRatio = 'auto';
 
   /**
    * How this element clips what overflows it, which is what makes it a scroll
@@ -664,7 +687,10 @@ export const globals = (
   innerHeight: world.height,
   devicePixelRatio: world.dpr,
   matchMedia: (query: string) => ({ matches: matches(query, world.width) }),
-  getComputedStyle: (element: El) => ({ backgroundImage: element.background }),
+  getComputedStyle: (element: El) => ({
+    backgroundImage: element.background,
+    aspectRatio: element.aspectRatio,
+  }),
   window: win,
   Event: Ev,
 });

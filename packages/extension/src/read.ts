@@ -83,15 +83,47 @@ export type RawImage = {
    * and one that says `24×24` is an icon, and neither is a thing a DOM path
    * tells you.
    *
-   * A laid-out height is not the dimension `non-goals.test.ts` refuses.
-   * `naturalWidth` is refused because it is the ingredient of a guessed weight
-   * — pixels in a file, times pixels in a file, times a bytes-per-pixel
-   * figure someone invented — and this is a CSS box, which says how large the
-   * page drew the image and nothing about what arrived. The package performs
-   * no multiplication anywhere either, which `through-core.test.ts` holds, so
-   * there is no arithmetic here for a dimension to feed.
+   * A laid-out height is not the dimension `non-goals.test.ts` refuses. What
+   * that check refuses is a guessed weight — pixels in a file, times pixels in
+   * a file, times a bytes-per-pixel figure someone invented — and this is a CSS
+   * box, which says how large the page drew the image and nothing about what
+   * arrived. The package performs no multiplication anywhere either, which
+   * `through-core.test.ts` holds, so there is no arithmetic here for a
+   * dimension to feed.
    */
   renderedHeight: number;
+  /**
+   * The width of the file the browser decoded, in CSS pixels, or zero where it
+   * has decoded none.
+   *
+   * This field was refused for a while, and the refusal was right for what it
+   * was aimed at: `naturalWidth` is the first ingredient of a guessed byte
+   * weight, and a panel that guesses weights is a panel that invents the one
+   * figure a reader most wants to trust. `non-goals.test.ts` refuses the guess,
+   * and it still does — nothing here multiplies, and a weight is still only
+   * ever the recorded transfer or the word `unknown`.
+   *
+   * What the field is for instead is one comparison, made in `core`, and the
+   * comparison decides whether a row may be judged at all. The browser reports
+   * an intrinsic width already divided by the density it picked the file at, so
+   * an element the page never sized is exactly as wide as this number. A box of
+   * any other width was sized by something other than the file — which is what
+   * frees the row from `can't tell`, the verdict that had swallowed 15 rows of
+   * 23 on an ordinary page.
+   *
+   * A number the page can see anyway. `naturalWidth` is a DOM property of the
+   * page's own image, readable by the page's own scripts, and this reads it and
+   * sends it nowhere.
+   */
+  naturalWidth: number;
+  /**
+   * Whether the page gives this element a width of its own.
+   *
+   * A declaration the page wrote, not a figure this took. `core` reads it for
+   * the same question `naturalWidth` answers from the other side: when `sizes`
+   * resolves to `auto`, was the box the page's doing or the loaded file's?
+   */
+  declaresWidth: boolean;
   /**
    * The `alt` attribute as the page wrote it, or null where it wrote none.
    *
@@ -324,6 +356,35 @@ export function readPage(): Reading | null {
     return { srcset: img.srcset, sizes: img.sizes || null, sizesSource: 'img' };
   };
 
+  /**
+   * Whether the page gives this element a width of its own.
+   *
+   * Three declarations, and every one of them is something the page wrote
+   * rather than something this measured. A `width` attribute is a width. An
+   * inline `width` is a width. A computed `aspect-ratio` other than `auto` ties
+   * one dimension to the other, which is the page deciding the box as surely as
+   * a length does — and Chrome reports the attributes as `auto 3 / 2` there, so
+   * this read covers the first case a second time rather than missing it.
+   *
+   * `core` asks for one thing only: when `sizes` resolves to `auto`, was the
+   * box the page's doing or the loaded file's? A declared width settles it,
+   * because a box built from a declaration is the same box whichever file
+   * arrived.
+   *
+   * What it does not reach is a width set from a stylesheet with no attribute,
+   * no inline style and no ratio. The cascade is not read here, so that page
+   * keeps the verdict it had before.
+   *
+   * This function is written twice. The other copy is `declaresWidth` in the
+   * command line's `collect.ts`, and `test/no-drift.test.ts` refuses any
+   * difference between the two.
+   */
+  const declaresWidth = (img: HTMLImageElement): boolean => {
+    if (img.getAttribute('width') !== null) return true;
+    if (img.style.width !== '') return true;
+    return getComputedStyle(img).aspectRatio !== 'auto';
+  };
+
   // Every `<img>` this collection holds, with nothing filtered out. A 1×1
   // tracking pixel and an image the page never shows are both bytes the browser
   // went and got, and dropping a row here would put it beyond anything
@@ -360,6 +421,8 @@ export function readPage(): Reading | null {
       sizesSource: offered.sizesSource,
       renderedWidth: box.width || img.width || 0,
       renderedHeight: box.height || img.height || 0,
+      naturalWidth: img.naturalWidth,
+      declaresWidth: declaresWidth(img),
       alt: img.getAttribute('alt'),
       // The attribute and not the property, because the property reflects a
       // resolved URL and resolves an empty one against the document — so an

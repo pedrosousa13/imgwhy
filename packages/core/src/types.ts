@@ -70,6 +70,19 @@ export type CapturedImage = {
    */
   sizesSource: 'img' | 'source';
   renderedWidth: number;
+  /**
+   * Whether the page gives this element a width of its own.
+   *
+   * True where the element carries a `width` attribute, or a computed
+   * `aspect-ratio` other than `auto`, or an inline width. Every one of those is
+   * a declaration the page wrote, which is why this is not a measurement and
+   * `no-estimate.test.ts` has nothing to say about it.
+   *
+   * It answers one question and only one: when `sizes` resolves to `auto`, is
+   * the box the page's doing or the loaded file's? `explain.ts` says why that
+   * matters and what it does with the answer.
+   */
+  declaresWidth: boolean;
   currentSrc: string;
   naturalWidth: number;
   /** Null where the transfer size is unknown. Never guessed. */

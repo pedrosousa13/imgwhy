@@ -13,7 +13,7 @@ const NEXT_SRCSET = [
 describe('the trace, end to end', () => {
   it('picks 1080w for a 640px viewport at DPR 1.5', () => {
     const candidates = parseSrcset(NEXT_SRCSET);
-    const resolution = resolveSizes('100vw', 640);
+    const resolution = resolveSizes('100vw', 640, false);
 
     expect(resolution).toEqual({ kind: 'length', px: 640, clause: '100vw', cond: null });
     expect(resolution.kind === 'length' && resolution.px * 1.5).toBe(960);
@@ -22,7 +22,7 @@ describe('the trace, end to end', () => {
 
   it('picks 1080w for a 640px viewport at DPR 1.5 when sizes is absent', () => {
     const candidates = parseSrcset(NEXT_SRCSET);
-    const resolution = resolveSizes(null, 640);
+    const resolution = resolveSizes(null, 640, false);
 
     expect(resolution).toEqual({
       kind: 'default',
@@ -34,7 +34,7 @@ describe('the trace, end to end', () => {
 
   it('narrows the pick when a sizes clause halves the width', () => {
     const candidates = parseSrcset(NEXT_SRCSET);
-    const resolution = resolveSizes('(min-width: 600px) 50vw, 100vw', 640);
+    const resolution = resolveSizes('(min-width: 600px) 50vw, 100vw', 640, false);
 
     expect(resolution).toEqual({
       kind: 'length',

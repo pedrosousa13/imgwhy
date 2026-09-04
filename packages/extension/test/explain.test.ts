@@ -101,7 +101,7 @@ describe('the panel the worker computes from a reading', () => {
       // undersized
       { srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' },
       // can't tell
-      { srcset: TWO, sizes: 'auto', renderedWidth: 1080, currentSrc: 'https://example.com/i/1080.png' },
+      { srcset: TWO, sizes: 'auto', loading: 'lazy', renderedWidth: 1080, naturalWidth: 1080, currentSrc: 'https://example.com/i/1080.png' },
       // not loaded
       { srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: '' },
       // unknown
@@ -152,7 +152,7 @@ describe('the panel the worker computes from a reading', () => {
         Array.from({ length: count }, () => image(fields));
       const many = [
         ...copies(1, { srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' }),
-        ...copies(3, { srcset: TWO, sizes: 'auto', renderedWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
+        ...copies(3, { srcset: TWO, sizes: 'auto', loading: 'lazy', renderedWidth: 1080, naturalWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
         ...copies(19, { srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' }),
       ];
 
@@ -237,8 +237,9 @@ describe('the panel the worker computes from a reading', () => {
         sizes: live.sizes,
         sizesSource: live.sizesSource,
         renderedWidth: live.renderedWidth,
+        declaresWidth: live.declaresWidth,
+        naturalWidth: live.naturalWidth,
         currentSrc: live.currentSrc,
-        naturalWidth: 0,
         transferBytes: null,
         loading: live.loading,
       },
@@ -567,8 +568,8 @@ describe('the clause a collapsed row leads with', () => {
       at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' }),
       at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' }),
       at({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' }),
-      at({ srcset: TWO, sizes: 'auto', renderedWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
-      at({ srcset: TWO, sizes: 'auto', renderedWidth: 0 }),
+      at({ srcset: TWO, sizes: 'auto', loading: 'lazy', renderedWidth: 1080, naturalWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
+      at({ srcset: TWO, sizes: 'auto', loading: 'lazy', renderedWidth: 0 }),
       at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: '' }),
       at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/other.png' }),
       at({ currentSrc: 'https://example.com/px.gif' }),
@@ -851,7 +852,7 @@ describe('the verdict a row leads with', () => {
     // gone — it is the note the row carries, one opening away, and the case
     // below is where every word of it is asserted.
     expect(
-      verdictOf({ srcset: TWO, sizes: 'auto', renderedWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
+      verdictOf({ srcset: TWO, sizes: 'auto', loading: 'lazy', renderedWidth: 1080, naturalWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
     ).toEqual(['can’t tell', 'quiet']);
   });
 
@@ -864,8 +865,8 @@ describe('the verdict a row leads with', () => {
       verdictOf({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' }),
       verdictOf({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' }),
       verdictOf({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' }),
-      verdictOf({ srcset: TWO, sizes: 'auto', renderedWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
-      verdictOf({ srcset: TWO, sizes: 'auto', renderedWidth: 0 }),
+      verdictOf({ srcset: TWO, sizes: 'auto', loading: 'lazy', renderedWidth: 1080, naturalWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
+      verdictOf({ srcset: TWO, sizes: 'auto', loading: 'lazy', renderedWidth: 0 }),
       verdictOf({ srcset: TWO, sizes: '33vw', currentSrc: '' }),
       verdictOf({ srcset: TWO, sizes: '(min-width: 100px) wide', currentSrc: 'https://example.com/i/640.png' }),
       verdictOf({ currentSrc: 'https://example.com/px.gif' }),
@@ -902,10 +903,15 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
     // agrees because one produced the other. The marks and the note were both
     // there and the verdict still read plain good, which is the panel being
     // quietest exactly where it knows least.
+    // `lazy` is what makes the browser read `auto` at all, and the natural
+    // width matching the box is what says the box may be the file's own: the
+    // page declares no width, so nothing else can have set it.
     const row = rowOf({
       srcset: TWO,
       sizes: 'auto',
+      loading: 'lazy',
       renderedWidth: 1080,
+      naturalWidth: 1080,
       currentSrc: 'https://example.com/i/1080.png',
     });
 
@@ -914,7 +920,7 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
     // check: the file laid the image out, the width became `needed`, `needed`
     // produced the pick, and the pick then agreed with the file.
     expect(row.why).toBe(
-      'The width came from the loaded file, so the pick cannot disagree with it.',
+      'The width may be the loaded file’s own, so the pick cannot disagree with it.',
     );
     // And the mechanism is intact, one opening away, in the two paragraphs the
     // row carries: the arithmetic as it ran, and why its agreement is worth

@@ -39,11 +39,25 @@ const src = fileURLToPath(new URL('../src', import.meta.url));
  * response without `Timing-Allow-Origin`, which most image CDNs do not send —
  * and a dimension read is the ingredient of the guess that would fill the gap.
  *
- * `renderedWidth` is not here, and that is the one entry worth arguing. Core
- * asks for it: `sizes: auto` defers to layout, and the width the element ended
- * up at is the honest answer there, so the reader has to take it. A dimension
- * the arithmetic needs is not an ingredient lying around — and `naturalWidth`
- * is, which is why this package does not read one at all.
+ * `renderedWidth` is not here, and that is the entry worth arguing. Core asks
+ * for it: `sizes: auto` defers to layout, and the width the element ended up at
+ * is the honest answer there, so the reader has to take it. A dimension the
+ * arithmetic needs is not an ingredient lying around.
+ *
+ * `naturalWidth` was here and is not any more, and the narrowing is deliberate
+ * rather than a loosening. Core asks for it too: it is the width an element the
+ * page never sized ends up at, so comparing it with the box is how a row learns
+ * whether its own width came from the file that loaded — the difference between
+ * a row that can be judged and a row that says `can't tell`. Refusing it cost
+ * 15 rows of 23 on an ordinary page.
+ *
+ * What guards the non-goal instead is what the guess actually needs, and it
+ * needs three things this package cannot get. A second dimension, which is
+ * refused below: one width is a length and never an area. A multiplication,
+ * which `through-core.test.ts` refuses anywhere in this package. And a
+ * bytes-per-pixel figure, which is a number somebody would have to invent and
+ * write down here. The check now names the ingredients rather than the first
+ * one to hand.
  */
 const REFUSED: Rules = [
   [/^type$/, 'the type attribute, which the design says not to read'],
@@ -52,9 +66,9 @@ const REFUSED: Rules = [
     'a probe for what a format decodes to',
   ],
   [
-    /^naturalWidth$/,
-    'a pixel dimension the arithmetic does not need, which is the one ingredient a guessed ' +
-      'weight takes',
+    /^naturalHeight$/,
+    'the second dimension of a decoded file, which is what turns the first one into an area and ' +
+      'an area into a guessed weight',
   ],
   [
     /^(?:transferSize|encodedBodySize|decodedBodySize)$/,
@@ -258,23 +272,33 @@ describe('the non-goal checks, given a panel that negotiates or guesses', () => 
   });
 
   it('catches a weight guessed from the pixels that arrived', () => {
+    // The area is the guess. One dimension is a length core asks for, and the
+    // second is the one that turns it into pixels-in-a-file.
     expect(
       findings({
-        'explain.ts': 'export const weigh = (img: HTMLImageElement) => `${img.naturalWidth} b`;',
+        'explain.ts':
+          'export const weigh = (img: HTMLImageElement) => ' +
+          '`${img.naturalWidth * img.naturalHeight} b`;',
       }),
     ).toEqual([
-      'explain.ts reads naturalWidth, which is a pixel dimension the arithmetic does not need, ' +
-        'which is the one ingredient a guessed weight takes',
+      'explain.ts reads naturalHeight, which is the second dimension of a decoded file, which is ' +
+        'what turns the first one into an area and an area into a guessed weight',
     ]);
   });
 
   it('catches a dimension taken apart by a destructuring, which no dot announces', () => {
     expect(
-      findings({ 'explain.ts': 'export const weigh = ({ naturalWidth: w }) => `${w} b`;' }),
+      findings({ 'explain.ts': 'export const weigh = ({ naturalHeight: h }) => `${h} b`;' }),
     ).toEqual([
-      'explain.ts reads naturalWidth, which is a pixel dimension the arithmetic does not need, ' +
-        'which is the one ingredient a guessed weight takes',
+      'explain.ts reads naturalHeight, which is the second dimension of a decoded file, which is ' +
+        'what turns the first one into an area and an area into a guessed weight',
     ]);
+  });
+
+  it('lets the width through, which core asks for and one number cannot make an area of', () => {
+    expect(
+      findings({ 'read.ts': 'export const wide = (img: HTMLImageElement) => img.naturalWidth;' }),
+    ).toEqual([]);
   });
 
   it('reads nothing out of a comment, which a regex over the text cannot help', () => {

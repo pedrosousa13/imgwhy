@@ -522,14 +522,17 @@ const candidatesOf = (raw: RawImage): Candidate[] => {
 /**
  * One reading of one image, in the shape core takes.
  *
- * Two fields are filled in rather than read, and both for a reason worth
- * writing down. `transferBytes` is null because a page cannot measure one —
- * null is core's own word for unknown, so the honest value is the value the
- * type already has for it. `naturalWidth` is zero because the extension does
- * not read a pixel dimension the arithmetic has no use for: `explainSelection`
- * reads `candidates`, `sizes` and `renderedWidth` and nothing else, and a
- * dimension is the one ingredient a guessed weight takes. `non-goals.test.ts`
- * refuses a read of one.
+ * One field is filled in rather than read. `transferBytes` is null because a
+ * page cannot measure one — null is core's own word for unknown, so the honest
+ * value is the value the type already has for it.
+ *
+ * `naturalWidth` was the second such field and is now read. It stood at zero
+ * on the argument that a pixel dimension is the first ingredient of a guessed
+ * weight, and `non-goals.test.ts` refuses the guess. It still does: nothing
+ * here multiplies anything, and a weight is the recorded transfer or the word
+ * `unknown`. What the number buys is the comparison in `core` that tells a box
+ * the page sized from a box the loaded file sized, which is the difference
+ * between a row that can be judged and a row that cannot.
  */
 const captured = (raw: RawImage): CapturedImage => ({
   id: raw.selector,
@@ -538,8 +541,9 @@ const captured = (raw: RawImage): CapturedImage => ({
   sizes: raw.sizes,
   sizesSource: raw.sizesSource,
   renderedWidth: raw.renderedWidth,
+  declaresWidth: raw.declaresWidth,
   currentSrc: raw.currentSrc,
-  naturalWidth: 0,
+  naturalWidth: raw.naturalWidth,
   transferBytes: null,
   loading: raw.loading,
 });
@@ -738,7 +742,7 @@ function ranked(loaded: Candidate, picked: Candidate): 'larger' | 'smaller' | 'e
 }
 
 /**
- * Whether the width core selected against is one this render's layout produced.
+ * Whether the width core selected against may be the loaded file's own doing.
  *
  * Which is what makes a row's own agreement worth nothing: `auto` defers to
  * layout, core answers with the width the element ended up at, and for an image
@@ -747,14 +751,15 @@ function ranked(loaded: Candidate, picked: Candidate): 'larger' | 'smaller' | 'e
  * selection run against `needed`, so the loaded file is upstream of the figure
  * that agrees with it.
  *
- * True for every `auto` resolution rather than only where the width provably
- * came from the file, for the reason the `cache` marks are drawn the same way:
- * an `auto` image the page *does* give a CSS width has a `css px` no cache
- * could have touched, and this package reads a laid-out box rather than a
- * cascade, so there is no reading of the page that tells the two apart.
+ * `core` answers it now, and the answer is narrower than the question this used
+ * to ask. This read `resolution.kind === 'auto'` and stopped there, which put
+ * the quietest verdict the panel has on every row of every page that writes
+ * `sizes="auto"` — 15 rows of 23 on an ordinary one, nearly all of them images
+ * the page had sized itself. `widthFrom` separates the three ways a layout
+ * width comes about, and only the last of them is a width to distrust.
  */
 const fromLayout = (selection: Selection): boolean =>
-  selection.kind === 'width' && selection.resolution.kind === 'auto';
+  selection.kind === 'width' && selection.widthFrom === 'layout-intrinsic';
 
 /**
  * What a collapsed row says, per outcome: the pixels the arithmetic asked for
@@ -943,7 +948,7 @@ function judged(
     return fromLayout(selection)
       ? {
           verdict: CANT_TELL,
-          why: 'The width came from the loaded file, so the pick cannot disagree with it.',
+          why: 'The width may be the loaded file’s own, so the pick cannot disagree with it.',
           because: [`${capital(chain)} — ${winning(selection, picked)}.${tie}`],
         }
       : {

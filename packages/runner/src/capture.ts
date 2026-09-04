@@ -108,6 +108,7 @@ const toCapturedImage = (image: RawImage, transfers: TransferLog): CapturedImage
   sizes: image.sizes,
   sizesSource: image.sizesSource,
   renderedWidth: image.renderedWidth,
+  declaresWidth: image.declaresWidth,
   currentSrc: image.currentSrc,
   naturalWidth: image.naturalWidth,
   // The response `currentSrc` names, at the size the protocol reported for it.

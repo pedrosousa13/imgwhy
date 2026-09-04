@@ -29,6 +29,7 @@ export const logo = (): CapturedImage => ({
   renderedWidth: 120,
   currentSrc: 'https://example.com/i/logo.png',
   naturalWidth: 120,
+  declaresWidth: false,
   transferBytes: null,
   loading: 'lazy',
 });
@@ -42,6 +43,7 @@ export const hero = (renderedWidth: number, file: string, bytes: number): Captur
   renderedWidth,
   currentSrc: `https://example.com/i/${file}`,
   naturalWidth: renderedWidth,
+  declaresWidth: false,
   transferBytes: bytes,
   loading: null,
 });
@@ -69,6 +71,7 @@ export const badge = (file: string, bytes: number): CapturedImage => ({
   renderedWidth: 200,
   currentSrc: `https://example.com/i/${file}`,
   naturalWidth: 200,
+  declaresWidth: false,
   transferBytes: bytes,
   loading: null,
 });
