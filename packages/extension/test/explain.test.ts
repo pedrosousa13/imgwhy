@@ -68,15 +68,102 @@ describe('the panel the worker computes from a reading', () => {
     ]);
   });
 
-  it('heads the panel with the two inputs every row names, and the count', () => {
+  it('heads the panel with the two inputs every row reasons from, and the counts', () => {
     // Width and ratio as two fields rather than one line, because they are
-    // the inputs that explain every row and the panel lays them out as such.
+    // the inputs every row's reasoning names and the panel lays them out as
+    // such.
     expect(panelOf(reading({ viewport: { width: 393, height: 852 }, dpr: 3 })).head).toEqual({
       width: '393 px',
       dpr: 'DPR 3 (retina)',
-      images: '0 images',
+      counts: '0 images',
     });
-    expect(panelOf(reading({ images: [image()] })).head.images).toBe('1 image');
+    expect(panelOf(reading({ images: [image()] })).head.counts).toBe('1 image · 1 no choice');
+  });
+
+  /**
+   * The glance-level answer for a whole page, which is the one figure a reader
+   * of twenty-three rows wanted and the header did not have.
+   *
+   * `23 images` says how much there is to read and nothing about what it says.
+   * The counts say where the problems are before a single row is read, and they
+   * partition the page — every image is counted exactly once, which is what
+   * makes the line an answer rather than a highlight reel.
+   */
+  describe('the counts the header states', () => {
+    /** One image per verdict word, on one page, in a deliberate jumble. */
+    const everySort = (): Parameters<typeof image>[0][] => [
+      // fit
+      { srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' },
+      // oversized
+      { srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' },
+      // no choice
+      { currentSrc: 'https://example.com/px.gif' },
+      // undersized
+      { srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' },
+      // can't tell
+      { srcset: TWO, sizes: 'auto', renderedWidth: 1080, currentSrc: 'https://example.com/i/1080.png' },
+      // not loaded
+      { srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: '' },
+      // unknown
+      { srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/other.png' },
+      // no width
+      { srcset: TWO, sizes: 'auto', renderedWidth: 0, loading: 'lazy' },
+      // fit again, so one count is not one row
+      { srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' },
+    ];
+
+    it('says the count of every verdict on the page, worst first, and leaves out the rest', () => {
+      // The order is the severity order the list offers as "warnings first",
+      // and it is the same on every page — a header whose words moved about
+      // with the page would be a header a reader has to re-read.
+      const panel = panelOf(reading({ images: everySort().map((fields) => image(fields)) }));
+
+      expect(panel.head.counts).toBe(
+        '9 images · 1 oversized · 1 undersized · 1 can’t tell · 1 no width · 1 not loaded · ' +
+          '1 unknown · 1 no choice · 2 fit',
+      );
+    });
+
+    it('counts every image exactly once, so the line is an answer and not a selection', () => {
+      // The claim the fixed order costs: a verdict left out of it would vanish
+      // from the header, and the header would quietly under-report a page. The
+      // counts are read back and summed against the number of rows.
+      const rows = everySort().map((fields) => image(fields));
+      const panel = panelOf(reading({ images: rows }));
+      const [total, ...counted] = panel.head.counts.split(' · ');
+
+      expect(total).toBe('9 images');
+      expect(
+        counted
+          .map((one) => Number(one.split(' ')[0]))
+          .reduce((sum, one) => sum + one, 0),
+      ).toBe(rows.length);
+      // And every word counted is a word some row actually carries.
+      expect(counted.map((one) => one.split(' ').slice(1).join(' ')).sort()).toEqual(
+        [...new Set(panel.rows.map((row) => row.verdict.word))].sort(),
+      );
+    });
+
+    it('says the page the report was written about, in the words it asked for', () => {
+      // The maintainer's own page: one oversized, three the panel cannot stand
+      // behind, nineteen that are fine. Finding the two that are wrong meant
+      // scrolling past nineteen that are not, and this line is where that stops.
+      const copies = (count: number, fields: Parameters<typeof image>[0]) =>
+        Array.from({ length: count }, () => image(fields));
+      const many = [
+        ...copies(1, { srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' }),
+        ...copies(3, { srcset: TWO, sizes: 'auto', renderedWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
+        ...copies(19, { srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' }),
+      ];
+
+      expect(panelOf(reading({ images: many })).head.counts).toBe(
+        '23 images · 1 oversized · 3 can’t tell · 19 fit',
+      );
+    });
+
+    it('says nothing but the count on a page with no image at all', () => {
+      expect(panelOf(reading()).head.counts).toBe('0 images');
+    });
   });
 
   it('says retina where the ratio is two or more, standard at one, and nothing in between', () => {
@@ -280,15 +367,14 @@ describe('the panel the worker computes from a reading', () => {
       'needed  1200px × DPR 2 = 2400px  [cache]',
       'candidates  400w, 1200w (picked)',
     ]);
-    expect(row.why).toBe(
-      'Your screen is 1440 px wide at DPR 2 (retina); sizes is auto, and the width came from ' +
-        'layout: 1200 px, so it needs 2400 device pixels — no file covers that, so 1200w, the ' +
-        'largest on offer, is stretched to fit; add a candidate above 1200w.',
-    );
+    expect(row.why).toBe('Needs 2400 px, and 1200w is the largest file on offer.');
     expect(row.mark).toBe(
       'what the browser has, not what it chose — and the width above descends from it',
     );
     expect(row.notes).toEqual([
+      'Your screen is 1440 px wide at DPR 2 (retina); sizes is auto, and the width came from ' +
+        'layout: 1200 px, so it needs 2400 device pixels — no file covers that, so 1200w, the ' +
+        'largest on offer, is stretched to fit; add a candidate above 1200w.',
       'sizes resolved to auto, so the width above is the width this render laid the image out ' +
         'at — and for an image the page gives no width of its own, that is the width of ' +
         'whichever file the browser already held. Every marked figure descends from it, so a ' +
@@ -297,13 +383,17 @@ describe('the panel the worker computes from a reading', () => {
     ]);
   });
 
-  it('writes no note where the arithmetic needs none', () => {
-    // The cache argument for a disagreement now lives in the row's own
-    // sentence, so a note repeating it would be the same prose twice.
+  it('writes no note where there is nothing further to say', () => {
+    // One candidate is one clause and no reasoning: "only one file on offer"
+    // is the whole of it, and a note repeating the sentence above would be the
+    // same words twice. Every row with a choice to explain has one.
+    expect(rowOf({ srcset: '/i/one.png 800w', currentSrc: 'https://example.com/i/one.png' }).notes).toEqual(
+      [],
+    );
     expect(
       rowOf({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' })
         .notes,
-    ).toEqual([]);
+    ).toHaveLength(1);
   });
 
   it('explains the mark once, and what the extension cannot measure', () => {
@@ -339,27 +429,186 @@ describe('the panel the worker computes from a reading', () => {
 });
 
 /**
- * The one sentence per row, which is the whole of what the maintainer asked
- * for: "I literally need to know which one got loaded and why. Succinctly."
+ * The one clause a collapsed row says, which is the whole of what a scan
+ * reads.
  *
- * One template per outcome, and every template has the same shape — the
- * outcome, then the causal chain from the reader's device through `sizes` to
- * the pixels needed, then, where the outcome is a warning, what to do about
- * it. The device is named in every sentence on purpose: the reader's question
- * was "is it because of my device?", and the answer has to say *yes, these two
- * numbers* on the line they are looking at rather than in the head.
+ * It used to be the answer and three caveats, in that order and in one
+ * paragraph, and on a page of twenty-three images three rows filled the panel:
+ * finding the two that were wrong meant scrolling past nineteen that were not.
+ * So the answer is what is left here and the caveats are behind the disclosure
+ * the row already had — which is not a deletion, and the describe below is
+ * where every word of them is asserted.
  *
- * Every number in every sentence is core's, formatted. Nothing here is
+ * Two facts left with them, and this is the one part of the move worth arguing.
+ * The viewport width and the ratio were in every sentence deliberately, to
+ * answer the maintainer's "is it because of my device?" — and that was right
+ * while the sentence was the only place they appeared. The head states them as
+ * inputs now, so a row that named them again was answering a question a reader
+ * could already see the answer to, three lines at a time, twenty-three times.
+ *
+ * Every number in every clause is core's, formatted. Nothing here is
  * recomputed, and `through-core.test.ts` refuses the operators that would let
  * it be.
  */
-describe('the sentence that says which file loaded and why', () => {
+describe('the clause a collapsed row leads with', () => {
   const at = (fields: Parameters<typeof image>[0], dpr = 1, width = 1440): string =>
     rowOf(fields, dpr, width).why;
 
-  it('width-selected and it fit: names the device, the clause, the pixels, and the pick', () => {
+  it('width-selected and it fit: the pixels needed, and the file that covers them', () => {
+    // The issue's own shape: "Needs 1468 px, and 1920w is the smallest that
+    // covers it." The descriptor and the verdict are already the headline, so
+    // the clause is what the headline does not say.
     expect(
       at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' }),
+    ).toBe('Needs 475 px, and 640w is the smallest file that covers it.');
+  });
+
+  it('width-selected and a larger file loaded: the pixels needed, and what covered them', () => {
+    expect(at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' })).toBe(
+      'Needs 475 px, and 640w covers it, so 1080w is larger than needed.',
+    );
+  });
+
+  it('width-selected and nothing covers it: says the largest on offer is all there is', () => {
+    expect(at({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/1080.png' }, 3)).toBe(
+      'Needs 4320 px, and 1080w is the largest file on offer.',
+    );
+  });
+
+  it('width-selected and a smaller file loaded: says the loaded file falls short', () => {
+    expect(at({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' })).toBe(
+      'Needs 1440 px, and 640w does not cover it.',
+    );
+  });
+
+  it('width-selected and nothing loaded yet: says so, and what the arithmetic will pick', () => {
+    expect(at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: '' })).toBe(
+      'Nothing has loaded yet, and the arithmetic picks 640w.',
+    );
+  });
+
+  it('width-selected and the loaded file is not a candidate: says so rather than guessing', () => {
+    expect(at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/other.png' })).toBe(
+      'The loaded file is not one the srcset offers.',
+    );
+  });
+
+  it('density-selected: names the density rather than a pixel figure there is none of', () => {
+    // No `sizes` entered, so there is no width and no pixel count to open
+    // with. The ratio is the whole cause, and the clause points at the head
+    // field that holds it rather than repeating the figure.
+    expect(at({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' }, 2)).toBe(
+      '2x is the smallest density at or above your pixel ratio.',
+    );
+    expect(at({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' }, 3)).toBe(
+      '2x is the densest on offer, and your pixel ratio is higher.',
+    );
+    expect(at({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' })).toBe(
+      '1x covers your pixel ratio, so 2x is larger than needed.',
+    );
+    expect(
+      at({ srcset: '/i/hi.png 2x', srcAttribute: '/i/lo.png', currentSrc: 'https://example.com/i/lo.png' }, 2),
+    ).toBe('2x covers your pixel ratio, and src (1x) does not.');
+  });
+
+  it('unreadable sizes: says the clause would not read, and names it in the steps', () => {
+    // The clause's own text is page content and can be any length at all, so
+    // it stays in the `clause used` line where a reader is looking for it. A
+    // collapsed row says which kind of failure it was.
+    expect(at({ srcset: TWO, sizes: '(min-width: 100px) wide', currentSrc: 'https://example.com/i/640.png' })).toBe(
+      'The sizes clause could not be read, so nothing was picked.',
+    );
+    expect(
+      at(
+        { srcset: '/i/640.png 640w, /i/hi.png 2x', sizes: '(min-width: 100px) wide', currentSrc: 'https://example.com/i/hi.png' },
+        2,
+      ),
+    ).toBe('2x is the smallest density at or above your pixel ratio.');
+  });
+
+  it('no width at all: says nothing was picked, and blames no descriptor for it', () => {
+    // True of both ways core arrives at no width — a box this render drew
+    // nothing for, and a page that wrote `0px` itself — which is why the
+    // clause names neither. The note says which.
+    expect(at({ srcset: TWO, sizes: 'auto', renderedWidth: 0, loading: 'lazy' })).toBe(
+      'No width to select against, so nothing was picked.',
+    );
+    expect(at({ srcset: TWO, sizes: '0px' })).toBe(
+      'No width to select against, so nothing was picked.',
+    );
+  });
+
+  it('a w and an x descriptor: says the two cannot be ranked', () => {
+    // The pick is the 2x and the browser took the 640w, which is neither
+    // larger nor smaller: a page that mixes the two on one tag has written a
+    // srcset a browser reads as all w.
+    expect(
+      at({ srcset: '/i/a.png 640w, /i/b.png 2x', sizes: '100vw', currentSrc: 'https://example.com/i/a.png' }),
+    ).toBe('A w and an x descriptor cannot be ranked against each other.');
+  });
+
+  it('the device had no say: says so and stops', () => {
+    expect(at({ currentSrc: 'https://example.com/px.gif' })).toBe(
+      'No srcset, so your device made no difference here.',
+    );
+    expect(at({ srcset: '/i/one.png 800w', currentSrc: 'https://example.com/i/one.png' })).toBe(
+      'Only one file on offer, so your device made no difference here.',
+    );
+    expect(
+      at({ srcset: '/clear.png 320w, /clear.png 640w, /clear.png 1280w', sizes: '100vw', currentSrc: 'https://example.com/clear.png' }),
+    ).toBe('All 3 candidates name one file, so your device made no difference here.');
+  });
+
+  it('says one thing and holds no caveat, on every verdict there is', () => {
+    // The property rather than the wording: a collapsed clause is one
+    // sentence, and none of the hedges that used to follow the answer is in
+    // it. Every one of them is asserted in the describe below, where they went.
+    const clauses = [
+      at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' }),
+      at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' }),
+      at({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' }),
+      at({ srcset: TWO, sizes: 'auto', renderedWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
+      at({ srcset: TWO, sizes: 'auto', renderedWidth: 0 }),
+      at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: '' }),
+      at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/other.png' }),
+      at({ currentSrc: 'https://example.com/px.gif' }),
+    ];
+
+    for (const clause of clauses) {
+      // One sentence: one full stop, at the end.
+      expect(clause.split('. ')).toHaveLength(1);
+      expect(clause.slice(-1)).toBe('.');
+      // And none of the words a caveat is made of.
+      expect(clause).not.toMatch(/held copy|empty cache|likeliest|would read the same|DPR /);
+      // Nor the device facts the head already states.
+      expect(clause).not.toContain('1440 px wide');
+    }
+  });
+});
+
+/**
+ * The reasoning, behind the disclosure the row already had.
+ *
+ * Every sentence here is the sentence the collapsed row used to say, moved
+ * rather than rewritten: the causal chain from the reader's device through
+ * `sizes` to the pixels needed, the cause named as a likelihood where the panel
+ * cannot know it, and the cure. It is shown with the steps, because a reader
+ * who opened a row asked for exactly this — and the two device facts belong
+ * here for the same reason, which is that this is where the question was asked.
+ */
+describe('the reasoning a row holds behind its disclosure', () => {
+  const because = (fields: Parameters<typeof image>[0], dpr = 1, width = 1440): string[] =>
+    rowOf(fields, dpr, width).notes;
+
+  const only = (fields: Parameters<typeof image>[0], dpr = 1, width = 1440): string => {
+    const [said] = because(fields, dpr, width);
+    if (said === undefined) throw new Error('the row holds no reasoning at all');
+    return said;
+  };
+
+  it('width-selected and it fit: names the device, the clause, the pixels, and the pick', () => {
+    expect(
+      only({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' }),
     ).toBe(
       'Your screen is 1440 px wide at DPR 1 (standard); sizes gives it 33vw, which is 475 px, so ' +
         'it needs 475 device pixels — and 640w is the smallest file that covers that.',
@@ -370,7 +619,7 @@ describe('the sentence that says which file loaded and why', () => {
     // The cause is named as a likelihood rather than as a fact, because a
     // larger file than the pick is equally consistent with a viewport that
     // shrank after load and with script that rewrote either attribute.
-    expect(at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' })).toBe(
+    expect(only({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' })).toBe(
       'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
         'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser loaded 1080w, ' +
         'which is larger. A held copy reused rather than chosen again is the likeliest cause, ' +
@@ -380,7 +629,7 @@ describe('the sentence that says which file loaded and why', () => {
   });
 
   it('width-selected and nothing covers it: says the largest stood in, and what to add', () => {
-    expect(at({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/1080.png' }, 3)).toBe(
+    expect(only({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/1080.png' }, 3)).toBe(
       'Your screen is 1440 px wide at DPR 3 (retina); sizes gives it 100vw, which is 1440 px, so ' +
         'it needs 4320 device pixels — no file covers that, so 1080w, the largest on offer, is ' +
         'stretched to fit; add a candidate above 1080w.',
@@ -388,7 +637,7 @@ describe('the sentence that says which file loaded and why', () => {
   });
 
   it('width-selected and a smaller file loaded: says what it falls short of, and where to look', () => {
-    expect(at({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' })).toBe(
+    expect(only({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' })).toBe(
       'The arithmetic picks 1080w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
         'it 100vw, which is 1440 px, so it needs 1440 device pixels — but the browser loaded ' +
         '640w, which does not cover the pixels needed above, so the image is upscaled wherever ' +
@@ -396,16 +645,16 @@ describe('the sentence that says which file loaded and why', () => {
     );
   });
 
-  it('width-selected and nothing loaded yet: says so, and what the arithmetic will pick', () => {
-    expect(at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: '' })).toBe(
+  it('width-selected and nothing loaded yet: says what the arithmetic will pick, and why', () => {
+    expect(only({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: '' })).toBe(
       'Nothing has loaded yet; when it does, the arithmetic picks 640w — your screen is 1440 px ' +
         'wide at DPR 1 (standard); sizes gives it 33vw, which is 475 px, so it needs 475 device ' +
         'pixels.',
     );
   });
 
-  it('width-selected and the loaded file is not a candidate: says so rather than guessing', () => {
-    expect(at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/other.png' })).toBe(
+  it('width-selected and the loaded file is not a candidate: says where to look', () => {
+    expect(only({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/other.png' })).toBe(
       'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
         'it 33vw, which is 475 px, so it needs 475 device pixels — but the loaded file is not ' +
         'one the srcset offers; check what set this src.',
@@ -418,37 +667,31 @@ describe('the sentence that says which file loaded and why', () => {
     // can see which one matched at this viewport. The two defaults are two
     // findings about the page, and are told apart.
     const loaded = 'https://example.com/i/640.png';
-    expect(at({ srcset: TWO, sizes: '580px', currentSrc: loaded })).toContain(
+    expect(only({ srcset: TWO, sizes: '580px', currentSrc: loaded })).toContain(
       '; sizes gives it 580px, so it needs 580 device pixels',
     );
-    expect(at({ srcset: TWO, sizes: '(max-width: 768px) 100vw, 33vw', currentSrc: loaded }, 1, 600)).toContain(
+    expect(only({ srcset: TWO, sizes: '(max-width: 768px) 100vw, 33vw', currentSrc: loaded }, 1, 600)).toContain(
       '; sizes matched (max-width: 768px) 100vw, which is 600 px, so it needs 600 device pixels',
     );
-    expect(at({ srcset: TWO, sizes: null, currentSrc: 'https://example.com/i/1080.png' })).toContain(
+    expect(only({ srcset: TWO, sizes: null, currentSrc: 'https://example.com/i/1080.png' })).toContain(
       '; no sizes is written, and the 100vw default gives it 1440 px, so it needs 1440 device pixels',
     );
     expect(
-      at({ srcset: TWO, sizes: '(min-width: 2000px) 50vw', currentSrc: 'https://example.com/i/1080.png' }),
+      only({ srcset: TWO, sizes: '(min-width: 2000px) 50vw', currentSrc: 'https://example.com/i/1080.png' }),
     ).toContain('; no sizes clause matched, and the 100vw default gives it 1440 px, so it needs 1440');
   });
 
-  it('density-selected and it fit: names the ratio, and that sizes never entered', () => {
-    expect(at({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' }, 2)).toBe(
+  it('density-selected: names the ratio, and that sizes never entered', () => {
+    expect(only({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' }, 2)).toBe(
       'Your screen is DPR 2 (retina) and no candidate carries a width, so the ratio decided ' +
         'alone — and 2x is the smallest density at or above it.',
     );
-  });
-
-  it('density-selected and no candidate reaches the ratio: says the densest stood in', () => {
-    expect(at({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' }, 3)).toBe(
+    expect(only({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' }, 3)).toBe(
       'Your screen is DPR 3 (retina) and no candidate carries a width, so the ratio decided ' +
         'alone — no candidate reaches that, so 2x, the densest on offer, is stretched to fit; add ' +
         'a candidate above 2x.',
     );
-  });
-
-  it('density-selected and a denser file loaded: says the pick, then the held copy', () => {
-    expect(at({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' })).toBe(
+    expect(only({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' })).toBe(
       'The arithmetic picks 1x — your screen is DPR 1 (standard) and no candidate carries a ' +
         'width, so the ratio decided alone — but the browser loaded 2x, which is larger. A held ' +
         'copy reused rather than chosen again is the likeliest cause, and a viewport that shrank ' +
@@ -457,16 +700,13 @@ describe('the sentence that says which file loaded and why', () => {
     );
   });
 
-  it('unreadable sizes with nothing to pick: names the clause at fault, and what to fix', () => {
-    expect(at({ srcset: TWO, sizes: '(min-width: 100px) wide', currentSrc: 'https://example.com/i/640.png' })).toBe(
+  it('unreadable sizes: names the clause at fault, and what to fix', () => {
+    expect(only({ srcset: TWO, sizes: '(min-width: 100px) wide', currentSrc: 'https://example.com/i/640.png' })).toBe(
       'The sizes clause (min-width: 100px) wide could not be read as a length, so there is no ' +
         'width to select against and nothing was picked; fix the sizes attribute.',
     );
-  });
-
-  it('unreadable sizes with an x candidate to fall back on: says only those were judged', () => {
     expect(
-      at(
+      only(
         { srcset: '/i/640.png 640w, /i/hi.png 2x', sizes: '(min-width: 100px) wide', currentSrc: 'https://example.com/i/hi.png' },
         2,
       ),
@@ -477,27 +717,56 @@ describe('the sentence that says which file loaded and why', () => {
     );
   });
 
-  it('no srcset: says the device made no difference, and where the one file came from', () => {
-    expect(at({ currentSrc: 'https://example.com/px.gif' })).toBe(
+  it('no width at all: names the box this render drew, or the length the page wrote', () => {
+    expect(only({ srcset: TWO, sizes: 'auto', renderedWidth: 0, loading: 'lazy' })).toBe(
+      'Sizes is auto, and the width came from layout: 0 px, so there was no width to select ' +
+        'against and nothing was picked — an image this render drew no box for, such as a lazy ' +
+        'one below the fold, is the ordinary cause. The srcset is not what to look at here.',
+    );
+    expect(only({ srcset: TWO, sizes: '0px' })).toBe(
+      'Sizes gives it 0px, so there was no width to select against and nothing was picked — an ' +
+        'image this render drew no box for, such as a lazy one below the fold, is the ordinary ' +
+        'cause. The srcset is not what to look at here.',
+    );
+  });
+
+  it('a w and an x descriptor: says the two cannot be ranked, and names both', () => {
+    expect(
+      only({ srcset: '/i/a.png 640w, /i/b.png 2x', sizes: '100vw', currentSrc: 'https://example.com/i/a.png' }),
+    ).toBe(
+      'The arithmetic picks 2x — your screen is 1440 px wide at DPR 1 (standard); sizes gives it ' +
+        '100vw, which is 1440 px, so it needs 1440 device pixels — but the browser loaded 640w, ' +
+        'and a w and an x descriptor cannot be ranked against each other.',
+    );
+  });
+
+  it('the device had no say: says where the one file came from, and what the descriptors cost', () => {
+    expect(only({ currentSrc: 'https://example.com/px.gif' })).toBe(
       'No srcset, so your device made no difference here; the src attribute is the only file on offer.',
     );
-  });
-
-  it('one candidate: says the device made no difference', () => {
-    expect(at({ srcset: '/i/one.png 800w', currentSrc: 'https://example.com/i/one.png' })).toBe(
-      'Only one file on offer, so your device made no difference here.',
-    );
-  });
-
-  it('every candidate one file: says so once, rather than pretending a choice was made', () => {
-    // The maintainer's screenshot: a `1×1` overlay offering nine descriptors
-    // that all resolve to `clear.png`. The arithmetic ran and picked one of
-    // them, and it made no difference to the bytes.
     expect(
-      at({ srcset: '/clear.png 320w, /clear.png 640w, /clear.png 1280w', sizes: '100vw', currentSrc: 'https://example.com/clear.png' }),
+      only({ srcset: '/clear.png 320w, /clear.png 640w, /clear.png 1280w', sizes: '100vw', currentSrc: 'https://example.com/clear.png' }),
     ).toBe(
       'All 3 candidates name one file, so your device made no difference here — the descriptors ' +
         'differ and the bytes do not.',
+    );
+  });
+
+  it('carries every warning’s cure, which is what a warning is for', () => {
+    // A warning with no action is noise. The cure moved with the rest of the
+    // reasoning and it is still a clause after a semicolon, one opening away
+    // from the word that says something is wrong.
+    const warned = [
+      { srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' },
+      { srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' },
+    ];
+
+    for (const fields of warned) {
+      expect(rowOf(fields).verdict.tone).toBe('warn');
+      expect(only(fields)).toMatch(/; (?:an empty cache is the only way|add a candidate|check what set)/);
+    }
+    expect(only({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/1080.png' }, 3)).toMatch(
+      /; add a candidate above 1080w/,
     );
   });
 });
@@ -575,19 +844,43 @@ describe('the verdict a row leads with', () => {
     expect(verdictOf({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/other.png' })).toEqual(['unknown', 'quiet']);
   });
 
-  it('carries every warning with a clause saying what to do', () => {
-    // A warning with no action is noise. Every `warn` sentence names a cure
-    // after its semicolon.
-    const warned = [
-      rowOf({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' }),
-      rowOf({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/1080.png' }, 3),
-      rowOf({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' }),
-    ];
+  it('says can’t tell in plain words, rather than naming the mechanism', () => {
+    // The maintainer read the panel and asked what `circular` meant, which is
+    // the argument against the word: a verdict has one job, and it is to be
+    // understood without being looked up. The mechanism is exact and it is not
+    // gone — it is the note the row carries, one opening away, and the case
+    // below is where every word of it is asserted.
+    expect(
+      verdictOf({ srcset: TWO, sizes: 'auto', renderedWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
+    ).toEqual(['can’t tell', 'quiet']);
+  });
 
-    for (const row of warned) {
-      expect(row.verdict.tone).toBe('warn');
-      expect(row.why).toMatch(/; (?:an empty cache is the only way|add a candidate|check what set)/);
-    }
+  it('names every verdict in plain words a reader needs no glossary for', () => {
+    // The closed list, so a word that needs looking up cannot arrive quietly.
+    // Each is either an outcome (`fit`, `oversized`, `undersized`) or a plain
+    // statement that the panel cannot answer — and not one of them is a term
+    // of art.
+    const words = [
+      verdictOf({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' }),
+      verdictOf({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' }),
+      verdictOf({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' }),
+      verdictOf({ srcset: TWO, sizes: 'auto', renderedWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
+      verdictOf({ srcset: TWO, sizes: 'auto', renderedWidth: 0 }),
+      verdictOf({ srcset: TWO, sizes: '33vw', currentSrc: '' }),
+      verdictOf({ srcset: TWO, sizes: '(min-width: 100px) wide', currentSrc: 'https://example.com/i/640.png' }),
+      verdictOf({ currentSrc: 'https://example.com/px.gif' }),
+    ].map(([word]) => word);
+
+    expect(words).toEqual([
+      'fit',
+      'oversized',
+      'undersized',
+      'can’t tell',
+      'no width',
+      'not loaded',
+      'unknown',
+      'no choice',
+    ]);
   });
 });
 
@@ -616,15 +909,28 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
       currentSrc: 'https://example.com/i/1080.png',
     });
 
-    expect([row.verdict.word, row.verdict.tone]).toEqual(['circular', 'quiet']);
+    expect([row.verdict.word, row.verdict.tone]).toEqual(['can’t tell', 'quiet']);
+    // The clause says the consequence, which is that there is nothing here to
+    // check: the file laid the image out, the width became `needed`, `needed`
+    // produced the pick, and the pick then agreed with the file.
     expect(row.why).toBe(
+      'The width came from the loaded file, so the pick cannot disagree with it.',
+    );
+    // And the mechanism is intact, one opening away, in the two paragraphs the
+    // row carries: the arithmetic as it ran, and why its agreement is worth
+    // nothing. The tail the sentence used to carry is gone from it because
+    // this is where it said the same thing — twice in one disclosure would be
+    // the reader reading it twice.
+    expect(row.notes).toEqual([
       'Your screen is 1440 px wide at DPR 1 (standard); sizes is auto, and the width came from ' +
         'layout: 1080 px, so it needs 1080 device pixels — and 1080w is the smallest file that ' +
-        'covers that. But that width came from layout, and for an image the page gives no width ' +
-        'of its own the layout width is the width of the file the browser already held — so the ' +
-        'pick may agree with the loaded file because one produced the other; an empty cache is ' +
-        'the only way to tell.',
-    );
+        'covers that.',
+      'sizes resolved to auto, so the width above is the width this render laid the image out ' +
+        'at — and for an image the page gives no width of its own, that is the width of ' +
+        'whichever file the browser already held. Every marked figure descends from it, so a ' +
+        'prediction that agrees with the loaded file may agree because one produced the other. ' +
+        'An empty cache is the only way to tell.',
+    ]);
   });
 
   it('counts the src attribute as the 1x candidate HTML says it is', () => {
@@ -642,10 +948,11 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
     const one = rowOf(offered);
     expect([one.verdict.word, one.verdict.tone]).toEqual(['fit', 'good']);
     expect(one.loaded).toBe('src (1x)');
-    expect(one.why).toBe(
+    expect(one.why).toBe('src (1x) is the smallest density at or above your pixel ratio.');
+    expect(one.notes).toEqual([
       'Your screen is DPR 1 (standard) and no candidate carries a width, so the ratio decided ' +
         'alone — and src (1x) is the smallest density at or above it.',
-    );
+    ]);
     expect(said(one.steps)).toEqual([
       'clause used  x descriptors only',
       'needed  DPR 1 (standard)',
@@ -655,12 +962,13 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
     // The same tag on a retina screen, where the ratio picks the other one.
     const two = rowOf(offered, 2);
     expect([two.verdict.word, two.verdict.tone]).toEqual(['undersized', 'warn']);
-    expect(two.why).toBe(
+    expect(two.why).toBe('2x covers your pixel ratio, and src (1x) does not.');
+    expect(two.notes).toEqual([
       'The arithmetic picks 2x — your screen is DPR 2 (retina) and no candidate carries a ' +
         'width, so the ratio decided alone — but the browser loaded src (1x), which does not ' +
         'cover the pixels needed above, so the image is upscaled wherever the page draws it at ' +
         'that size; check what set this src.',
-    );
+    ]);
   });
 
   it('leaves a src attribute out where the srcset already answers for it', () => {
@@ -689,11 +997,11 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
       ),
     ).toContain('candidates  1x (picked), 2x');
     expect(
-      rowOf({ srcAttribute: '/i/one.png', currentSrc: 'https://example.com/i/one.png' }).why,
-    ).toBe(
+      rowOf({ srcAttribute: '/i/one.png', currentSrc: 'https://example.com/i/one.png' }).notes,
+    ).toEqual([
       'No srcset, so your device made no difference here; the src attribute is the only file on ' +
         'offer.',
-    );
+    ]);
   });
 
   it('says a zero width is a box this render drew, and blames no descriptor for it', () => {
@@ -703,18 +1011,22 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
     const row = rowOf({ srcset: TWO, sizes: 'auto', renderedWidth: 0, loading: 'lazy' });
 
     expect([row.verdict.word, row.verdict.tone]).toEqual(['no width', 'quiet']);
-    expect(row.why).toBe(
+    // Two notes, because an `auto` clause resolved to this width as well as
+    // failing to give one: the second is the same argument every marked figure
+    // on the panel carries, and a box of zero is a marked figure.
+    expect(row.notes[0]).toBe(
       'Sizes is auto, and the width came from layout: 0 px, so there was no width to select ' +
         'against and nothing was picked — an image this render drew no box for, such as a lazy ' +
         'one below the fold, is the ordinary cause. The srcset is not what to look at here.',
     );
+    expect(row.notes).toHaveLength(2);
     // And the same for a page that wrote the zero itself, which is the other
     // way core arrives at no width at all.
-    expect(rowOf({ srcset: TWO, sizes: '0px' }).why).toBe(
+    expect(rowOf({ srcset: TWO, sizes: '0px' }).notes).toEqual([
       'Sizes gives it 0px, so there was no width to select against and nothing was picked — an ' +
         'image this render drew no box for, such as a lazy one below the fold, is the ordinary ' +
         'cause. The srcset is not what to look at here.',
-    );
+    ]);
   });
 
   it('names a held copy as the likely cause of a larger file rather than as the cause', () => {
@@ -728,14 +1040,14 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
         sizes: '33vw',
         renderedWidth: 475,
         currentSrc: 'https://example.com/i/1080.png',
-      }).why,
-    ).toBe(
+      }).notes,
+    ).toEqual([
       'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
         'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser loaded 1080w, ' +
         'which is larger. A held copy reused rather than chosen again is the likeliest cause, ' +
         'and a viewport that shrank after load or script that rewrote sizes or srcset would read ' +
         'the same; an empty cache is the only way to see the real pick.',
-    );
+    ]);
   });
 
   it('claims a stretch only where the loaded file falls short of the figure above', () => {
@@ -744,13 +1056,13 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
     // `sizes` asked for, not what the page drew, so the honest claim names the
     // figure the row already shows and says the upscale follows from it.
     expect(
-      rowOf({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' }).why,
-    ).toBe(
+      rowOf({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' }).notes,
+    ).toEqual([
       'The arithmetic picks 1080w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
         'it 100vw, which is 1440 px, so it needs 1440 device pixels — but the browser loaded ' +
         '640w, which does not cover the pixels needed above, so the image is upscaled wherever ' +
         'the page draws it at that size; check what set this src.',
-    );
+    ]);
   });
 
   it('ranks two candidates at one descriptor as neither larger nor smaller', () => {
@@ -764,12 +1076,15 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
     });
 
     expect([row.verdict.word, row.verdict.tone]).toEqual(['fit', 'good']);
-    expect(row.why).toBe(
+    expect(row.why).toBe('Needs 320 px, and 640w is the smallest file that covers it.');
+    // The tie is a caveat about the file name beside the headline rather than
+    // an outcome, so it went behind the disclosure with the rest of them.
+    expect(row.notes).toEqual([
       'Your screen is 1440 px wide at DPR 1 (standard); sizes gives it 320px, so it needs 320 ' +
         'device pixels — and 640w is the smallest file that covers that. The browser loaded ' +
         '640w, which is a different file at the same descriptor, so the pixels are the same ' +
         'either way.',
-    );
+    ]);
 
     // And where neither of the two covers the need, the stretch is the
     // srcset's and not the browser's — the tie is still a tie.
@@ -779,12 +1094,13 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
       currentSrc: 'https://example.com/i/a.png',
     });
     expect([short.verdict.word, short.verdict.tone]).toEqual(['undersized', 'warn']);
-    expect(short.why).toBe(
+    expect(short.why).toBe('Needs 1440 px, and 640w is the largest file on offer.');
+    expect(short.notes).toEqual([
       'Your screen is 1440 px wide at DPR 1 (standard); sizes gives it 100vw, which is 1440 px, ' +
         'so it needs 1440 device pixels — no file covers that, so 640w, the largest on offer, is ' +
         'stretched to fit; add a candidate above 640w. The browser loaded 640w, which is a ' +
         'different file at the same descriptor, so the pixels are the same either way.',
-    );
+    ]);
   });
 
   it('is fit for a coarse candidate list, because the browser chose correctly', () => {
@@ -797,10 +1113,11 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
     const row = rowOf({ srcset: TWO, sizes: '100px', currentSrc: 'https://example.com/i/640.png' });
 
     expect([row.verdict.word, row.verdict.tone]).toEqual(['fit', 'good']);
-    expect(row.why).toBe(
+    expect(row.why).toBe('Needs 100 px, and 640w is the smallest file that covers it.');
+    expect(row.notes).toEqual([
       'Your screen is 1440 px wide at DPR 1 (standard); sizes gives it 100px, so it needs 100 ' +
         'device pixels — and 640w is the smallest file that covers that.',
-    );
+    ]);
   });
 });
 

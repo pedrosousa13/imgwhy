@@ -346,7 +346,7 @@ describe('the panel a click injects', () => {
     expect(host.getElementById(HOST_ID)?.parent?.name).toBe('html');
   });
 
-  it('writes the head as two inputs and a count, one item per image, and the footer', () => {
+  it('writes the head as two inputs and the counts, one item per image, and the footer', () => {
     const host = page();
     inPage(source, host);
     const nodes = nodesIn(host);
@@ -360,7 +360,10 @@ describe('the panel a click injects', () => {
       'dt: pixel ratio',
       'dd: DPR 1 (standard)',
     ]);
-    expect(said(host)).toContain('p: 2 images');
+    // The counts rather than the count: how much there is to read, and how
+    // much of it is a problem. `explain.test.ts` holds the wording and the
+    // order; this holds that the panel writes it where the count used to be.
+    expect(said(host)).toContain('p: 2 images · 1 oversized · 1 fit');
   });
 
   it('heads every row with the verdict, then the descriptor that loaded, then the name', () => {
@@ -375,17 +378,19 @@ describe('the panel a click injects', () => {
 
     expect(
       headings.map((h2) => h2.children.map((node) => `${node.name}: ${node.textContent}`)),
+    // The oversized row first, because that is the order the list shows: the
+    // reading held the fit one first and the panel puts the findings on top.
     ).toEqual([
-      ['output: fit', 'button: 640w640.png', 'mark: cache'],
       ['output: oversized', 'button: 1080w1080.png', 'mark: cache'],
+      ['output: fit', 'button: 640w640.png', 'mark: cache'],
     ]);
     expect(
       headings.map((h2) =>
         h2.children[1]?.children.map((node) => `${node.name}: ${node.textContent}`),
       ),
     ).toEqual([
-      ['code: 640w', 'small: 640.png'],
       ['code: 1080w', 'small: 1080.png'],
+      ['code: 640w', 'small: 640.png'],
     ]);
   });
 
@@ -399,8 +404,8 @@ describe('the panel a click injects', () => {
     const verdicts = nodesIn(host).filter((node) => node.name === 'output');
 
     expect(verdicts.map((node) => [node.textContent, node.className])).toEqual([
-      ['fit', 'good'],
       ['oversized', 'warn'],
+      ['fit', 'good'],
     ]);
   });
 
@@ -418,13 +423,8 @@ describe('the panel a click injects', () => {
       expect(top?.children.map((node) => node.name)).toEqual(['img', 'h2', 'p']);
     }
     expect(rows.map((row) => row.children[0]?.children[2]?.textContent)).toEqual([
-      'Your screen is 1440 px wide at DPR 1 (standard); sizes gives it 33vw, which is 475 px, so ' +
-        'it needs 475 device pixels — and 640w is the smallest file that covers that.',
-      'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
-        'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser loaded 1080w, ' +
-        'which is larger. A held copy reused rather than chosen again is the likeliest cause, ' +
-        'and a viewport that shrank after load or script that rewrote sizes or srcset would read ' +
-        'the same; an empty cache is the only way to see the real pick.',
+      'Needs 475 px, and 640w covers it, so 1080w is larger than needed.',
+      'Needs 475 px, and 640w is the smallest file that covers it.',
     ]);
   });
 
@@ -441,8 +441,23 @@ describe('the panel a click injects', () => {
 
     expect(steps?.name).toBe('details');
     expect(steps?.open).toBe(false);
-    expect(steps?.children.map((node) => node.name)).toEqual(['summary', 'dl', 'details']);
+    // The reasoning first and the figures after it, which is the order a
+    // reader who opened the row asks them in: the sentence the collapsed row
+    // no longer carries, and then the arithmetic it came from.
+    expect(steps?.children.map((node) => node.name)).toEqual([
+      'summary',
+      'p',
+      'dl',
+      'details',
+    ]);
     expect(steps?.children[0]?.textContent).toBe('why, step by step');
+    expect(steps?.children[1]?.textContent).toBe(
+      'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
+        'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser loaded 1080w, ' +
+        'which is larger. A held copy reused rather than chosen again is the likeliest cause, ' +
+        'and a viewport that shrank after load or script that rewrote sizes or srcset would read ' +
+        'the same; an empty cache is the only way to see the real pick.',
+    );
     expect(files?.open).toBe(false);
     expect(files?.children.map((node) => node.name)).toEqual(['summary', 'dl']);
     expect(files?.children[0]?.textContent).toBe('files and where it sat');
@@ -467,7 +482,7 @@ describe('the panel a click injects', () => {
       'dt: needed',
       'dd: 475px × DPR 1 = 475px',
       'dt: candidates',
-      'dd: 640w (picked), 1080w',
+      'dd: 640w (picked), 1080w (loaded)',
     ]);
     // `loaded` comes back as the URL and the mark's word run together, and
     // that is a real `textContent` read rather than a quirk of the stub: the
@@ -475,17 +490,19 @@ describe('the panel a click injects', () => {
     // descendants. It is what says the mark is inside the value it qualifies.
     expect(files).toEqual([
       'dt: loaded',
-      'dd: https://example.com/i/640.pngcache',
+      'dd: https://example.com/i/1080.pngcache',
       'dt: 640w',
       'dd: https://example.com/i/640.png',
       'dt: 1080w',
       'dd: https://example.com/i/1080.png',
       'dt: alt',
-      'dd: A person at a desk',
+      'dd: (no alt attribute)',
       'dt: rendered box',
       'dd: 475×317',
+      'dt: loading',
+      'dd: lazy',
       'dt: selector',
-      'dd: html > body > img:nth-of-type(1)',
+      'dd: html > body > img:nth-of-type(2)',
       'dt: bytes',
       'dd: unknown',
     ]);
@@ -507,8 +524,8 @@ describe('the panel a click injects', () => {
     // `dd`: `textContent` removes every existing child, so the value has to be
     // written before the mark is appended and never after.
     expect(marks.filter((node) => node.parent?.name === 'dd').map((node) => node.parent?.textContent)).toEqual([
-      'https://example.com/i/640.pngcache',
       'https://example.com/i/1080.pngcache',
+      'https://example.com/i/640.pngcache',
     ]);
     // And every chip says what it means, where the mark is.
     expect([...new Set(marks.map((node) => node.title))]).toEqual([
@@ -545,6 +562,8 @@ describe('the panel a click injects', () => {
 
     expect(nodesIn(host).filter((node) => node.name === 'li')).toEqual([]);
     expect(said(host)).toContain('p: 0 images');
+    // And no line about the order of a list with nothing in it.
+    expect(said(host).some((line) => line.startsWith('p: Showing'))).toBe(false);
   });
 
   it('says every word as text rather than as markup', () => {
@@ -555,6 +574,295 @@ describe('the panel a click injects', () => {
     inPage(source, host);
 
     expect(said(host).some((line) => line.startsWith('h1: imgwhy'))).toBe(true);
+  });
+});
+
+/**
+ * The collapsed row, measured, because the report against the panel it
+ * replaces was a measurement.
+ *
+ * A `circular` row ran about sixty words over seven lines, so three rows
+ * filled the panel and finding the two that were wrong meant scrolling past
+ * nineteen that were not. "Two or three lines" is what the issue asks for
+ * instead, and there is no browser here to lay one out — so the measure is the
+ * one the stylesheet itself names, and the sentence is wrapped at it.
+ *
+ * ## What still gets past
+ *
+ * - **A heading the page made long.** The row's first line is the verdict, the
+ *   descriptor and the file name, and two of those three are page content: a
+ *   `srcset` descriptor a page invented can be any length at all, and so can a
+ *   file name. Nothing here can bound them and nothing should try to — the
+ *   panel shows what the page shipped. What is bounded is the sentence, which
+ *   is imgwhy's own words, and that is what this measures.
+ * - **What a browser actually fits on a line.** A `ch` is the advance of the
+ *   digit zero, which in this font stack is wider than the average lowercase
+ *   letter, so wrapping at 62 characters models a 62ch column conservatively:
+ *   the real column fits more, never fewer.
+ */
+describe('the collapsed row, at the measure the stylesheet gives it', () => {
+  const source = String(renderPanel);
+
+  /** The column the row's sentence is set in, in characters, out of the sheet. */
+  const measure = (host: Page): number => {
+    const rule = /header\s*>\s*p\s*\{([^}]*)\}/.exec(stylesheetIn(host))?.[1] ?? '';
+    const found = /max-width:\s*(\d+)ch/.exec(rule);
+    if (found?.[1] === undefined) throw new Error('the sentence is set to no measure at all');
+    return Number(found[1]);
+  };
+
+  /** How many lines one sentence takes, wrapped at `chars` characters. */
+  const linesIn = (text: string, chars: number): number => {
+    let lines = 1;
+    let used = 0;
+    for (const word of text.split(' ')) {
+      if (used === 0) used = word.length;
+      else if (used + 1 + word.length <= chars) used += 1 + word.length;
+      else {
+        lines += 1;
+        used = word.length;
+      }
+    }
+    return lines;
+  };
+
+  /**
+   * One image per verdict, each written to make its own wording as long as it
+   * gets: four-figure pixel counts, four-figure descriptors, and a candidate
+   * list long enough that its count is two digits.
+   *
+   * At 1440 and DPR 3, which needs 4320 device pixels — the widest figure a
+   * real device produces, and the retina desktop the design's own device set
+   * ends at.
+   */
+  const longest = (): Panel =>
+    panelOf(
+      reading({
+        dpr: 3,
+        images: [
+          // fit: the pick covers it and the pick is what loaded.
+          image({ srcset: '/i/4320.png 4320w, /i/5760.png 5760w', sizes: '100vw', currentSrc: 'https://example.com/i/4320.png' }),
+          // oversized: the pick covers it and something larger loaded.
+          image({ srcset: '/i/4320.png 4320w, /i/5760.png 5760w', sizes: '100vw', currentSrc: 'https://example.com/i/5760.png' }),
+          // undersized: nothing on offer covers it.
+          image({ srcset: '/i/1920.png 1920w, /i/2880.png 2880w', sizes: '100vw', currentSrc: 'https://example.com/i/2880.png' }),
+          // undersized: the loaded file is smaller than the pick.
+          image({ srcset: '/i/1920.png 1920w, /i/4320.png 4320w', sizes: '100vw', currentSrc: 'https://example.com/i/1920.png' }),
+          // can't tell: the width the pick was made against came from layout.
+          image({ srcset: '/i/4320.png 4320w, /i/5760.png 5760w', sizes: 'auto', renderedWidth: 1440, currentSrc: 'https://example.com/i/4320.png' }),
+          // not loaded.
+          image({ srcset: '/i/4320.png 4320w, /i/5760.png 5760w', sizes: '100vw' }),
+          // unknown: the loaded file is not on offer.
+          image({ srcset: '/i/4320.png 4320w, /i/5760.png 5760w', sizes: '100vw', currentSrc: 'https://example.com/i/other.png' }),
+          // unknown: a w and an x that cannot be ranked.
+          image({ srcset: '/i/4320.png 4320w, /i/hi.png 2x', sizes: '100vw', currentSrc: 'https://example.com/i/4320.png' }),
+          // unknown: a sizes clause that would not read.
+          image({ srcset: '/i/4320.png 4320w, /i/5760.png 5760w', sizes: '(min-width: 100px) as wide as the page is', currentSrc: 'https://example.com/i/4320.png' }),
+          // no width: a box this render drew nothing for.
+          image({ srcset: '/i/4320.png 4320w, /i/5760.png 5760w', sizes: 'auto', loading: 'lazy' }),
+          // no choice: twelve descriptors naming one file.
+          image({
+            srcset: [320, 480, 640, 800, 960, 1280, 1440, 1920, 2560, 2880, 3840, 5760]
+              .map((at) => `/clear.png ${at}w`)
+              .join(', '),
+            sizes: '100vw',
+            currentSrc: 'https://example.com/clear.png',
+          }),
+          // no choice: no srcset at all.
+          image({ currentSrc: 'https://example.com/px.gif' }),
+        ],
+      }),
+    );
+
+  it('says every verdict inside two lines, so a row with its heading is three', () => {
+    const host = page();
+    const panel = longest();
+    inPage(source, host, panel);
+    const chars = measure(host);
+
+    // Every verdict there is, so a wording added later is measured by the
+    // commit that adds it rather than by whoever next opens the panel.
+    expect([...new Set(panel.rows.map((row) => row.verdict.word))].sort()).toEqual([
+      'can’t tell',
+      'fit',
+      'no choice',
+      'no width',
+      'not loaded',
+      'oversized',
+      'undersized',
+      'unknown',
+    ]);
+    expect(chars).toBe(62);
+
+    const over = panel.rows
+      .map((row) => row.why)
+      .filter((why) => linesIn(why, chars) > 2)
+      .map((why) => `${linesIn(why, chars)} lines: ${why}`);
+
+    expect(over).toEqual([]);
+  });
+
+  it('is the sentence the row actually shows, and the row shows nothing else', () => {
+    // The measurement above is worth nothing if the node holds something
+    // other than `why`, so the two are read off the same tree: the row's
+    // header is a thumbnail, a heading and one paragraph, and the paragraph is
+    // the clause.
+    const host = page();
+    const panel = longest();
+    inPage(source, host, panel);
+    const tops = nodesIn(host).filter((node) => node.name === 'header');
+
+    expect(tops.map((top) => top.children.filter((node) => node.name === 'p').length)).toEqual(
+      panel.rows.map(() => 1),
+    );
+    // Sorted on both sides, because the list is not in the order the panel was
+    // handed: what this asks is that every sentence shown is a row's own
+    // clause and that no row is shown without one.
+    expect(tops.map((top) => top.children[2]?.textContent).sort()).toEqual(
+      panel.rows.map((row) => row.why).sort(),
+    );
+  });
+
+  it('holds every caveat behind the disclosure, and none of it in the row', () => {
+    // The other half of the same claim: the words that used to crowd the row
+    // are all still in the panel, and every one of them is inside a `details`
+    // that is closed.
+    const host = page();
+    inPage(source, host, longest());
+    const rows = nodesIn(host).filter((node) => node.name === 'li');
+
+    for (const row of rows) {
+      const said = row.children[0]?.children[2]?.textContent ?? '';
+      expect(said).not.toMatch(/held copy|empty cache|1440 px wide|DPR /);
+    }
+    // And the hedges are in the openings, which are shut.
+    const opened = nodesIn(host).filter((node) => node.name === 'details');
+    expect(opened.filter((node) => node.open).map((node) => node.name)).toEqual(['details']);
+    expect(
+      nodesIn(host)
+        .filter((node) => node.name === 'p' && node.parent?.name === 'details')
+        .some((node) => node.textContent.includes('an empty cache is the only way')),
+    ).toBe(true);
+  });
+});
+
+/**
+ * The order the list is in, and the line that says so.
+ *
+ * The list put its rows in document order and said nothing about it, which is
+ * the right default for a page of three images and the wrong one for
+ * twenty-three: the rows a reader came for are the ones that are wrong, and
+ * they were scattered through nineteen that were not. So warnings come first,
+ * document order is one click away, and the panel says which of the two is
+ * showing — a list whose order is a mystery is worse than either order.
+ *
+ * `pointing.test.ts` holds the half that matters most, which is that a sorted
+ * row still marks and scrolls to the image it describes.
+ *
+ * ## What still gets past
+ *
+ * - **A reader who has scrolled past the line.** It sits at the top of the
+ *   list, inside the one scroller the panel has, so twelve rows down it is out
+ *   of view. Keeping it there means `position: sticky`, and a bar pinned over
+ *   the scroller obscures the row a keyboard has just scrolled to unless the
+ *   scroll padding grows to clear it — which is a second arrangement to keep
+ *   right, for a line a reader has already read once.
+ * - **Whether the change is announced.** The control's own label is what
+ *   changes with the order — "Show document order" becomes "Show warnings
+ *   first" — and focus stays on it, so the new name is what a reader hears
+ *   next. Saying it out loud as well means an `aria-live` region, which is an
+ *   attribute this package cannot write: `privacy.test.ts` holds its written
+ *   properties to the seven the panel cannot be built without, and a label
+ *   that already says the state is not a reason to widen that list.
+ * - **A chosen order that outlives the panel.** There is nowhere to keep one.
+ *   The design allows no storage, so the order lives in the open panel and the
+ *   next click opens with warnings first again.
+ */
+describe('the order the panel lists its rows in', () => {
+  const source = String(renderPanel);
+
+  /** The line that says which order is showing, and the control beside it. */
+  const orderIn = (host: Page): El => {
+    const [card] = nodesIn(host).filter((node) => node.name === 'details');
+    const found = card?.children.find((node) => node.name === 'p');
+    if (found === undefined) throw new Error('the panel says nothing about the order');
+    return found;
+  };
+
+  /** The control that changes the order, which is the line's one child. */
+  const swapIn = (host: Page): El => {
+    const [found] = orderIn(host).children;
+    if (found === undefined) throw new Error('the order says nothing a click can change');
+    return found;
+  };
+
+  it('says which order is showing, with the other one named on the control', () => {
+    // The words run together because they are two nodes of one line and a
+    // `textContent` read concatenates a node's descendants — which is what
+    // says the control is inside the line that states the order rather than
+    // somewhere else in the panel.
+    const host = page();
+    inPage(source, host);
+
+    expect(orderIn(host).textContent).toBe('Showing warnings firstShow document order');
+    expect(orderIn(host).children.map((node) => `${node.name}: ${node.textContent}`)).toEqual([
+      'button: Show document order',
+    ]);
+  });
+
+  it('puts the rows that are a finding first, and says so', () => {
+    const host = page();
+    inPage(source, host);
+
+    // The panel was handed a fit and then an oversized, in that order.
+    expect(PANEL.rows.map((row) => row.verdict.word)).toEqual(['fit', 'oversized']);
+    expect(
+      nodesIn(host)
+        .filter((node) => node.name === 'output')
+        .map((node) => node.textContent),
+    ).toEqual(['oversized', 'fit']);
+  });
+
+  // What a click on that control does is `pointing.test.ts`'s: changing the
+  // order takes a mark down, and a re-ordered row still points at the image it
+  // describes, and both of those are claims about a window and a page rather
+  // than about a tree of nodes.
+
+  it('is a button, so a keyboard reaches it and the platform activates it', () => {
+    // No key handler and no key this panel has taught anybody: a `button`
+    // answers Enter and Space itself, takes focus in order, and carries the
+    // one focus outline the stylesheet draws. `dormant.test.ts` is what would
+    // refuse a `keydown` that tried to do it by hand.
+    const host = page();
+    inPage(source, host);
+    const swap = swapIn(host);
+
+    expect(swap.name).toBe('button');
+    expect([...swap.listeners.keys()]).toEqual(['click']);
+    expect(stylesheetIn(host)).toContain('summary:focus-visible');
+  });
+
+  it('sits outside the summary, so changing the order does not close the panel', () => {
+    // A `button` inside a `summary` is a control inside a control: a click on
+    // it toggles the disclosure it sits in, so re-ordering the list would
+    // collapse the panel holding it.
+    const host = page();
+    inPage(source, host);
+    const bar = orderIn(host);
+    const [card] = nodesIn(host).filter((node) => node.name === 'details');
+
+    expect(bar.parent?.name).toBe('details');
+    expect(card?.children.map((node) => node.name)).toEqual(['summary', 'p', 'ol', 'footer']);
+  });
+
+  it('says nothing about the order of a list with one row in it', () => {
+    // There is no order to state and nothing to re-order, so the line would be
+    // a control that does nothing on every page with one image on it.
+    const host = page();
+    inPage(source, host, panelOf(reading({ images: [image({ at: 0 })] })));
+    const [card] = nodesIn(host).filter((node) => node.name === 'details');
+
+    expect(card?.children.map((node) => node.name)).toEqual(['summary', 'ol', 'footer']);
   });
 });
 

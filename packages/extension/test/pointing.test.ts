@@ -1146,6 +1146,222 @@ describe('a lazy image nothing has requested, from the click through to the thum
   });
 });
 
+/**
+ * The list re-ordered, which is the half of this slice that could lose an
+ * image.
+ *
+ * A row's handle is the index into `document.images` the reading minted, and
+ * every claim in this file rests on it: the mark is drawn from the box of
+ * `document.images[row.at]`, confirmed against the file the row recorded, and
+ * the scroll goes to the same element. A sorted view that carried display
+ * positions rather than rows would point every row at whichever image now sits
+ * where it is shown — silently, with no error anywhere, on the page where the
+ * order actually changed something. So the cases below re-order a page whose
+ * rows are deliberately not in the order they are shown, and then ask the
+ * panel to mark and to scroll.
+ *
+ * ## What still gets past
+ *
+ * - **Which row a reader believes they are looking at.** The panel says which
+ *   order is showing and `panel.test.ts` holds that; whether a reader read it
+ *   is not something a test can ask.
+ */
+describe('the list, re-ordered', () => {
+  /** The two files the page below chooses between. */
+  const SMALL = 'https://example.com/i/640.png';
+  const LARGE = 'https://example.com/i/1080.png';
+
+  /**
+   * Three images whose verdicts put the middle one first.
+   *
+   * A fit, an oversized, a fit — so document order and warnings-first order
+   * disagree about every row, and a row that pointed at its display position
+   * would mark the wrong image on all three.
+   */
+  const three = (): Page => {
+    const host = page();
+    const body = host.documentElement.children[0];
+    if (body === undefined) throw new Error('the page has no body');
+
+    host.images.push(imageIn(host, body, { width: 640, height: 360, top: 100 }, SMALL));
+    host.images.push(imageIn(host, body, { width: 320, height: 180, top: 800 }, LARGE));
+    host.images.push(imageIn(host, body, { width: 96, height: 96, top: 1600 }, SMALL));
+    return host;
+  };
+
+  /** The reading of that page: one `srcset`, one `sizes`, three loaded files. */
+  const rowsOf = (host: Page): Parameters<typeof image>[0][] =>
+    host.images.map((img, at) => ({
+      at,
+      srcset: '/i/640.png 640w, /i/1080.png 1080w',
+      sizes: '33vw',
+      renderedWidth: 475,
+      renderedHeight: 317,
+      currentSrc: img.currentSrc,
+    }));
+
+  /** The line that says which order is showing, and the control on it. */
+  const orderIn = (host: Page): El => {
+    const [card] = of(host, 'details');
+    const found = card?.children.find((node) => node.name === 'p');
+    if (found === undefined) throw new Error('the panel says nothing about the order');
+    return found;
+  };
+
+  const swapIn = (host: Page): El => {
+    const [found] = orderIn(host).children;
+    if (found === undefined) throw new Error('the order says nothing a click can change');
+    return found;
+  };
+
+  /** The verdict of every row, in the order the list shows them. */
+  const shown = (host: Page): string[] => of(host, 'output').map((node) => node.textContent);
+
+  it('shows the oversized row first, which is not where the reading put it', () => {
+    const host = three();
+    render(host, rowsOf(host));
+
+    expect(shown(host)).toEqual(['oversized', 'fit', 'fit']);
+    expect(orderIn(host).textContent).toBe('Showing warnings firstShow document order');
+  });
+
+  it('marks the image the first row describes, and not the first image on the page', () => {
+    // The criterion, and the one most likely to break without a sound: the row
+    // shown first is the reading's second, so the box drawn has to be the
+    // second image's — 320×180 at 800 — and never the first image's 640×360.
+    const host = three();
+    render(host, rowsOf(host));
+
+    dispatch(rows(host)[0], 'mouseenter');
+
+    expect(drawn(host)).toBe(
+      'div { display: block; top: 800px; left: 0px; width: 320px; height: 180px }',
+    );
+  });
+
+  it('scrolls to the image the first row describes, and not to the first image', () => {
+    const host = three();
+    const win = windowOf(host);
+    render(host, rowsOf(host), win);
+
+    dispatch(nameIn(rows(host)[0]), 'click');
+
+    expect(win.scrolled).toEqual([{ top: 800, behavior: 'instant' }]);
+  });
+
+  it('marks and scrolls to the same image after the order is put back', () => {
+    // Both orders, one page, and the same row: the panel is handed the rows in
+    // document order and the row for the oversized image is the second of the
+    // three, so a click on it goes to 800 whichever position it is shown in.
+    const host = three();
+    const win = windowOf(host);
+    render(host, rowsOf(host), win);
+
+    dispatch(swapIn(host), 'click');
+    expect(shown(host)).toEqual(['fit', 'oversized', 'fit']);
+    expect(orderIn(host).textContent).toBe('Showing document orderShow warnings first');
+
+    dispatch(rows(host)[1], 'mouseenter');
+    expect(drawn(host)).toBe(
+      'div { display: block; top: 800px; left: 0px; width: 320px; height: 180px }',
+    );
+
+    dispatch(nameIn(rows(host)[1]), 'click');
+    expect(win.scrolled).toEqual([{ top: 800, behavior: 'instant' }]);
+  });
+
+  it('points every row at its own image, in both orders, which is the whole claim', () => {
+    // Read as a table rather than a case, because "the handle survives" is a
+    // claim about all three rows at once: each row is hovered in turn and the
+    // box drawn is compared with the box of the image its own `at` names.
+    const host = three();
+    render(host, rowsOf(host));
+    const boxes = host.images.map(
+      (img) =>
+        `div { display: block; top: ${img.rect.top}px; left: 0px; width: ${img.rect.width}px; ` +
+        `height: ${img.rect.height}px }`,
+    );
+
+    /** Every row, as the box it marks against the box it should mark. */
+    const marked = (): string[] =>
+      rows(host).map((row, at) => {
+        dispatch(row, 'mouseenter');
+        const drew = drawn(host);
+        dispatch(row, 'mouseleave');
+        const named = of(host, 'button')[at + 1]?.children[1]?.textContent;
+        return `${named ?? '?'}: ${drew}`;
+      });
+
+    // Warnings first: the second image's box, then the first's, then the third's.
+    expect(marked()).toEqual([
+      `1080.png: ${boxes[1]}`,
+      `640.png: ${boxes[0]}`,
+      `640.png: ${boxes[2]}`,
+    ]);
+
+    dispatch(swapIn(host), 'click');
+
+    // Document order: each row against the image it sat at.
+    expect(marked()).toEqual([
+      `640.png: ${boxes[0]}`,
+      `1080.png: ${boxes[1]}`,
+      `640.png: ${boxes[2]}`,
+    ]);
+  });
+
+  it('takes a mark down when the order changes, because the row it was drawn for is gone', () => {
+    // The list is written again, so the item the mark's closure holds — and the
+    // heading a `not found` word would have gone on — are nodes in no document.
+    // A box left up would be redrawn from one of them, over an image whose row
+    // a reader can no longer find.
+    const host = three();
+    const win = windowOf(host);
+    render(host, rowsOf(host), win);
+    dispatch(rows(host)[0], 'mouseenter');
+    expect(drawn(host)).not.toBe('');
+
+    dispatch(swapIn(host), 'click');
+
+    expect(drawn(host)).toBe('');
+    expect([...win.listeners.keys()]).toEqual([]);
+  });
+
+  it('leaves one row per image and one listener set, rather than a second copy of each', () => {
+    const host = three();
+    render(host, rowsOf(host));
+
+    dispatch(swapIn(host), 'click');
+
+    expect(rows(host)).toHaveLength(3);
+    expect(of(host, 'img')).toHaveLength(3);
+    expect(rows(host).map((row) => [...row.listeners.keys()].sort())).toEqual([
+      ['focusin', 'focusout', 'mouseenter', 'mouseleave'],
+      ['focusin', 'focusout', 'mouseenter', 'mouseleave'],
+      ['focusin', 'focusout', 'mouseenter', 'mouseleave'],
+    ]);
+    // And nothing the re-order wrote is on a page element, which is what the
+    // closing click's one `remove()` rests on.
+    expect(listenersIn(host)).toEqual([]);
+  });
+
+  it('writes nothing to a page element while it re-orders, and scrolls nothing', () => {
+    const host = three();
+    const win = windowOf(host);
+    const under = (at: Page): string[] =>
+      at
+        .light()
+        .filter((node) => node !== at.documentElement && node.id !== HOST_ID)
+        .map(written);
+    const before = under(host);
+
+    render(host, rowsOf(host), win);
+    dispatch(swapIn(host), 'click');
+
+    expect(under(host)).toEqual(before);
+    expect(win.scrolled).toEqual([]);
+  });
+});
+
 describe('the panel, laid out so twenty-three images can be read', () => {
   /** Twenty-three images, which is the page the maintainer sent a screenshot of. */
   const many = (): Page => {
@@ -1211,11 +1427,7 @@ describe('the panel, laid out so twenty-three images can be read', () => {
     expect(top?.children.map((node) => node.textContent)).toEqual([
       '',
       'oversized1080w1080.pngcache',
-      'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
-        'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser loaded 1080w, ' +
-        'which is larger. A held copy reused rather than chosen again is the likeliest cause, ' +
-        'and a viewport that shrank after load or script that rewrote sizes or srcset would read ' +
-        'the same; an empty cache is the only way to see the real pick.',
+      'Needs 475 px, and 640w covers it, so 1080w is larger than needed.',
     ]);
   });
 });

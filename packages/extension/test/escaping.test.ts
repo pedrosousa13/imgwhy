@@ -363,15 +363,30 @@ describe('the panel, given a page written to break out of it', () => {
     expect(nodes.filter((node) => node.name === 'mark')).toHaveLength(6);
   });
 
-  it('says the sentence with the page’s hostile sizes string in it, as text', () => {
-    // The one sentence a collapsed row shows is a `p` in the row's `header`,
-    // and the second image's names the clause at fault — which is the page's
-    // own `<script>` — byte for byte, as the text of that `p`.
+  it('says the clause a collapsed row shows without putting page content in it', () => {
+    // The one clause a collapsed row shows is a `p` in the row's `header`, and
+    // the second image's is imgwhy's own words start to finish. That is a
+    // property worth asserting rather than a coincidence: a `sizes` attribute
+    // is page content of a length the page chooses, and the collapsed row is
+    // the one place in the panel that cannot afford an unbounded string.
     const { nodes } = rendered();
     const sentences = nodes.filter((node) => node.name === 'p' && node.parent?.name === 'header');
 
     expect(sentences).toHaveLength(4);
     expect(sentences[1]?.textContent).toBe(
+      'The sizes clause could not be read, so nothing was picked.',
+    );
+  });
+
+  it('says the page’s hostile sizes string in the reasoning behind the row, as text', () => {
+    // And the clause at fault is still named, byte for byte, one opening down:
+    // the note the row carries is a `p` inside its `details`, which is where
+    // the sentence the collapsed row used to say went. A page's own `<script>`
+    // is words in a paragraph there, because nothing in this panel parses one.
+    const { nodes } = rendered();
+    const notes = nodes.filter((node) => node.name === 'p' && node.parent?.name === 'details');
+
+    expect(notes.map((node) => node.textContent)).toContain(
       "The sizes clause <script>alert('source sizes')</script> could not be read as a length, so " +
         'there is no width to select against and nothing was picked; fix the sizes attribute.',
     );
