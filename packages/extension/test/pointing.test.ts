@@ -740,16 +740,17 @@ describe('a row whose image the page has moved', () => {
 
   it('says so where the image it describes is no longer on the page', () => {
     // #22's commit message claimed this and the panel did not do it: the row
-    // silently marked its neighbour. The word is on the heading, beside the
-    // one that says a held copy could explain the figures, and it says what it
-    // means where it is.
+    // silently marked its neighbour. The word is on the heading, where the
+    // cache mark sits on the rows that earn one, and it says what it means
+    // where it is. These rows earn none — a plain `<img src>` offers one file
+    // and the browser has it — so `not found` stands alone here.
     const host = pageOf(boxes);
     render(host, rowsFor(host));
     removeImage(host, 0);
 
     dispatch(rows(host)[0], 'mouseenter');
 
-    expect(flagsIn(rows(host)[0])).toEqual(['cache', NOT_FOUND]);
+    expect(flagsIn(rows(host)[0])).toEqual([NOT_FOUND]);
     expect(drawn(host)).toBe('');
   });
 
@@ -763,7 +764,7 @@ describe('a row whose image the page has moved', () => {
 
     expect(win.scrolled).toEqual([]);
     expect(win.scrollY).toBe(0);
-    expect(flagsIn(rows(host)[0])).toEqual(['cache', NOT_FOUND]);
+    expect(flagsIn(rows(host)[0])).toEqual([NOT_FOUND]);
   });
 
   it('says so where the file the row names is held by two images it cannot choose between', () => {
@@ -783,7 +784,7 @@ describe('a row whose image the page has moved', () => {
 
     dispatch(rows(host)[2], 'mouseenter');
 
-    expect(flagsIn(rows(host)[2])).toEqual(['cache', NOT_FOUND]);
+    expect(flagsIn(rows(host)[2])).toEqual([NOT_FOUND]);
     expect(drawn(host)).toBe('');
   });
 
@@ -847,7 +848,7 @@ describe('a row whose image the page has moved', () => {
     dispatch(rows(host)[1], 'mouseenter');
 
     expect(drawn(host)).toBe('');
-    expect(flagsIn(rows(host)[1])).toEqual(['cache', NOT_FOUND]);
+    expect(flagsIn(rows(host)[1])).toEqual([NOT_FOUND]);
   });
 
   it('moves the word to the row that is asking, when two rows in a row cannot find one', () => {
@@ -862,17 +863,28 @@ describe('a row whose image the page has moved', () => {
     removeImage(host, 0);
 
     dispatch(rows(host)[0], 'mouseenter');
-    expect(flagsIn(rows(host)[0])).toEqual(['cache', NOT_FOUND]);
+    expect(flagsIn(rows(host)[0])).toEqual([NOT_FOUND]);
 
     dispatch(nameIn(rows(host)[1]), 'focusin');
 
-    expect(flagsIn(rows(host)[0])).toEqual(['cache']);
-    expect(flagsIn(rows(host)[1])).toEqual(['cache', NOT_FOUND]);
+    expect(flagsIn(rows(host)[0])).toEqual([]);
+    expect(flagsIn(rows(host)[1])).toEqual([NOT_FOUND]);
   });
 
-  it('takes the word back off the row when the mark comes down', () => {
+  it('takes the word back off the row and leaves the cache mark beside it standing', () => {
+    // The one case here written for a row that carries both words, because
+    // `remove()` is aimed at a node and a heading holds two: taking the word
+    // off must leave its sibling where it was. The other rows above are plain
+    // `<img src>` rows and earn no mark at all, so this one is given a srcset
+    // the browser did not honour — the loaded file is not the pick, which is
+    // the difference a held copy explains.
     const host = pageOf(boxes);
-    render(host, rowsFor(host));
+    render(
+      host,
+      rowsFor(host).map((fields, at) =>
+        at === 0 ? { ...fields, srcset: `${fileAt(0)} 640w, /i/wide.png 1080w`, sizes: '100vw' } : fields,
+      ),
+    );
     removeImage(host, 0);
 
     dispatch(rows(host)[0], 'mouseenter');

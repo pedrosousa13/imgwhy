@@ -1012,7 +1012,7 @@ export function renderPanel(panel: Panel, reading: Reading): 'opened' {
 
     /**
      * The heading: the verdict, then the descriptor and the name, then the
-     * mark where a file loaded.
+     * mark where the row carries one.
      *
      * `output` is the element the platform has for the result of a
      * calculation, which is what a verdict is. Its class is the tone — one of

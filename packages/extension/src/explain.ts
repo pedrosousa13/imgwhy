@@ -52,6 +52,12 @@ import type { RawImage, Reading } from './read.js';
  * sentence every time and the panel says it once in the footer. What the flag
  * has to be is per figure, so that a reader can see which figures it covers
  * without reading the footer first.
+ *
+ * The flag is no longer sufficient on its own, and `docs/adr/0001` is where
+ * that is argued rather than here: the panel draws a chip where a line is
+ * flagged and the row carries a mark, and `markFor` decides the second half.
+ * The design's sentence above is answered by the footer now, once, about the
+ * panel as a whole.
  */
 export type Line = { label: string; value: string; held: boolean };
 
@@ -200,8 +206,9 @@ export type Row = {
   why: string;
   /**
    * What the cache mark means on this row, said where the mark is. Null where
-   * nothing loaded, because there is then nothing a held copy could have
-   * supplied.
+   * the row carries no mark, which is most rows: `markFor` is the rule, and it
+   * puts the word where a held copy would change the conclusion rather than on
+   * every row a file loaded.
    */
   mark: string | null;
   /** The arithmetic as steps, opened once. */
@@ -631,8 +638,8 @@ const tinyOf = (raw: RawImage): string | null => {
  * own note carries the same reasoning in a form a keyboard reaches — a
  * tooltip is a hover affordance and cannot be the only copy.
  */
-const markOf = (laidOut: boolean): string =>
-  laidOut
+const markOf = (descends: boolean): string =>
+  descends
     ? 'what the browser has, not what it chose — and the width above descends from it'
     : 'what the browser has, not what it chose';
 
@@ -793,6 +800,102 @@ function ranked(loaded: Candidate, picked: Candidate): 'larger' | 'smaller' | 'e
  */
 const fromLayout = (selection: Selection): boolean =>
   selection.kind === 'width' && selection.widthFrom === 'layout-intrinsic';
+
+/**
+ * Whether a width figure this row shows may be the held file's own doing.
+ *
+ * `fromLayout` and a width to point at, which are two different questions and
+ * were one for a slice. A layout width of zero is core reporting nothing to
+ * select against, so a row that has one shows `0px` where its width should be —
+ * and a claim that `0px` descends from the loaded file is a claim about a figure
+ * a reader cannot use. What that row is called depends on the `srcset`: a tag
+ * whose every candidate carries a `w` has nothing to select at all and reads
+ * `no width`, and a `w` candidate beside an `x` one still has a density to
+ * judge, so it is picked and judged normally at a width of zero and can read
+ * anything from `fit` to `can’t tell`. Either way the width is not a figure the
+ * row can point at. `kind` is asked again for the figure that follows it;
+ * `fromLayout` has already answered for it.
+ *
+ * One name for it, because two things read it and they have to agree: the
+ * clause of the mark that says a figure descends from the held file, and the
+ * `held` flag on the figures themselves. A chip on `0px` beside a mark that has
+ * stopped claiming the width would be the two halves of one rule disagreeing on
+ * one row.
+ */
+const descendsFromHeld = (selection: Selection): boolean =>
+  fromLayout(selection) && selection.kind === 'width' && selection.cssPx !== 0;
+
+/**
+ * Whether the cache mark stands on this row, and what it says where it does.
+ *
+ * The whole rule, in one place, because "when the mark appears" is exactly the
+ * kind of rule that decays into a guess: three call sites each deciding it
+ * would be three rules within a slice or two.
+ *
+ * It used to be `has` alone — the mark on every row a file loaded. The argument
+ * for that was sound as far as it went, and it is the footer's: `currentSrc` is
+ * what the browser has, and no reading of a page says whether it chose it. What
+ * it left out is that the same is true of every row. On a page a person has
+ * browsed every image is cached, so the word stood on all twenty-three rows of
+ * the maintainer's own page and distinguished none of them from any other — a
+ * mark that never varies is decoration, and it costs a reader attention on
+ * every row it sits on.
+ *
+ * So it stands where it changes the conclusion, which is the issue's own three
+ * cases:
+ *
+ * - The loaded file is not the file the arithmetic picked — a held copy reused
+ *   rather than chosen again is the likeliest cause of that difference, so the
+ *   mark is what explains the row. Which is `oversized` and `undersized` where
+ *   the loaded file and the pick differ, a different file at the pick's own
+ *   descriptor, a loaded file the `srcset` never offered, two descriptors that
+ *   cannot be ranked, and the one file on offer where the browser has another.
+ * - The verdict rests on the held file, which is `can’t tell` and only that:
+ *   the word exists to say the pick cannot disagree with a width the loaded file
+ *   may have written. Read off the verdict the row actually got rather than
+ *   worked out again from the reading, because a verdict derived twice is a
+ *   verdict that can disagree with itself — and it did. A `w` candidate beside
+ *   an `x` one is judged at a width of zero, so `can’t tell` can arise with no
+ *   width figure to point at, and the clause below then answers no while this
+ *   one answers yes.
+ * - A figure the row shows descends from the held file — `sizes: auto` deferred
+ *   to layout and the page sized nothing itself, so `css px` and every figure
+ *   under it may be the loaded file's own doing. `descendsFromHeld` is that
+ *   question, and it is also what the wording turns on: the clause about the
+ *   width is written only where there is a width to write it about.
+ *
+ * And nowhere else. A row where the browser loaded the pick, whose verdict
+ * stands without the cache and none of whose figures descend from it, is a row
+ * the mark is true of exactly as much as it is true of every other row on the
+ * page.
+ *
+ * Null where nothing loaded, which is where it always was: there is then no
+ * file for a held copy to have supplied.
+ *
+ * `selection` is null at the one site where no arithmetic ran at all — fewer
+ * than two candidates, so nothing was selected and the single candidate on
+ * offer stands in for the pick. A row with no `srcset` offers none, and a
+ * browser that loaded the `src` has then loaded the only file there was.
+ */
+const markFor = (
+  has: boolean,
+  loaded: Candidate | null,
+  picked: Candidate | null,
+  verdict: Verdict,
+  selection: Selection | null,
+): string | null => {
+  if (!has) return null;
+
+  const differs = picked !== null && loaded !== picked;
+  // By word rather than by identity, which is how `tally` reads a verdict too.
+  // A `can’t tell` built anywhere but the constant would otherwise answer no
+  // and take the mark quietly back off the row — the same defect as before,
+  // arriving by another route.
+  const rests = verdict.word === CANT_TELL.word;
+  const descends = selection !== null && descendsFromHeld(selection);
+
+  return differs || rests || descends ? markOf(descends) : null;
+};
 
 /**
  * What a collapsed row says, per outcome: the pixels the arithmetic asked for
@@ -1058,7 +1161,7 @@ function stepsOf(
   selection: Selection,
   device: DeviceProfile,
   loaded: Candidate | null,
-  laidOut: boolean,
+  descends: boolean,
 ): Line[] {
   const picked = selection.picked;
   const wrote = selection.kind !== 'density' || image.sizes !== null;
@@ -1076,13 +1179,13 @@ function stepsOf(
   const measured: Line[] =
     selection.kind === 'width'
       ? [
-          { label: 'css px', value: `${Math.round(selection.cssPx)}px`, held: laidOut },
+          { label: 'css px', value: `${Math.round(selection.cssPx)}px`, held: descends },
           {
             label: 'needed',
             value:
               `${Math.round(selection.cssPx)}px × DPR ${device.dpr} = ` +
               `${Math.round(selection.neededPx)}px`,
-            held: laidOut,
+            held: descends,
           },
         ]
       : selection.kind === 'unreadable'
@@ -1153,11 +1256,12 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
   ];
 
   // Every file this row involves, whole. The loaded one first, because it is
-  // the one a reader came to check — and marked on every row a file loaded,
-  // held copy or not, because `currentSrc` is what the browser has and there
-  // is no reading of the page that says whether it chose it. Then every
-  // candidate in the order the page offered them, or one line where they all
-  // name one file: nine identical addresses say less than one sentence does.
+  // the one a reader came to check — and flagged on every row a file loaded,
+  // because `currentSrc` is what the browser has and there is no reading of the
+  // page that says whether it chose it. The flag says which figure the mark is
+  // about; whether the row draws one at all is `markFor`. Then every candidate
+  // in the order the page offered them, or one line where they all name one
+  // file: nine identical addresses say less than one sentence does.
   const files: Line[] = [
     ...(has ? [{ label: 'loaded', value: image.currentSrc, held: true }] : []),
     ...(sameFile
@@ -1189,7 +1293,7 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
         only === undefined
           ? 'No srcset, so your device made no difference here.'
           : 'Only one file on offer, so your device made no difference here.',
-      mark: has ? markOf(false) : null,
+      mark: markFor(has, matching[0] ?? null, only ?? null, NO_CHOICE, null),
       steps: [{ label: 'candidates', value: only === undefined ? '(no srcset)' : only.raw, held: false }],
       // One candidate is one clause and no reasoning: "only one file on offer"
       // is the whole of it, and a note repeating the clause above would be the
@@ -1219,20 +1323,22 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
         ? picked
         : (matching[0] ?? null);
 
-  // Where a clause resolved to `auto`, the figures under it are marked and
-  // `circular` says why: the width is the width this render laid the image
-  // out at, and for an image the page gives no width of its own that is the
-  // width of the file the browser already held.
+  // Where a clause resolved to `auto` and the width it gave may be the loaded
+  // file's own, the figures under it are flagged and `circular` says why: the
+  // width is the width this render laid the image out at, and for an image the
+  // page gives no width of its own that is the width of the file the browser
+  // already held.
   //
-  // `fromLayout` says why the mark covers every `auto` resolution rather than
-  // only the ones where the width provably came from the file, and the verdict
-  // asks it the same question: a row whose figures descend from the loaded file
-  // cannot read as a confirmation of it.
-  const laidOut = fromLayout(selection);
+  // The two are asked separately because they are not the same question.
+  // `descendsFromHeld` is a figure worth flagging, which needs a width there is
+  // something to say about; `fromLayout` is the argument itself, which a row
+  // with no width still needs — its verdict may be `can’t tell`, and that
+  // reader is owed the mechanism whatever the figures read.
+  const descends = descendsFromHeld(selection);
 
   const headline = !has ? '—' : loaded === null ? 'src' : loaded.raw;
-  const steps = stepsOf(image, selection, device, loaded, laidOut);
-  const circularity = laidOut ? [circular()] : [];
+  const steps = stepsOf(image, selection, device, loaded, descends);
+  const circularity = fromLayout(selection) ? [circular()] : [];
 
   if (sameFile) {
     return {
@@ -1240,7 +1346,7 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
       verdict: NO_CHOICE,
       loaded: headline,
       why: `All ${urls.length} candidates name one file, so your device made no difference here.`,
-      mark: has ? markOf(laidOut) : null,
+      mark: markFor(has, loaded, picked, NO_CHOICE, selection),
       steps,
       notes: [
         `All ${urls.length} candidates name one file, so your device made no difference here — ` +
@@ -1256,7 +1362,7 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
     verdict,
     loaded: headline,
     why,
-    mark: has ? markOf(laidOut) : null,
+    mark: markFor(has, loaded, picked, verdict, selection),
     steps,
     // The reasoning first and the circularity argument after it, in the order a
     // reader who opened the row reads them: what the arithmetic did, and then

@@ -356,11 +356,12 @@ describe('the panel, given a page written to break out of it', () => {
     // The descriptor is the field with no validation behind it at all —
     // `parseSrcset` keeps whatever text stood where a `640w` should have — and
     // it lands on the candidates line, in the sentence, and as the label of a
-    // file. The count of marks is what says the forgery made no element: two
-    // rows loaded a file and carry a chip in the heading and a chip on the
-    // `loaded` URL, one loaded nothing and carries none, and the
-    // `<mark>` the page asked for is a word in a `dd`. Three rows loaded a
-    // file, so six is two chips each and none of them the page's.
+    // file. The count of marks is what says the forgery made no element: one
+    // row here earns the mark, and it carries a chip in the heading and a chip
+    // on the `loaded` URL. That row is the first, whose loaded file is a
+    // `data:` URL the srcset never offered; the others loaded the pick, loaded
+    // nothing, or offer one file, so `markFor` leaves them alone. Two chips,
+    // and the `<mark>` the page asked for is a word in a `dd`.
     const { nodes } = rendered();
     const words = nodes.map((node) => node.textContent);
 
@@ -371,7 +372,7 @@ describe('the panel, given a page written to break out of it', () => {
         word.endsWith(`Nothing has loaded yet; when it does, the arithmetic picks ${DESCRIPTOR}.`),
       ),
     ).toBe(true);
-    expect(nodes.filter((node) => node.name === 'mark')).toHaveLength(6);
+    expect(nodes.filter((node) => node.name === 'mark')).toHaveLength(2);
   });
 
   it('says the clause a collapsed row shows without putting page content in it', () => {
