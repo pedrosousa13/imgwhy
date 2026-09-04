@@ -488,7 +488,7 @@ describe('the imgwhy command, given a page written to break the trace', () => {
     expect(lines(ran.stdout).filter((line) => line.trimStart().startsWith('FORGED'))).toEqual([]);
     expect(ran.stdout).toContain(String.raw`  sizes       100vw\u001b]0;imgwhy-pwned\u0007`);
     expect(ran.stdout).toContain(
-      String.raw`  candidates  640w\u001b[2K\u000aFORGED CANDIDATE LINE, 1080w`,
+      String.raw`  candidates  640w\u001b[2K\nFORGED CANDIDATE LINE, 1080w`,
     );
   }, 120_000);
 });

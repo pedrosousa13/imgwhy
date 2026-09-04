@@ -4,8 +4,8 @@ import { serializeCapture } from '../src/out.js';
 import { formatCapture } from '../src/trace.js';
 
 /**
- * The control characters a page put in an attribute, with the line it wanted
- * the trace to write behind them.
+ * The characters a page put in an attribute to be acted on, with the line it
+ * wanted the trace to write behind them.
  *
  * ESC opens a sequence a terminal executes and BEL ends it — this one retitles
  * the window, and an erase-line sequence takes the `← differs` marker off a
@@ -14,25 +14,39 @@ import { formatCapture } from '../src/trace.js';
  * fact the page wrote into a trace that promises one fact per line. NUL is
  * there because a check reading the whole trace should cover the character a
  * length calculation is likeliest to lose.
+ *
+ * The last two are not control characters and do those same two things. The
+ * bidi override displays the text behind it in the order the page chose rather
+ * than the order imgwhy wrote it, and the line separator ends a line for
+ * anything reading stdout a line at a time.
  */
-const CONTROLS = '\u001b]0;imgwhy-pwned\u0007\r\nFORGED LINE\u0000';
+const CONTROLS = '\u001b]0;imgwhy-pwned\u0007\r\nFORGED LINE\u0000\u202edesrever\u2028';
 
 /** One string as a page written to break the trace would write it. */
 const carrying = (text: string): string => `${text}${CONTROLS}`;
 
-/** A control character, which is what a terminal reads as an order. */
+/**
+ * Everything a terminal or a line reader acts on, which is the trace's whole
+ * alphabet less the backslash it writes them with: every control character,
+ * the bidi embeddings, overrides and isolates, and the two separators that end
+ * a line.
+ */
+const ACTED_ON = /[\p{Cc}\u2028\u2029\u202a-\u202e\u2066-\u2069]/u;
+
+/** A control character, which is all `JSON.stringify` promises to escape. */
 const CONTROL = /\p{Cc}/u;
 
 /**
- * Every line of the given text still holding one. Empty is clean.
+ * Every line of the given text still holding one of `pattern`'s. Empty is
+ * clean.
  *
  * The split is on the newlines the trace itself wrote — its own separator is
  * the one control character it is allowed — so a page's newline arriving
  * intact reads here as a line that ends early and a line that starts with the
  * page's words, and either way this list is not empty.
  */
-const holdingControls = (text: string): string[] =>
-  text.split('\n').filter((line) => CONTROL.test(line));
+const holding = (text: string, pattern: RegExp): string[] =>
+  text.split('\n').filter((line) => pattern.test(line));
 
 /** Where each column of a table line begins, which is what lined up means. */
 const starts = (line: string): number[] =>
@@ -190,8 +204,8 @@ const page = (image: CapturedImage, devices: DeviceProfile[] = [DESKTOP]): Captu
 describe('a trace of a page written to break out of it', () => {
   const trace = formatCapture(hostile());
 
-  it('writes no control character on any line', () => {
-    expect(holdingControls(trace)).toEqual([]);
+  it('writes nothing a terminal or a line reader acts on, on any line', () => {
+    expect(holding(trace, ACTED_ON)).toEqual([]);
   });
 
   it('ends no line but its own', () => {
@@ -231,7 +245,40 @@ describe('the trace, given the attributes the reproduction served', () => {
     const written = trace.split('\n').filter((line) => line.includes('FORGED CANDIDATE LINE'));
 
     expect(written).toHaveLength(1);
-    expect(written[0]).toContain(String.raw`400w\u001b[2K\u000dFORGED CANDIDATE LINE, 800w`);
+    expect(written[0]).toContain(String.raw`400w\u001b[2K\rFORGED CANDIDATE LINE, 800w`);
+  });
+
+  it('spells everything --json spells the way --json spells it', () => {
+    // A backslash, BS, TAB, LF, FF, CR, ESC, VT and NUL, written by code
+    // because a source file holding them could not be read. Every one is a
+    // character `JSON.stringify` escapes too, which is the set this case is
+    // about: what makes writing a control character better than dropping it is
+    // that one page produces one spelling of one attribute in both of a run's
+    // outputs, and that is only true where the two spellings agree.
+    const sizes = `100vw${String.fromCharCode(92, 8, 9, 10, 12, 13, 27, 11, 0)}`;
+
+    const trace = formatCapture(page({ ...plain(), sizes }));
+
+    // The Capture's own spelling, with the quotes JSON puts around a string
+    // taken off. The double quote is the one character JSON escapes and this
+    // does not, because JSON has a delimiter to protect and a line has none.
+    expect(lineWith(trace, '  sizes ')).toContain(JSON.stringify(sizes).slice(1, -1));
+  });
+
+  it('tells the characters that spell an escape apart from the character they spell', () => {
+    // The first page wrote a backslash, a `u` and four digits. The second
+    // wrote an ESC. A trace that read back the same for both could not say
+    // which one it found, and saying what the attribute held is the whole
+    // reason these are written out rather than dropped.
+    const written = String.raw`100vw\u001b`;
+    const meant = '100vw\u001b';
+
+    const asWritten = lineWith(formatCapture(page({ ...plain(), sizes: written })), '  sizes ');
+    const asMeant = lineWith(formatCapture(page({ ...plain(), sizes: meant })), '  sizes ');
+
+    expect(asWritten).not.toBe(asMeant);
+    expect(asWritten).toContain(JSON.stringify(written).slice(1, -1));
+    expect(asMeant).toContain(JSON.stringify(meant).slice(1, -1));
   });
 
   it('lines the columns up on rows whose page strings carried control characters', () => {
@@ -242,9 +289,9 @@ describe('the trace, given the attributes the reproduction served', () => {
     const rows = tableLines(trace);
     expect(rows).toHaveLength(3);
     // Every column begins at the same offset on every line, which is what a
-    // reader running an eye down one of them relies on. That offset is the
-    // printed width only because the checks above leave the trace with no
-    // character in it a terminal does not print.
+    // reader running an eye down one of them relies on. The offset is the
+    // printed one only because the check above leaves nothing in the trace
+    // that a terminal acts on — `say` says where that stops being true.
     expect(rows.map(starts)).toEqual([starts(rows[0]), starts(rows[0]), starts(rows[0])]);
   });
 });
@@ -261,7 +308,7 @@ describe('the capture itself, which the trace only presents', () => {
   it('reaches --json with every control character as its JSON escape', () => {
     const json = serializeCapture(hostile());
 
-    expect(holdingControls(json)).toEqual([]);
+    expect(holding(json, CONTROL)).toEqual([]);
     expect(json).toContain(String.raw`\u001b`);
     // And it is still the page's Capture: what a parser reads back off stdout
     // is what the runner recorded, character for character.
