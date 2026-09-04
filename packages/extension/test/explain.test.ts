@@ -557,6 +557,19 @@ describe('the verdict a row leads with', () => {
     expect(verdictOf({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: '' })).toEqual(['not loaded', 'quiet']);
   });
 
+  it('is still no choice where nothing loaded and there was nothing to choose between', () => {
+    // The one row where `not loaded` is not the word, and it is the right way
+    // round: `no choice` answers "did my device decide this", which a lazy
+    // `<img src>` with no `srcset` answers with a flat no whether or not it has
+    // loaded. What says nothing arrived is the rest of the row — no descriptor
+    // for the headline, no file for a thumbnail to ask for, and no mark, since
+    // there is no held copy for one to be about.
+    const row = rowOf({ srcAttribute: '/i/hero.png', loading: 'lazy', renderedWidth: 300 });
+
+    expect([row.verdict.word, row.verdict.tone]).toEqual(['no choice', 'quiet']);
+    expect([row.loaded, row.name, row.file, row.mark]).toEqual(['—', '', '', null]);
+  });
+
   it('is unknown where the comparison cannot settle it, and never a guess', () => {
     expect(verdictOf({ srcset: TWO, sizes: '(min-width: 100px) wide', currentSrc: 'https://example.com/i/640.png' })).toEqual(['unknown', 'quiet']);
     expect(verdictOf({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/other.png' })).toEqual(['unknown', 'quiet']);

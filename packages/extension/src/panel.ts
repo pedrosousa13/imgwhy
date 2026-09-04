@@ -585,9 +585,21 @@ export function renderPanel(panel: Panel): 'opened' {
    * about a file that has since arrived is a row describing something else.
    */
   const imageFor = (row: Row): HTMLImageElement | undefined => {
-    /** Whether one element is the image this row describes. */
+    /**
+     * Whether one element is the image this row describes.
+     *
+     * `currentSrc` against `row.file`, and nothing else on either side. The
+     * property was on this line and it made the paragraph below false for every
+     * lazy image on the page: a row that recorded no file was compared against
+     * an `img.src` reflecting the attribute, so the comparison was a URL
+     * against the empty string, the handle never confirmed, and the ordinary
+     * image below the fold got `not found` and no mark — which is the failure
+     * the word exists to report rather than to cause. Both sides are the file
+     * the browser loaded now, so "the image here has still loaded nothing" is a
+     * thing this can actually say.
+     */
     const describes = (image: HTMLImageElement | undefined): boolean =>
-      image !== undefined && (image.currentSrc || image.src) === row.file;
+      image !== undefined && image.currentSrc === row.file;
 
     const at = document.images[row.at];
     if (describes(at)) return at;

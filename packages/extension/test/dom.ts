@@ -172,6 +172,25 @@ export class El {
   srcset = '';
   sizes = '';
   media = '';
+  /**
+   * The file the browser loaded, which is not an attribute and not derived
+   * from one.
+   *
+   * Empty until a load begins, and a `src` attribute does not begin one here
+   * any more than it does in a browser: `currentSrc` is the current request's
+   * URL, and there is no request until the browser selects a source and goes
+   * and fetches it. A lazy image below the fold has an attribute naming a file
+   * and an empty `currentSrc`, and that pair is the whole of the defect in #34
+   * — one field said the page had asked for a file and the other said the
+   * browser did not have it, and the reader collapsed the two into one answer.
+   *
+   * So a fixture that means "this image loaded" sets this, and one that means
+   * "this image has not loaded yet" leaves it and sets `src`. The second is
+   * what a browser hands the reader on any page with an image below the fold,
+   * and the model was already right about it: what was missing was a case that
+   * asked the reader for the right answer, since the one case in that shape
+   * asserted the fallback as though it were the behaviour.
+   */
   currentSrc = '';
   /**
    * The `src` *content attribute*: null where nothing ever set one.
@@ -278,15 +297,29 @@ export class El {
    * string here and an empty one reads as the page, which is the difference the
    * panel's guard turns on and the difference a plain field cannot hold.
    *
-   * Every other value is handed back byte for byte rather than run through a
-   * URL parser. What a case here asks of a hostile `currentSrc` is that it
-   * arrives whole, and a parser would percent-encode the payload — a fidelity
-   * nothing in this package's claims needs, at the cost of the one claim it
-   * makes about the value.
+   * A relative reference resolves too, for the same reason and one step
+   * further: `src="/i/640.png"` on a page at `https://example.com/` reads as
+   * the whole address, so this property is *never* the text the page wrote
+   * wherever the page wrote a path. That is what separates it from
+   * `srcAttribute`, and a stand-in that handed a relative reference straight
+   * back would let a reader of the reading confuse the two.
+   *
+   * A value with a scheme of its own is handed back byte for byte, and so is
+   * one no URL parser will take. What a case here asks of a hostile value is
+   * that it arrives whole — `data:text/html,<script>…` is the string a page
+   * would try, and a parser would percent-encode the payload — and a value that
+   * already names its own scheme is one a browser resolves to itself anyway, so
+   * nothing is given up by leaving it alone.
    */
   get src(): string {
     if (this.srcAttribute === null) return '';
-    return this.srcAttribute === '' ? this.baseURI : this.srcAttribute;
+    if (this.srcAttribute === '') return this.baseURI;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(this.srcAttribute)) return this.srcAttribute;
+    try {
+      return new URL(this.srcAttribute, this.baseURI).href;
+    } catch {
+      return this.srcAttribute;
+    }
   }
 
   set src(value: string) {

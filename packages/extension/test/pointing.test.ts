@@ -1,7 +1,9 @@
 import vm from 'node:vm';
 import { describe, expect, it } from 'vitest';
+import type { Panel } from '../src/explain.js';
 import { panelOf } from '../src/explain.js';
 import { renderPanel } from '../src/panel.js';
+import type { Reading } from '../src/read.js';
 import { readPage } from '../src/read.js';
 import type { Page, Win, World } from './dom.js';
 import {
@@ -150,23 +152,47 @@ function removeImage(host: Page, at: number): void {
   img?.remove();
 }
 
-/** The panel, rendered into `host` the way Chrome renders it. */
-function render(
-  host: Page,
-  images: Parameters<typeof image>[0][],
-  win: Win = windowOf(host),
-): void {
-  const panel = panelOf(reading({ images: images.map((fields) => image(fields)) }));
+/** One panel, rendered into `host` the way Chrome renders it. */
+function paint(host: Page, panel: Panel, win: Win = windowOf(host)): void {
   vm.runInContext(
     `(${String(renderPanel)})(${JSON.stringify(panel)})`,
     vm.createContext({ document: host, window: win }),
   );
 }
 
+/** The panel, rendered into `host` the way Chrome renders it. */
+function render(
+  host: Page,
+  images: Parameters<typeof image>[0][],
+  win: Win = windowOf(host),
+): void {
+  paint(host, panelOf(reading({ images: images.map((fields) => image(fields)) })), win);
+}
+
 /** The reader, run the way Chrome runs it, which is the click that closes. */
 const close = (host: Page, win: Win = windowOf(host)): void => {
   vm.runInContext(`(${String(readPage)})()`, vm.createContext(globals(host, DESKTOP, win)));
 };
+
+/**
+ * The whole click, on a page nobody wrote a reading for: read it, ask the
+ * worker, render what comes back.
+ *
+ * Three steps rather than one because the click is three, and because a claim
+ * about what the panel requests is a claim about all three of them. A case that
+ * hands `panelOf` a reading it wrote itself is a case that has already decided
+ * what the page reported, which is where the defect in #34 lived.
+ */
+function clickIn(host: Page, win: Win = windowOf(host)): Reading {
+  const found = vm.runInContext(
+    `(${String(readPage)})()`,
+    vm.createContext(globals(host, DESKTOP, win)),
+  ) as Reading | null;
+  if (found === null) throw new Error('the reader removed a panel instead of reading the page');
+
+  paint(host, panelOf(found), win);
+  return found;
+}
 
 /** Every node the panel made, which is everything inside its closed root. */
 function nodesIn(host: Page): El[] {
@@ -775,6 +801,29 @@ describe('a row whose image the page has moved', () => {
     );
   });
 
+  it('marks one whose src attribute names a file it has not requested, which is every lazy image', () => {
+    // The same rule against the image the case above was written without: a
+    // lazy image carries a `src`, and confirming the handle against the `src`
+    // property rather than the loaded file compared a URL with the empty string
+    // and missed on every one of them. So the row for the ordinary lazy image
+    // said `not found` and marked nothing, which is the failure the word exists
+    // to report rather than to cause.
+    const host = pageOf([]);
+    const body = host.documentElement.children[0] as El;
+    const lazy = imageIn(host, body, { width: 300, height: 200, top: 1800 }, '');
+    lazy.srcAttribute = 'https://example.com/i/800x600.png';
+    lazy.loading = 'lazy';
+    host.images.push(lazy);
+    render(host, rowsFor(host));
+
+    dispatch(rows(host)[0], 'mouseenter');
+
+    expect(flagsIn(rows(host)[0])).toEqual([]);
+    expect(drawn(host)).toBe(
+      'div { display: block; top: 1800px; left: 0px; width: 300px; height: 200px }',
+    );
+  });
+
   it('takes the box down when the next row cannot find its image', () => {
     // The sequence a single hover cannot produce: a row that resolves draws a
     // box, and the row after it does not resolve. Without the box being taken
@@ -1010,6 +1059,90 @@ describe('the thumbnail, which identifies the image in the panel', () => {
 
     expect(of(host, 'img')).toHaveLength(2);
     expect(of(host, 'img').map((node) => node.parent?.name)).toEqual(['header', 'header']);
+  });
+});
+
+/**
+ * A page of lazy images the browser has not requested, read and explained and
+ * drawn, which is the one arrangement the defect in #34 could be seen in.
+ *
+ * Every claim the panel makes about a file rests on there being one, and the
+ * reader is where that is decided. So this runs all three steps of the click on
+ * a page nobody wrote a reading for: the reader reads it, the worker asks core,
+ * the renderer builds the tree. A case that starts from a hand-written reading
+ * has already answered the question this asks.
+ *
+ * The privacy argument is what makes it worth a describe of its own. The
+ * thumbnail is allowed to make a request because it asks for "a URL the page
+ * has already requested, from a host it has already contacted" — and for an
+ * image below the fold that sentence is simply false. A panel that fetched one
+ * would provoke a download the page had declined to make, one per row, on a
+ * page whose whole point is that it has not made them yet.
+ */
+describe('a lazy image nothing has requested, from the click through to the thumbnail', () => {
+  /** One `<img loading="lazy">` far below the fold: a src attribute, no file. */
+  function lazyIn(host: Page, top: number, file: string): El {
+    const body = host.documentElement.children[0];
+    if (body === undefined) throw new Error('the page has no body');
+
+    const img = imageIn(host, body, { width: 300, height: 200, top }, '');
+    img.srcAttribute = file;
+    img.srcset = '/i/640.png 640w, /i/1080.png 1080w';
+    img.sizes = '33vw';
+    img.loading = 'lazy';
+    host.images.push(img);
+    return img;
+  }
+
+  it('reads no file, says not loaded, and asks the network for nothing at all', () => {
+    const host = pageOf([]);
+    const first = lazyIn(host, 4000, 'https://example.com/i/800x600.png');
+    const second = lazyIn(host, 4600, 'https://example.com/i/1200x900.png');
+    const before = [written(first), written(second)];
+
+    const found = clickIn(host);
+
+    // What the browser reported, which is the whole of the reproduction: an
+    // attribute naming a file, and no file.
+    expect(found.images.map((one) => [one.srcAttribute, one.currentSrc])).toEqual([
+      ['https://example.com/i/800x600.png', ''],
+      ['https://example.com/i/1200x900.png', ''],
+    ]);
+    // Not one thumbnail carries a `src` attribute, so not one request leaves
+    // the page for a file the page itself declined to ask for. The attribute
+    // rather than the property, because an absent one is no request and an
+    // empty one is a request for the document.
+    expect(of(host, 'img').map((thumb) => thumb.srcAttribute)).toEqual([null, null]);
+    expect(of(host, 'img').map((thumb) => thumb.alt)).toEqual([
+      'nothing loaded',
+      'nothing loaded',
+    ]);
+    // And no row claims a file: the verdict is the one that was already written
+    // for this row and never reached, no `cache` mark sits on a heading, and
+    // there is no `loaded` address among the ones a row opens to.
+    expect(of(host, 'output').map((word) => word.textContent)).toEqual([
+      'not loaded',
+      'not loaded',
+    ]);
+    expect(rows(host).map(flagsIn)).toEqual([[], []]);
+    expect(of(host, 'dt').map((label) => label.textContent)).not.toContain('loaded');
+    // The page is as the click found it, which is the rest of what a reading
+    // may cost: nothing written to either element, and nothing scrolled.
+    expect([written(first), written(second)]).toEqual(before);
+  });
+
+  it('marks the image the row is about, because a row with no file still has one', () => {
+    const host = pageOf([]);
+    lazyIn(host, 4000, 'https://example.com/i/800x600.png');
+    lazyIn(host, 4600, 'https://example.com/i/1200x900.png');
+
+    clickIn(host);
+    dispatch(rows(host)[1], 'mouseenter');
+
+    expect(flagsIn(rows(host)[1])).toEqual([]);
+    expect(drawn(host)).toBe(
+      'div { display: block; top: 4600px; left: 0px; width: 300px; height: 200px }',
+    );
   });
 });
 
