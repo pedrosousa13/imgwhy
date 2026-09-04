@@ -261,6 +261,18 @@ export function renderPanel(panel: Panel): 'opened' {
      * The ground is checked, so a transparent image reads as transparent
      * rather than as missing — drawn with a gradient, because a stylesheet
      * that loaded an image would be a request this extension does not make.
+     *
+     * It is a mid tone rather than the light one an image editor uses, and
+     * that is the second blank-thumbnail bug rather than a preference. The
+     * editor convention assumes the artwork is dark; a page's own artwork
+     * often is not. A transparent banner whose only content is white type —
+     * two of them on the page this was found on — had nothing to contrast
+     * against on a white-and-light-grey check and drew as an empty box: the
+     * request succeeded, the thumbnail was there, and the reader saw nothing.
+     * A tool that explains other people's pages meets white logos constantly,
+     * so the ground has to answer light content and dark content both, and
+     * only a middle tone does. The stylesheet test holds every tone here
+     * inside a middle band, so a later palette cannot quietly take it back.
      */
     img {
       grid-row: span 2;
@@ -269,9 +281,9 @@ export function renderPanel(panel: Panel): 'opened' {
       height: 44px;
       overflow: hidden;
       object-fit: cover;
-      background-color: #ffffff;
-      background-image: repeating-conic-gradient(#e3e5e9 0 25%, #ffffff 0 50%);
-      background-size: 10px 10px;
+      background-color: #b9bec6;
+      background-image: repeating-conic-gradient(#8d949e 0 25%, #b9bec6 0 50%);
+      background-size: 8px 8px;
       border: 1px solid #d7dae0;
       border-radius: 4px;
       color: #5c6066;
