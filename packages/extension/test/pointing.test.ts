@@ -3,8 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { panelOf } from '../src/explain.js';
 import { renderPanel } from '../src/panel.js';
 import { readPage } from '../src/read.js';
-import type { El, Page, Win, World } from './dom.js';
+import type { Page, Win, World } from './dom.js';
 import {
+  El,
   Ev,
   box,
   descendants,
@@ -216,11 +217,47 @@ function nameIn(row: El): El {
 }
 
 /**
+ * The fields of the stand-in that are the tree itself rather than something a
+ * renderer writes to an element.
+ *
+ * Named as a closed list, and it is the mechanism that keeps `written` below
+ * complete as `dom.ts` grows: everything else an element has is compared
+ * automatically, so a field added to the stand-in is a field this claim covers
+ * on the commit that adds it. The list this replaced was written out by hand
+ * and had fallen two fields behind — `className` and `scrolled` were both
+ * missing, so `image.className = 'imgwhy-marked'` inside `place()` left every
+ * test green while the panel restyled the element it was measuring.
+ *
+ * Why each of the seven is out:
+ *
+ * - `children`, `parent`, `attached` and `shadowRoot` are the shape of the
+ *   tree. The panel does add a host to the document element, which is the whole
+ *   of what an injected panel is, and the cases below compare the tree
+ *   separately and by name.
+ * - `name` is the tag, which nothing can write.
+ * - `text` is the storage behind `textContent`; `words` below is that same
+ *   state under the name a diff reads better under.
+ * - `listeners` is a `Map`, which JSON renders as `{}` however full it is, so
+ *   it could not be compared here even in principle. `listenersIn` is the claim
+ *   about it, and it is the stronger form: no page element ever carried one.
+ */
+const STRUCTURE = new Set([
+  'attached',
+  'children',
+  'listeners',
+  'name',
+  'parent',
+  'shadowRoot',
+  'text',
+]);
+
+/**
  * One page element as everything a panel could write to it.
  *
- * Every field `dom.ts` gives an element, so an assignment anywhere in the
- * renderer shows up here as a diff — the scroll offset inside a page element
- * included, which is the field this slice added.
+ * Every field `dom.ts` gives an element bar the seven above, read off the
+ * element rather than listed, so an assignment anywhere in the renderer shows
+ * up here as a diff — the scroll offset inside a page element included, and the
+ * class name, and every `scrollIntoView` the element was asked for.
  *
  * The window's own offset is not here, because it is not a property of any
  * element: it is the one thing about the page a click changes, the issue asks
@@ -234,29 +271,40 @@ function nameIn(row: El): El {
  */
 const written = (node: El): string =>
   JSON.stringify({
-    id: node.id,
-    src: node.src,
-    srcset: node.srcset,
-    sizes: node.sizes,
-    media: node.media,
-    alt: node.alt,
-    title: node.title,
-    open: node.open,
-    loading: node.loading,
-    currentSrc: node.currentSrc,
-    width: node.width,
-    height: node.height,
-    rect: node.rect,
-    baseURI: node.baseURI,
-    background: node.background,
-    // The page's own scroll state, which is the field this slice added and the
-    // one the issue is about: a scroll offset inside the page is a position
-    // the panel can move and a reader cannot put back.
-    overflow: node.overflow,
-    scrollTop: node.scrollTop,
+    ...Object.fromEntries(Object.entries(node).filter(([field]) => !STRUCTURE.has(field))),
     words: node.textContent,
     children: node.children.length,
   });
+
+describe('what a page element is compared on', () => {
+  it('covers every field the stand-in gives an element, and names what it leaves out', () => {
+    // The claim `written` rests on, held over `dom.ts` itself rather than over
+    // a list somebody kept up to date. A field added to the stand-in is
+    // compared by the commit that adds it, and a field taken out of the
+    // comparison has to be added to `STRUCTURE` by name — where the comment
+    // above says why each of the seven is not something a renderer writes.
+    const sample = new El('img');
+    const compared = new Set(Object.keys(JSON.parse(written(sample))));
+
+    expect(
+      Object.keys(sample).filter((field) => !STRUCTURE.has(field) && !compared.has(field)),
+    ).toEqual([]);
+    expect([...STRUCTURE].sort()).toEqual([
+      'attached',
+      'children',
+      'listeners',
+      'name',
+      'parent',
+      'shadowRoot',
+      'text',
+    ]);
+    // And the two the hand-written list had lost, named so they cannot be lost
+    // again quietly: a restyled element lays out at a different width, and that
+    // width is an input to the arithmetic on the very row doing the restyling.
+    expect(compared).toContain('className');
+    expect(compared).toContain('scrolled');
+  });
+});
 
 describe('a row, pointed at with a mouse', () => {
   const boxes = [
@@ -385,6 +433,31 @@ describe('a row, activated', () => {
     expect(host.images[0].scrolled).toEqual([]);
   });
 
+  it('brings it into view from a page that was already scrolled, which is the offset in the sum', () => {
+    // The term the case above cannot fail. `scrollTo` takes a document
+    // coordinate and a rect is a viewport one, so the sum is the rect's own
+    // `top` plus where the page was already scrolled to — and at the top of the
+    // page those two figures are the same number, which is where every other
+    // fixture in this file starts. Here the reader is 900 down the page and the
+    // image is 300 below the fold, so the document coordinate is 1200 and the
+    // rect alone would scroll to the wrong place by exactly the offset.
+    const host = pageOf([box({ width: 640, height: 360, top: 300, left: 40 })]);
+    const win = windowOf(host);
+    win.scrollY = 900;
+    render(host, rowsFor(host), win);
+
+    dispatch(nameIn(rows(host)[0]), 'click');
+
+    expect(win.scrolled).toEqual([{ top: 1200, behavior: 'instant' }]);
+    expect(win.scrollY).toBe(1200);
+    // And the mark is on the box where that scroll left it: the image was 300
+    // below the fold and the page moved 300, so it is at the top of the
+    // viewport.
+    expect(drawn(host)).toBe(
+      'div { display: block; top: 0px; left: 40px; width: 640px; height: 360px }',
+    );
+  });
+
   it('leaves every other scroll container where the page’s own script put it', () => {
     // The defect, as a page that has one. A carousel holds its track at an
     // offset its own code chose, and `scrollIntoView` scrolls every scroll
@@ -430,6 +503,11 @@ describe('a row, activated', () => {
     // to be the mark for the box's new position rather than its old one. The
     // image was 2400 down the page and the window scrolled 2400, so the box is
     // at the top of the viewport and the mark says so.
+    //
+    // Which pins the order of the two lines in the click handler, now that a
+    // scroll fires no event of its own here: marking before scrolling reads the
+    // rect the page had before it moved, and nothing inside the call corrects
+    // it. A browser would correct it on the next frame, one frame late.
     const host = pageOf(boxes);
     const win = windowOf(host);
     render(host, rowsFor(host), win);
@@ -491,7 +569,10 @@ describe('a mark, while it is up', () => {
     render(host, rowsFor(host), win);
     dispatch(rows(host)[1], 'mouseenter');
 
+    // The scroll and the event it causes are two steps, because in a browser
+    // they are: the offset moves now and `scroll` fires on the next frame.
     win.scrollTo({ top: 300 });
+    win.dispatchEvent(new Ev('scroll'));
 
     expect(drawn(host)).toBe(
       'div { display: block; top: 400px; left: 12px; width: 96px; height: 96px }',
@@ -694,6 +775,47 @@ describe('a row whose image the page has moved', () => {
     );
   });
 
+  it('takes the box down when the next row cannot find its image', () => {
+    // The sequence a single hover cannot produce: a row that resolves draws a
+    // box, and the row after it does not resolve. Without the box being taken
+    // down first, the rule the panel wrote for the first row is still in the
+    // sheet — a box drawn confidently over an unrelated image, which is the
+    // failure the `not found` word exists to replace rather than to accompany.
+    const host = pageOf(boxes);
+    render(host, rowsFor(host));
+    removeImage(host, 1);
+
+    dispatch(rows(host)[0], 'mouseenter');
+    expect(drawn(host)).toBe(
+      'div { display: block; top: 120px; left: 40px; width: 640px; height: 360px }',
+    );
+
+    dispatch(rows(host)[1], 'mouseenter');
+
+    expect(drawn(host)).toBe('');
+    expect(flagsIn(rows(host)[1])).toEqual(['cache', NOT_FOUND]);
+  });
+
+  it('moves the word to the row that is asking, when two rows in a row cannot find one', () => {
+    // The scenario the guard names: a pointer on one row while a keyboard takes
+    // focus to another. Both rows have lost their image, so the second reading
+    // has a word already up — and a word left on the row the pointer has moved
+    // off is a word on the wrong row, which is a reader told the image they are
+    // now looking at is fine.
+    const host = pageOf(boxes);
+    render(host, rowsFor(host));
+    removeImage(host, 1);
+    removeImage(host, 0);
+
+    dispatch(rows(host)[0], 'mouseenter');
+    expect(flagsIn(rows(host)[0])).toEqual(['cache', NOT_FOUND]);
+
+    dispatch(nameIn(rows(host)[1]), 'focusin');
+
+    expect(flagsIn(rows(host)[0])).toEqual(['cache']);
+    expect(flagsIn(rows(host)[1])).toEqual(['cache', NOT_FOUND]);
+  });
+
   it('takes the word back off the row when the mark comes down', () => {
     const host = pageOf(boxes);
     render(host, rowsFor(host));
@@ -856,10 +978,19 @@ describe('the thumbnail, which identifies the image in the panel', () => {
     // An empty `src` resolves to the page's own address, so a browser pointed
     // at one fetches the document. The panel points it at nothing at all, and
     // the `alt` beside it is what a reader gets in the box's place.
+    //
+    // Both halves are asserted, because they are two different states and one
+    // of them is the bug. The attribute was never set, which is what "asks for
+    // nothing" means; the property is empty *because* of that. An unconditional
+    // assignment would leave the attribute set to `''` and the property reading
+    // the page's own address — which is the request, made by a panel that
+    // looks, on a stand-in modelling `src` as a plain string, exactly like one
+    // that made none.
     const host = pageOf([box()]);
     render(host, [image({ srcset: '/i/640.png 640w, /i/1080.png 1080w', currentSrc: '' })]);
     const [thumb] = of(host, 'img');
 
+    expect(thumb?.srcAttribute).toBeNull();
     expect(thumb?.src).toBe('');
     expect(thumb?.alt).toBe('nothing loaded');
   });
@@ -948,9 +1079,10 @@ describe('the panel, laid out so twenty-three images can be read', () => {
       '',
       'oversized1080w1080.pngcache',
       'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
-        'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser already held ' +
-        '1080w and reused it rather than choosing again; an empty cache is the only way to see ' +
-        'the real pick.',
+        'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser loaded 1080w, ' +
+        'which is larger. A held copy reused rather than chosen again is the likeliest cause, ' +
+        'and a viewport that shrank after load or script that rewrote sizes or srcset would read ' +
+        'the same; an empty cache is the only way to see the real pick.',
     ]);
   });
 });

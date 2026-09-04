@@ -58,12 +58,16 @@ export type Line = { label: string; value: string; held: boolean };
 /**
  * How a verdict reads before its word is read.
  *
- * Three tones for six words, because the words say what happened and the tone
+ * Three tones for eight words, because the words say what happened and the tone
  * says whether that is a problem. `good` is the file that should have loaded,
  * and it is quiet on purpose: the panel exists to find the rows that are not.
  * `warn` is bytes wasted or pixels stretched, and every sentence under one
  * carries a clause saying what to do about it, because a warning with no
- * action is noise. `quiet` is a row the device had no say in.
+ * action is noise. `quiet` is a row that is not a finding against the page —
+ * either the device had no say in it, or the panel cannot say. The second half
+ * of that is deliberate and it is the only honest place for those rows: a
+ * reading the panel cannot stand behind must not wear the tone that means
+ * "this one is fine".
  *
  * A closed set of three words the extension owns, and the one property the
  * renderer writes as a class. No page string can reach it.
@@ -80,23 +84,41 @@ export type Tone = 'good' | 'warn' | 'quiet';
  * figures core already worked out.
  *
  * - `fit` — the loaded file is the one the arithmetic picks, and it covers the
- *   pixels needed.
+ *   pixels needed. A second file at the same descriptor counts as the pick,
+ *   because two candidates at one descriptor are the same pixels either way.
  * - `oversized` — the loaded file is a larger candidate than the pick. Wasted
- *   bytes; a held copy the browser reused is the first thing to rule out.
+ *   bytes; a held copy the browser reused is the likeliest cause.
  * - `undersized` — the loaded file does not cover the pixels needed, so the
- *   image is stretched. Either no candidate covers them and the largest stood
- *   in, or the browser loaded something smaller than the pick.
+ *   image is upscaled wherever the page draws it at that size. Either no
+ *   candidate covers them and the largest stood in, or the browser loaded
+ *   something smaller than the pick.
  * - `no choice` — one candidate, no `srcset`, or every candidate naming one
  *   file. The device made no difference.
+ * - `circular` — the pick agrees with the loaded file, and the width the pick
+ *   was made against came from layout. So the loaded file may have produced the
+ *   figure that confirms it, and the agreement is not evidence.
+ * - `no width` — `sizes` resolved to nothing at all, so there was no width to
+ *   select against. An image this render drew no box for, most often.
  * - `not loaded` — nothing has loaded yet, so there is no file to judge. A lazy
  *   image below the fold, most often.
  * - `unknown` — the comparison cannot settle it: nothing was picked because a
  *   `sizes` clause would not read, or the loaded file is not one the `srcset`
  *   offers. Unknown is the honest word, and the sentence says which it was.
  *
- * The brief named four. `not loaded` and `unknown` are here because the four
- * do not cover a lazy image or a broken `sizes`, and forcing either into a
- * category it does not belong to would be a verdict that lies at a glance.
+ * The brief named four. `not loaded` and `unknown` are here because the four do
+ * not cover a lazy image or a broken `sizes`, and `circular` and `no width`
+ * because they do not cover a reading that confirms itself or an element with
+ * no box — and forcing any of the four into a category it does not belong to
+ * would be a verdict that lies at a glance.
+ *
+ * What `oversized` deliberately does not mean, because the review of #24 asked:
+ * the page having asked for more than it needed. `sizes="100px"` against 640w
+ * and 1080w is a 6.4× oversupply and still reads `fit`, and that is correct —
+ * 640w genuinely is the smallest candidate covering 100 px, so the browser did
+ * exactly the right thing and the waste is the page's. Saying so needs the
+ * ratio of what arrived to what was needed, which is a division, and the
+ * arithmetic is core's. So every verdict here is a verdict on the browser's
+ * choice, and page-side oversupply is a claim this package does not make.
  */
 export type Verdict = { word: string; tone: Tone };
 
@@ -187,6 +209,8 @@ const FIT: Verdict = { word: 'fit', tone: 'good' };
 const OVERSIZED: Verdict = { word: 'oversized', tone: 'warn' };
 const UNDERSIZED: Verdict = { word: 'undersized', tone: 'warn' };
 const NO_CHOICE: Verdict = { word: 'no choice', tone: 'quiet' };
+const CIRCULAR: Verdict = { word: 'circular', tone: 'quiet' };
+const NO_WIDTH: Verdict = { word: 'no width', tone: 'quiet' };
 const NOT_LOADED: Verdict = { word: 'not loaded', tone: 'quiet' };
 // A literal rather than `UNKNOWN`, because `dormant.test.ts` reads a constant
 // initialised from another name as something that runs at load, and the word
@@ -349,6 +373,48 @@ const deviceOf = (reading: Reading): DeviceProfile => ({
 });
 
 /**
+ * Every candidate the browser chose between, which is not always every
+ * candidate the `srcset` names.
+ *
+ * HTML's select-an-image-source appends the `src` attribute to the source set:
+ * "if child has a src attribute whose value is not the empty string and source
+ * set does not contain an image source with a density descriptor value of 1,
+ * and no image source with a width descriptor, append child's src attribute
+ * value to source set's image sources". So on a densities-only `srcset`, the
+ * `src` is a 1x candidate and the device pixel ratio decides between it and
+ * whatever else is on offer — and a row that left it out said "only one file on
+ * offer, so your device made no difference here" about a tag where the ratio
+ * decided the whole thing.
+ *
+ * All three of the spec's conditions are read, because each of them is a real
+ * page and dropping one would put a file in the list a browser never considered:
+ *
+ * - A `w` descriptor anywhere means a browser reads past `src` entirely.
+ * - A candidate already at 1x is the 1x candidate, and the `src` is not
+ *   appended beside it.
+ * - An empty `src` names no file. It is also the one value a browser resolves
+ *   against the document, so the attribute is read as written and an absent one
+ *   arrives here as the empty string.
+ *
+ * A `srcset` with no candidates at all is left alone rather than answered with
+ * a list of one. The row says "no srcset, so your device made no difference
+ * here; the src attribute is the only file on offer", which is the same fact
+ * and more of it.
+ *
+ * `src (1x)` is what the descriptor reads as, because the page wrote no
+ * descriptor and `src` is already the word this panel uses for a file that came
+ * off the attribute. The density is the part a reader needs to compare against
+ * a `2x` beside it.
+ */
+const candidatesOf = (raw: RawImage): Candidate[] => {
+  const written = parseSrcset(raw.srcset);
+  const byWidth = written.some((candidate) => candidate.w !== null);
+  const already = written.some((candidate) => candidate.x === 1);
+  if (written.length === 0 || byWidth || already || raw.srcAttribute === '') return written;
+  return [...written, { url: raw.srcAttribute, w: null, x: 1, raw: 'src (1x)' }];
+};
+
+/**
  * One reading of one image, in the shape core takes.
  *
  * Two fields are filled in rather than read, and both for a reason worth
@@ -363,7 +429,7 @@ const deviceOf = (reading: Reading): DeviceProfile => ({
 const captured = (raw: RawImage): CapturedImage => ({
   id: raw.selector,
   selector: raw.selector,
-  candidates: parseSrcset(raw.srcset),
+  candidates: candidatesOf(raw),
   sizes: raw.sizes,
   sizesSource: raw.sizesSource,
   renderedWidth: raw.renderedWidth,
@@ -540,18 +606,48 @@ function covers(selection: Selection, picked: Candidate, dpr: number): boolean {
 }
 
 /**
- * Whether `loaded` is a larger file than `picked`, a smaller one, or one the
- * two descriptors cannot rank.
+ * Whether `loaded` is a larger file than `picked`, a smaller one, the same
+ * descriptor, or one the two descriptors cannot rank.
  *
  * `w` against `w` and `x` against `x`. A page that mixes the two on one tag
  * has written a `srcset` a browser reads as all `w`, and the panel says the
  * two cannot be ranked rather than guessing which is bigger.
+ *
+ * `equal` is its own answer and not a rounding of `smaller`, which is what this
+ * read as before: `>` with an else sent two candidates at one descriptor —
+ * `/i/a.png 640w, /i/b.png 640w`, where the browser took the other one — down
+ * the branch that says the image is stretched. Same width, no stretch. Equal is
+ * neither larger nor smaller, and a `srcset` that offers one is a `srcset`
+ * where the choice made no difference to the pixels.
  */
-function ranked(loaded: Candidate, picked: Candidate): 'larger' | 'smaller' | null {
-  if (loaded.w !== null && picked.w !== null) return loaded.w > picked.w ? 'larger' : 'smaller';
-  if (loaded.x !== null && picked.x !== null) return loaded.x > picked.x ? 'larger' : 'smaller';
+function ranked(loaded: Candidate, picked: Candidate): 'larger' | 'smaller' | 'equal' | null {
+  if (loaded.w !== null && picked.w !== null) {
+    return loaded.w === picked.w ? 'equal' : loaded.w > picked.w ? 'larger' : 'smaller';
+  }
+  if (loaded.x !== null && picked.x !== null) {
+    return loaded.x === picked.x ? 'equal' : loaded.x > picked.x ? 'larger' : 'smaller';
+  }
   return null;
 }
+
+/**
+ * Whether the width core selected against is one this render's layout produced.
+ *
+ * Which is what makes a row's own agreement worth nothing: `auto` defers to
+ * layout, core answers with the width the element ended up at, and for an image
+ * the page gives no width of its own that is the width of whichever file the
+ * browser already held. `needed` is that width times the ratio and the pick is
+ * selection run against `needed`, so the loaded file is upstream of the figure
+ * that agrees with it.
+ *
+ * True for every `auto` resolution rather than only where the width provably
+ * came from the file, for the reason the `cache` marks are drawn the same way:
+ * an `auto` image the page *does* give a CSS width has a `css px` no cache
+ * could have touched, and this package reads a laid-out box rather than a
+ * cascade, so there is no reading of the page that tells the two apart.
+ */
+const fromLayout = (selection: Selection): boolean =>
+  selection.kind === 'width' && selection.resolution.kind === 'auto';
 
 /** The one clause that says why the pick wins, per kind of selection. */
 const winning = (selection: Selection, picked: Candidate): string =>
@@ -585,6 +681,32 @@ function judged(
   const chain = chainOf(selection, device);
 
   if (picked === null) {
+    // A width of zero is core reporting nothing to select against, and it is
+    // not the `srcset`'s doing. `select.ts` treats a `sizesPx` of `0` as
+    // unknown, so a lazy image below the fold with `sizes="auto"` — the
+    // ordinary case, not an exotic one — used to be told "fix the srcset" about
+    // a `srcset` with nothing wrong with it. Read here rather than fixed in
+    // core, because core measures a laid-out page for the command line and a
+    // width of zero there is a different finding: the command renders the page
+    // itself, so an element it laid out at nothing is an element that has no
+    // box at any scroll position. Only this front end can meet one that simply
+    // has not been scrolled to yet.
+    //
+    // Inside the `picked === null` branch rather than before it, because "and
+    // nothing was picked" has to stay true: a tag mixing a `w` candidate with
+    // an `x` one still has a density to judge, so it is picked and judged
+    // normally even where the width is zero.
+    if (selection.kind === 'width' && selection.cssPx === 0) {
+      return {
+        verdict: NO_WIDTH,
+        why:
+          `${capital(widthOf(selection.resolution, selection.cssPx))}, so there was no width to ` +
+          'select against and nothing was picked — an image this render drew no box for, such ' +
+          'as a lazy one below the fold, is the ordinary cause. The srcset is not what to look ' +
+          'at here.',
+      };
+    }
+
     return {
       verdict: UNSETTLED,
       why:
@@ -611,26 +733,67 @@ function judged(
     };
   }
 
-  if (loaded === picked) {
-    return covers(selection, picked, device.dpr)
-      ? { verdict: FIT, why: `${capital(chain)} — ${winning(selection, picked)}.` }
-      : { verdict: UNDERSIZED, why: `${capital(chain)} — ${stretched(selection, picked)}.` };
+  const rank = loaded === picked ? 'equal' : ranked(loaded, picked);
+
+  if (rank === 'equal') {
+    // A second file at the same descriptor is the pick as far as any reading of
+    // the page goes, so it is judged as the pick and the tie is named. Said
+    // after the outcome rather than instead of it, because the outcome is what
+    // a reader came for and the tie is why the file name below does not match
+    // the descriptor beside it.
+    const tie =
+      loaded === picked
+        ? ''
+        : ` The browser loaded ${loaded.raw}, which is a different file at the same descriptor, ` +
+          'so the pixels are the same either way.';
+
+    if (!covers(selection, picked, device.dpr)) {
+      return { verdict: UNDERSIZED, why: `${capital(chain)} — ${stretched(selection, picked)}.${tie}` };
+    }
+
+    // The one place a good verdict is withheld. Every figure the agreement
+    // rests on descends from the file the agreement is about, so `fit` here
+    // would be the row confirming its own coincidence — and it would do it in
+    // the quietest words the panel has, which is the panel being least
+    // sceptical exactly where it knows least.
+    return fromLayout(selection)
+      ? {
+          verdict: CIRCULAR,
+          why:
+            `${capital(chain)} — ${winning(selection, picked)}.${tie} But that width came from ` +
+            'layout, and for an image the page gives no width of its own the layout width is the ' +
+            'width of the file the browser already held — so the pick may agree with the loaded ' +
+            'file because one produced the other; an empty cache is the only way to tell.',
+        }
+      : { verdict: FIT, why: `${capital(chain)} — ${winning(selection, picked)}.${tie}` };
   }
 
-  switch (ranked(loaded, picked)) {
+  switch (rank) {
     case 'larger':
+      // What is known is that a larger candidate than the pick loaded. A held
+      // copy is the likeliest cause and it is not the only one: a viewport that
+      // shrank after load, script that rewrote `sizes` or `srcset`, and a
+      // layout that changed all read exactly the same from here. So the cause
+      // is named as a likelihood, which is what the panel can stand behind.
       return {
         verdict: OVERSIZED,
         why:
-          `${picks}the browser already held ${loaded.raw} and reused it rather than choosing ` +
-          'again; an empty cache is the only way to see the real pick.',
+          `${picks}the browser loaded ${loaded.raw}, which is larger. A held copy reused rather ` +
+          'than chosen again is the likeliest cause, and a viewport that shrank after load or ' +
+          'script that rewrote sizes or srcset would read the same; an empty cache is the only ' +
+          'way to see the real pick.',
       };
     case 'smaller':
+      // The figure the shortfall is against is the one the row already shows,
+      // and it is what `sizes` asked for rather than what the page drew — so
+      // the upscale is stated as following from that figure rather than as an
+      // observation of the rendered image, which nothing here can make.
       return {
         verdict: UNDERSIZED,
         why:
-          `${picks}the browser loaded ${loaded.raw}, which is smaller, so the image is ` +
-          'stretched to fit; check what set this src.',
+          `${picks}the browser loaded ${loaded.raw}, which does not cover the pixels needed ` +
+          'above, so the image is upscaled wherever the page draws it at that size; check what ' +
+          'set this src.',
       };
     case null:
       return {
@@ -817,14 +980,11 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
   // out at, and for an image the page gives no width of its own that is the
   // width of the file the browser already held.
   //
-  // Marked whenever the resolution is `auto` rather than only where the width
-  // came from the file, and that is deliberate rather than approximate. An
-  // `auto` image the page *does* give a CSS width has a `css px` no cache could
-  // have touched — but this package reads a laid-out box and not a cascade, so
-  // there is no reading of the page that tells the two apart. The mark says
-  // what a figure is, so it cannot be conditional on something nothing here
-  // can see.
-  const laidOut = selection.kind === 'width' && selection.resolution.kind === 'auto';
+  // `fromLayout` says why the mark covers every `auto` resolution rather than
+  // only the ones where the width provably came from the file, and the verdict
+  // asks it the same question: a row whose figures descend from the loaded file
+  // cannot read as a confirmation of it.
+  const laidOut = fromLayout(selection);
 
   const headline = !has ? '—' : loaded === null ? 'src' : loaded.raw;
   const steps = stepsOf(image, selection, device, loaded, laidOut);

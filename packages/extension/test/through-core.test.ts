@@ -32,8 +32,14 @@ const ASKS = ['explainSelection', 'parseSrcset'];
  *
  * So this is a denylist where every other check in this directory is an
  * allowlist, and it is the right way round for once: the set of operators is
- * closed and small, TypeScript owns no more of them, and naming the four is
- * exact where "no arithmetic" would be a rule about intent.
+ * closed and small, TypeScript owns no more of them, and naming them is exact
+ * where "no arithmetic" would be a rule about intent.
+ *
+ * The shifts are here because they are the same two operations spelled in
+ * binary: `n >> 1` is a halving, `n << 1` a doubling, and a density is a
+ * halving away from a `2x`. They reached no allowlist and performed no
+ * multiplication or division as TypeScript names one, so a selection written
+ * with them was a selection this check read as no arithmetic at all.
  */
 const SELECTION: [ts.SyntaxKind, string][] = [
   [ts.SyntaxKind.SlashToken, 'a division, which is how a w candidate becomes a density'],
@@ -47,6 +53,15 @@ const SELECTION: [ts.SyntaxKind, string][] = [
   [ts.SyntaxKind.AsteriskAsteriskEqualsToken, 'an exponentiation'],
   [ts.SyntaxKind.PercentToken, 'a remainder'],
   [ts.SyntaxKind.PercentEqualsToken, 'a remainder'],
+  [ts.SyntaxKind.GreaterThanGreaterThanToken, 'a right shift, which is a division by two'],
+  [ts.SyntaxKind.GreaterThanGreaterThanEqualsToken, 'a right shift'],
+  [
+    ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken,
+    'an unsigned right shift, which is a division by two',
+  ],
+  [ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken, 'an unsigned right shift'],
+  [ts.SyntaxKind.LessThanLessThanToken, 'a left shift, which is a multiplication by two'],
+  [ts.SyntaxKind.LessThanLessThanEqualsToken, 'a left shift'],
 ];
 
 /** Every arithmetic operation one module performs, one line each. */
@@ -125,6 +140,10 @@ function asks(text: string): string[] {
  *   nothing reasonable would either. The reason this check is worth having
  *   anyway is that the way a reimplementation actually arrives is a copy of
  *   `imgwhy.js`, which is at the root of this repo and full of both operators.
+ *   The bit shifts used to be in this list by omission — `n >> 1` is a halving
+ *   and passed — and they are refused above now, because a shift is an operator
+ *   TypeScript names and a check that can see one has no excuse for a note
+ *   saying it cannot.
  * - **A decision that is not arithmetic.** Choosing the first candidate, or
  *   the largest, needs no operator at all. `explain.test.ts` is what catches
  *   that: it asserts the panel's answers against `explainSelection` called
@@ -211,6 +230,21 @@ describe('the arithmetic check, given a panel that computes a selection', () => 
       'a ratio dressed up as a compound assignment',
       'export const waste = (delivered: number, needed: number) => { let r = delivered; r /= needed; return r; };',
       ['panel.ts performs a division'],
+    ],
+    [
+      'a halving spelled as a shift, which no allowlist of operators used to name',
+      'export const half = (needed: number) => needed >> 1;',
+      ['panel.ts performs a right shift, which is a division by two'],
+    ],
+    [
+      'a doubling spelled the other way, which is the pixels a retina screen needs',
+      'export const retina = (cssPx: number) => cssPx << 1;',
+      ['panel.ts performs a left shift, which is a multiplication by two'],
+    ],
+    [
+      'a shift dressed up as a compound assignment, both ways round',
+      'export const both = (n: number) => { let d = n; d >>>= 1; d <<= 1; return d; };',
+      ['panel.ts performs an unsigned right shift', 'panel.ts performs a left shift'],
     ],
     [
       'an nth-of-type index, which is the one sum the reader legitimately does',

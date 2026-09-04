@@ -173,7 +173,24 @@ export class El {
   sizes = '';
   media = '';
   currentSrc = '';
-  src = '';
+  /**
+   * The `src` *content attribute*: null where nothing ever set one.
+   *
+   * Three states, and the third is why this is not a plain string. A browser
+   * has one value for "no `src` attribute" and another for `src=""`, and they
+   * do very different things: an absent attribute makes no request at all,
+   * while an empty one *resolves against the document* and fetches the page
+   * itself. That is exactly the request the panel's guard exists to prevent —
+   * and modelled as a string starting at `''`, an unconditional assignment of
+   * an empty value is indistinguishable from the guard holding, so the guard
+   * could be deleted with every test still green.
+   *
+   * Read back through `src` below, which reflects it the way a browser does,
+   * and through `getAttribute('src')`, which is what the reader asks — the
+   * attribute is where HTML's select-an-image-source looks for the candidate a
+   * densities-only `srcset` offers alongside it.
+   */
+  srcAttribute: string | null = null;
   width = 0;
   height = 0;
   rect: Box = box();
@@ -251,14 +268,46 @@ export class El {
     return this.parent;
   }
 
+  /**
+   * The `src` IDL attribute, as a browser reflects the content attribute.
+   *
+   * A URL attribute reflects its *resolved* value, which is what makes an empty
+   * `src` a request for the document rather than no request: `''` resolved
+   * against the document's base is the document's own address, and that is the
+   * URL a browser goes and fetches. So an absent attribute reads as the empty
+   * string here and an empty one reads as the page, which is the difference the
+   * panel's guard turns on and the difference a plain field cannot hold.
+   *
+   * Every other value is handed back byte for byte rather than run through a
+   * URL parser. What a case here asks of a hostile `currentSrc` is that it
+   * arrives whole, and a parser would percent-encode the payload — a fidelity
+   * nothing in this package's claims needs, at the cost of the one claim it
+   * makes about the value.
+   */
+  get src(): string {
+    if (this.srcAttribute === null) return '';
+    return this.srcAttribute === '' ? this.baseURI : this.srcAttribute;
+  }
+
+  set src(value: string) {
+    this.srcAttribute = value;
+  }
+
   getBoundingClientRect(): Box {
     return this.rect;
   }
 
-  /** The two attributes the reader asks for, and null for anything else. */
+  /**
+   * The three attributes the reader asks for, and null for anything else.
+   *
+   * `src` is here as the attribute rather than the property for the reason the
+   * accessor above spells out: the reader needs to know whether the page wrote
+   * one, and the property cannot say.
+   */
   getAttribute(name: string): string | null {
     if (name === 'loading') return this.loading;
     if (name === 'alt') return this.alt;
+    if (name === 'src') return this.srcAttribute;
     return null;
   }
 
@@ -398,16 +447,32 @@ export type Page = {
   shadow(host: El): El[];
 };
 
-export function page(): Page {
+/**
+ * A page, and the address it is at.
+ *
+ * The address is not decoration. Every element a document makes carries that
+ * document's base — `Node.baseURI` is the document base URL — and it is what an
+ * empty `src` resolves against, so a thumbnail given one asks for the page
+ * itself. A stand-in whose elements had no base would report that request as
+ * the empty string and pass the guard against it either way.
+ */
+export function page(at = 'https://example.com/'): Page {
   const documentElement = new El('html');
+  documentElement.baseURI = at;
   documentElement.appendChild(new El('body'));
 
   const light = (): El[] => [documentElement, ...descendants(documentElement)];
 
+  const made = (name: string): El => {
+    const node = new El(name);
+    node.baseURI = at;
+    return node;
+  };
+
   return {
     documentElement,
     images: [],
-    createElement: (name) => new El(name),
+    createElement: made,
     // A shadow boundary is exactly where `getElementById` stops, which is
     // both correct and the reason the toggle can use it: the host is in the
     // light tree, and everything the panel is made of is not.
@@ -467,10 +532,14 @@ export type Win = {
  *   nearer the top of it. That coupling is the whole of what "the mark follows
  *   its image" means, and a stub that moved the offset alone would let a
  *   cached rect pass.
- * - **The scroll event fires from the scroll.** Synchronously here, where a
- *   browser fires it on the next frame. The difference does not reach any
- *   claim below: what is asserted is that a listener was registered and that
- *   what it draws comes from a fresh reading.
+ * - **A scroll fires no event of its own.** A browser fires `scroll` on the
+ *   next frame, and nothing here has frames — so a case that wants the event
+ *   dispatches it, which is what `pointing.test.ts` does either side of a
+ *   layout shift. This used to be dispatched synchronously from `scrollTo`,
+ *   and that hid an ordering claim: a panel that marked a row *before*
+ *   scrolling the window would have been corrected by its own scroll handler
+ *   inside the same call, so the mark read correctly here and one frame stale
+ *   in a browser.
  *
  * Every box is moved, which is a simplification worth naming: a page's own
  * `position: fixed` element does not move with a scroll, and nothing here
@@ -509,7 +578,6 @@ export function windowOf(host: Page): Win {
       }
       win.scrollY = top;
       win.scrollX = left;
-      win.dispatchEvent(new Ev('scroll'));
     },
   };
 
