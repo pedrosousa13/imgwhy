@@ -137,6 +137,21 @@ const returning =
   () =>
     Promise.resolve(capture);
 
+/**
+ * The gallery as the runner would have recorded it for the profiles it was
+ * handed: a Capture reports the devices that rendered it and no others, so a
+ * double that answered with all five whatever it was asked for could not show
+ * what `--device` does.
+ */
+const rendering: CaptureFn = (options) => {
+  const full = gallery();
+  return Promise.resolve({
+    ...full,
+    devices: options.profiles,
+    runs: full.runs.filter((run) => options.profiles.some((p) => p.id === run.deviceId)),
+  });
+};
+
 const lines = (stdout: string): string[] => stdout.split('\n');
 
 /** A table row, read back as its cells. Two or more spaces separate them. */
@@ -619,6 +634,200 @@ describe('run', () => {
     expect(outcome.code).toBe(1);
     expect(outcome.stderr).toContain(USAGE);
     expect(started).toBe(0);
+  });
+});
+
+/**
+ * `--device` picks from the set a run would otherwise have rendered whole. It
+ * names no device of its own, so what a name means is still the config file's
+ * to say, and what order the names render in is still the profile set's.
+ */
+describe('run, asked for some of the devices', () => {
+  it('renders the one device --device names, and the Capture records only it', async () => {
+    let asked: string[] = [];
+    const capture: CaptureFn = (options) => {
+      asked = options.profiles.map((p) => p.id);
+      return rendering(options);
+    };
+
+    const outcome = await run(
+      ['--json', '--device', 'desktop', 'https://example.com/gallery'],
+      capture,
+      cwd,
+    );
+
+    expect(outcome.code).toBe(0);
+    expect(asked).toEqual(['desktop']);
+    const captured: Capture = JSON.parse(outcome.stdout);
+    expect(captured.devices).toEqual([DEFAULT_PROFILES[4]]);
+    expect(captured.runs.map((deviceRun) => deviceRun.deviceId)).toEqual(['desktop']);
+  });
+
+  it('renders the devices a comma-separated list names', async () => {
+    let asked: string[] = [];
+    const capture: CaptureFn = (options) => {
+      asked = options.profiles.map((p) => p.id);
+      return Promise.resolve(gallery());
+    };
+
+    await run(['--device', 'iphone-se,ipad', 'https://example.com/gallery'], capture, cwd);
+
+    expect(asked).toEqual(['iphone-se', 'ipad']);
+  });
+
+  it('renders them in profile-set order, whatever order the flag named them in', async () => {
+    // Two runs of one page print the same trace, because the order small to
+    // large is the profile set's to decide and the flag only says which of
+    // them run.
+    let asked: string[] = [];
+    const capture: CaptureFn = (options) => {
+      asked = options.profiles.map((p) => p.id);
+      return Promise.resolve(gallery());
+    };
+
+    await run(['--device', 'desktop,ipad,iphone-se', 'https://example.com/gallery'], capture, cwd);
+
+    expect(asked).toEqual(['iphone-se', 'ipad', 'desktop']);
+  });
+
+  it('stops before the browser when no profile carries the id given', async () => {
+    let started = 0;
+    const capture: CaptureFn = () => {
+      started++;
+      return Promise.reject(new Error('the browser must not start'));
+    };
+
+    const outcome = await run(
+      ['--device', 'nosuch', 'https://example.com/gallery'],
+      capture,
+      cwd,
+    );
+
+    expect(started).toBe(0);
+    expect(outcome.code).toBe(1);
+    expect(outcome.stdout).toBe('');
+    // The id that was not found, and the ids that were there to find. The set
+    // is configurable, so a reader cannot be expected to know it.
+    expect(outcome.stderr).toBe(
+      'no device is called "nosuch", and this run can render ' +
+        'iphone-se, iphone-15-pro, pixel-8, ipad, desktop\n',
+    );
+  });
+
+  it('refuses an empty --device, because a run with no device to render explains nothing', async () => {
+    let started = 0;
+    const capture: CaptureFn = () => {
+      started++;
+      return Promise.reject(new Error('the browser must not start'));
+    };
+
+    const outcome = await run(['--device', '', 'https://example.com/gallery'], capture, cwd);
+
+    // The empty string is an id like any other, and no profile carries it, so
+    // the run is refused by the same rule that refuses a typo. Nothing here
+    // may ever start dropping ids it cannot use: a selection filtered down to
+    // none would render nothing and print a trace saying so, which reads as a
+    // page with no images rather than as a flag that named no device.
+    expect(started).toBe(0);
+    expect(outcome.code).toBe(1);
+    expect(outcome.stdout).toBe('');
+    expect(outcome.stderr).toBe(
+      'no device is called "", and this run can render ' +
+        'iphone-se, iphone-15-pro, pixel-8, ipad, desktop\n',
+    );
+  });
+
+  it('takes the ids imgwhy.config.json names, and renders the profile it named', async () => {
+    writeFileSync(
+      join(cwd, 'imgwhy.config.json'),
+      JSON.stringify({
+        devices: [
+          { id: 'kiosk', name: 'Kiosk', viewport: { width: 1080, height: 1920 }, dpr: 1 },
+          { id: 'till', name: 'Till', viewport: { width: 800, height: 480 }, dpr: 1 },
+        ],
+      }),
+      'utf8',
+    );
+    let asked: string[] = [];
+    const capture: CaptureFn = (options) => {
+      asked = options.profiles.map((p) => p.id);
+      return Promise.resolve(gallery());
+    };
+
+    await run(['--device', 'till', 'https://example.com/gallery'], capture, cwd);
+
+    expect(asked).toEqual(['till']);
+  });
+
+  it('refuses a built-in id where the config file replaced the set', async () => {
+    writeFileSync(
+      join(cwd, 'imgwhy.config.json'),
+      JSON.stringify({
+        devices: [{ id: 'kiosk', name: 'Kiosk', viewport: { width: 1080, height: 1920 }, dpr: 1 }],
+      }),
+      'utf8',
+    );
+    let started = 0;
+    const capture: CaptureFn = () => {
+      started++;
+      return Promise.reject(new Error('the browser must not start'));
+    };
+
+    const outcome = await run(['--device', 'desktop', 'https://example.com/gallery'], capture, cwd);
+
+    expect(started).toBe(0);
+    expect(outcome.code).toBe(1);
+    // A config file replaces the set outright, so `desktop` is a name this run
+    // does not have, and the ids listed are the ones the file gave.
+    expect(outcome.stderr).toBe(
+      'no device is called "desktop", and this run can render kiosk\n',
+    );
+  });
+
+  it('writes every sink asked for from the filtered run', async () => {
+    const out = join(cwd, 'capture.json');
+    const report = join(cwd, 'report.html');
+
+    const outcome = await run(
+      [
+        '--json',
+        '--out',
+        out,
+        '--report',
+        report,
+        '--device',
+        'desktop',
+        'https://example.com/gallery',
+      ],
+      rendering,
+      cwd,
+    );
+
+    expect(outcome.stderr).toBe('');
+    expect(outcome.code).toBe(0);
+    const desktopOnly: Capture = {
+      ...gallery(),
+      devices: [DEFAULT_PROFILES[4]],
+      runs: gallery().runs.filter((deviceRun) => deviceRun.deviceId === 'desktop'),
+    };
+    expect(JSON.parse(outcome.stdout)).toStrictEqual(desktopOnly);
+    expect(JSON.parse(readFileSync(out, 'utf8'))).toStrictEqual(desktopOnly);
+    expect(readFileSync(report, 'utf8')).toBe(renderReport(desktopOnly));
+  });
+
+  it('prints the trace of the one device it rendered', async () => {
+    const outcome = await run(
+      ['--device', 'desktop', 'https://example.com/gallery'],
+      rendering,
+      cwd,
+    );
+
+    expect(outcome.code).toBe(0);
+    expect(lines(outcome.stdout)[1]).toBe('images   3 on 1 devices');
+    expect(tableUnder(outcome.stdout, 'image 2 of 3').map((row) => cells(row)[0])).toEqual([
+      'device',
+      'Desktop',
+    ]);
   });
 });
 

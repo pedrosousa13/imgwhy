@@ -35,9 +35,13 @@ node packages/cli/dist/bin.js https://example.com --report report.html
 # the raw Capture, to stdout or to a file
 node packages/cli/dist/bin.js https://example.com --json
 node packages/cli/dist/bin.js https://example.com --out capture.json
+
+# render some of the devices rather than all of them
+node packages/cli/dist/bin.js https://example.com --device desktop
+node packages/cli/dist/bin.js https://example.com --device iphone-se,ipad
 ```
 
-The five default devices are iPhone SE (375×667, DPR 2), iPhone 15 Pro (393×852, DPR 3), Pixel 8 (412×915, DPR 2.625), iPad (820×1180, DPR 2) and Desktop (1440×900, DPR 1). Each renders in its own browser context with the cache disabled, so one device's download never explains another's. Drop an `imgwhy.config.json` beside the page you are working on to name a different set.
+The five default devices are iPhone SE (375×667, DPR 2), iPhone 15 Pro (393×852, DPR 3), Pixel 8 (412×915, DPR 2.625), iPad (820×1180, DPR 2) and Desktop (1440×900, DPR 1). Each renders in its own browser context with the cache disabled, so one device's download never explains another's. Drop an `imgwhy.config.json` beside the page you are working on to name a different set. `--device` selects from whichever set is in force, by id, and renders them in the set's own order.
 
 Output is one block per image. An image with `w` descriptors gets the arithmetic laid out per device, because that is where the devices disagree:
 

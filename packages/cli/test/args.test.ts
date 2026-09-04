@@ -15,6 +15,7 @@ describe('parseArgs', () => {
       json: false,
       out: null,
       report: null,
+      devices: null,
     });
   });
 
@@ -25,6 +26,7 @@ describe('parseArgs', () => {
       json: true,
       out: null,
       report: null,
+      devices: null,
     });
   });
 
@@ -35,6 +37,7 @@ describe('parseArgs', () => {
       json: false,
       out: 'capture.json',
       report: null,
+      devices: null,
     });
   });
 
@@ -45,6 +48,7 @@ describe('parseArgs', () => {
       json: false,
       out: null,
       report: 'report.html',
+      devices: null,
     });
   });
 
@@ -55,6 +59,7 @@ describe('parseArgs', () => {
       json: true,
       out: 'capture.json',
       report: null,
+      devices: null,
     });
   });
 
@@ -65,6 +70,7 @@ describe('parseArgs', () => {
       json: true,
       out: 'capture.json',
       report: null,
+      devices: null,
     });
   });
 
@@ -84,6 +90,7 @@ describe('parseArgs', () => {
       json: true,
       out: 'capture.json',
       report: 'report.html',
+      devices: null,
     });
   });
 
@@ -94,7 +101,37 @@ describe('parseArgs', () => {
       json: false,
       out: 'my captures/a=b.json',
       report: null,
+      devices: null,
     });
+  });
+
+  it('reads --device as the one device the run renders', () => {
+    expect(parseArgs(['--device', 'desktop', 'https://example.com'])).toEqual({
+      ok: true,
+      url: 'https://example.com',
+      json: false,
+      out: null,
+      report: null,
+      devices: ['desktop'],
+    });
+  });
+
+  it('reads a comma-separated --device list as the ids it names', () => {
+    expect(parseArgs(['--device', 'iphone-se,ipad', 'https://example.com'])).toEqual({
+      ok: true,
+      url: 'https://example.com',
+      json: false,
+      out: null,
+      report: null,
+      devices: ['iphone-se', 'ipad'],
+    });
+  });
+
+  it('leaves the ids in the order given, because the profile set orders the run', () => {
+    // Which is why nothing here sorts them: `run` filters the profile set, so
+    // the order this list arrives in never reaches the trace.
+    const parsed = parseArgs(['--device', 'ipad,iphone-se', 'https://example.com']);
+    expect(parsed.ok && parsed.devices).toEqual(['ipad', 'iphone-se']);
   });
 
   it('prints usage when no URL is given', () => {
@@ -150,7 +187,29 @@ describe('parseArgs', () => {
     );
   });
 
+  it('refuses --device with nothing after it', () => {
+    expect(rejected(['https://example.com', '--device'])).toBe(
+      `--device needs one or more device ids after it\n${USAGE}`,
+    );
+  });
+
+  it('refuses a second --device by name, because a run renders one device set', () => {
+    expect(rejected(['--device', 'desktop', '--device', 'ipad', 'https://example.com'])).toBe(
+      `--device was given twice, and a run renders one device set\n${USAGE}`,
+    );
+  });
+
+  it('refuses to treat the next option as the --device list', () => {
+    expect(rejected(['--device', '--json', 'https://example.com'])).toBe(
+      `--device needs one or more device ids after it\n${USAGE}`,
+    );
+  });
+
   it('names --report in the usage line, so the option can be found', () => {
     expect(USAGE).toContain('--report <file>');
+  });
+
+  it('names --device in the usage line, so the option can be found', () => {
+    expect(USAGE).toContain('--device <ids>');
   });
 });
