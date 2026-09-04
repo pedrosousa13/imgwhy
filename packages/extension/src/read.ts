@@ -300,6 +300,11 @@ export function readPage(): Reading | null {
    * design's non-goal — "`<picture>` type negotiation. Evaluate `media` only.
    * Do not model AVIF against WebP support" — and it is checked rather than
    * left to a reader, in `non-goals.test.ts`.
+   *
+   * This function is written twice. The other copy is `active` in the command
+   * line's `collect.ts`, and `test/no-drift.test.ts` refuses any difference
+   * between the two — a change here that is not made there is the two front
+   * ends naming different files as the one a browser read.
    */
   const active = (
     img: HTMLImageElement,
