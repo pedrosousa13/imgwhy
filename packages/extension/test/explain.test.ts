@@ -1308,6 +1308,47 @@ describe('where the cache mark earns its place', () => {
       markAt({ srcset: '/i/640.png 640w, /i/2x.png 2x', sizes: 'auto', loading: 'lazy', renderedWidth: 0, naturalWidth: 0, currentSrc: 'https://example.com/i/640.png' }),
     ).toBe(HELD);
   });
+
+  it('marks a can’t tell row whether or not it has a width figure to point at', () => {
+    // The verdict is a clause of the rule in its own right, and this row is why
+    // it cannot be derived from the layout question alone: a `w` candidate
+    // beside an `x` one is picked and judged at a width of zero, the pick is
+    // what loaded, and the width it was picked against may still be the loaded
+    // file's own. The row says "the width may be the loaded file's own" and
+    // must not then say nothing about the cache.
+    const row = rowOf({
+      srcset: '/i/640.png 640w, /i/2x.png 2x',
+      sizes: 'auto',
+      loading: 'lazy',
+      renderedWidth: 0,
+      naturalWidth: 0,
+      currentSrc: 'https://example.com/i/2x.png',
+    });
+
+    expect(row.verdict.word).toBe('can’t tell');
+    // The plain wording, because there is no width figure above to descend
+    // from anything — the clause the mark adds is about a figure, and this row
+    // shows none it can use.
+    expect(row.mark).toBe(HELD);
+  });
+
+  it('flags no figure on a row whose only width figure is zero', () => {
+    // The per-figure half of the same decision. `panel.ts` draws a chip where a
+    // line is flagged and the row carries a mark, so a flag left on `0px` here
+    // would put `cache` beside a figure the mark itself has stopped claiming —
+    // the two halves of one rule disagreeing on one row.
+    expect(
+      said(
+        rowOf({ srcset: '/i/640.png 640w, /i/2x.png 2x', sizes: 'auto', loading: 'lazy', renderedWidth: 0, naturalWidth: 0, currentSrc: 'https://example.com/i/640.png' }).steps,
+      ),
+    ).toEqual([
+      'sizes  auto',
+      'clause used  auto',
+      'css px  0px',
+      'needed  0px × DPR 1 = 0px',
+      'candidates  640w (loaded), 2x (picked)',
+    ]);
+  });
 });
 
 /**

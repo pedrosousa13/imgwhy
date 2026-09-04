@@ -871,17 +871,28 @@ describe('a row whose image the page has moved', () => {
     expect(flagsIn(rows(host)[1])).toEqual([NOT_FOUND]);
   });
 
-  it('takes the word back off the row when the mark comes down', () => {
+  it('takes the word back off the row and leaves the cache mark beside it standing', () => {
+    // The one case here written for a row that carries both words, because
+    // `remove()` is aimed at a node and a heading holds two: taking the word
+    // off must leave its sibling where it was. The other rows above are plain
+    // `<img src>` rows and earn no mark at all, so this one is given a srcset
+    // the browser did not honour — the loaded file is not the pick, which is
+    // the difference a held copy explains.
     const host = pageOf(boxes);
-    render(host, rowsFor(host));
+    render(
+      host,
+      rowsFor(host).map((fields, at) =>
+        at === 0 ? { ...fields, srcset: `${fileAt(0)} 640w, /i/wide.png 1080w`, sizes: '100vw' } : fields,
+      ),
+    );
     removeImage(host, 0);
 
     dispatch(rows(host)[0], 'mouseenter');
-    expect(flagsIn(rows(host)[0])).toEqual([NOT_FOUND]);
+    expect(flagsIn(rows(host)[0])).toEqual(['cache', NOT_FOUND]);
 
     dispatch(rows(host)[0], 'mouseleave');
 
-    expect(flagsIn(rows(host)[0])).toEqual([]);
+    expect(flagsIn(rows(host)[0])).toEqual(['cache']);
   });
 });
 
