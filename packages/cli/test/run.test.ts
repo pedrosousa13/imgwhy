@@ -143,7 +143,7 @@ const returning =
  * double that answered with all five whatever it was asked for could not show
  * what `--device` does.
  */
-const rendering = (): CaptureFn => (options) => {
+const rendering: CaptureFn = (options) => {
   const full = gallery();
   return Promise.resolve({
     ...full,
@@ -647,7 +647,7 @@ describe('run, asked for some of the devices', () => {
     let asked: string[] = [];
     const capture: CaptureFn = (options) => {
       asked = options.profiles.map((p) => p.id);
-      return rendering()(options);
+      return rendering(options);
     };
 
     const outcome = await run(
@@ -714,6 +714,29 @@ describe('run, asked for some of the devices', () => {
     );
   });
 
+  it('refuses an empty --device, because a run with no device to render explains nothing', async () => {
+    let started = 0;
+    const capture: CaptureFn = () => {
+      started++;
+      return Promise.reject(new Error('the browser must not start'));
+    };
+
+    const outcome = await run(['--device', '', 'https://example.com/gallery'], capture, cwd);
+
+    // The empty string is an id like any other, and no profile carries it, so
+    // the run is refused by the same rule that refuses a typo. Nothing here
+    // may ever start dropping ids it cannot use: a selection filtered down to
+    // none would render nothing and print a trace saying so, which reads as a
+    // page with no images rather than as a flag that named no device.
+    expect(started).toBe(0);
+    expect(outcome.code).toBe(1);
+    expect(outcome.stdout).toBe('');
+    expect(outcome.stderr).toBe(
+      'no device is called "", and this run can render ' +
+        'iphone-se, iphone-15-pro, pixel-8, ipad, desktop\n',
+    );
+  });
+
   it('takes the ids imgwhy.config.json names, and renders the profile it named', async () => {
     writeFileSync(
       join(cwd, 'imgwhy.config.json'),
@@ -776,7 +799,7 @@ describe('run, asked for some of the devices', () => {
         'desktop',
         'https://example.com/gallery',
       ],
-      rendering(),
+      rendering,
       cwd,
     );
 
@@ -795,7 +818,7 @@ describe('run, asked for some of the devices', () => {
   it('prints the trace of the one device it rendered', async () => {
     const outcome = await run(
       ['--device', 'desktop', 'https://example.com/gallery'],
-      rendering(),
+      rendering,
       cwd,
     );
 

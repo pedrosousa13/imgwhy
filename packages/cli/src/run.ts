@@ -1,6 +1,6 @@
 import type { Capture, DeviceProfile } from '@imgwhy/core';
 import { parseArgs } from './args.js';
-import { loadDeviceProfiles } from './config.js';
+import { type LoadedProfiles, loadDeviceProfiles } from './config.js';
 import { messageOf } from './message.js';
 import { serializeCapture, writeCapture, writeReport } from './out.js';
 import { formatCapture } from './trace.js';
@@ -26,16 +26,14 @@ const fail = (message: string): Outcome => ({ code: 1, stdout: '', stderr: `${me
  * would read as a finding. The message lists the ids that do exist, because a
  * config file can replace the set and the reader has no other way to see it.
  */
-function selectDevices(
-  profiles: DeviceProfile[],
-  ids: string[] | null,
-): { ok: true; profiles: DeviceProfile[] } | { ok: false; message: string } {
+function selectDevices(profiles: DeviceProfile[], ids: string[] | null): LoadedProfiles {
   if (ids === null) return { ok: true, profiles };
 
-  const known = new Set(profiles.map((profile) => profile.id));
+  const available = profiles.map((profile) => profile.id);
+  const known = new Set(available);
   for (const id of ids) {
     if (!known.has(id)) {
-      const all = profiles.map((profile) => profile.id).join(', ');
+      const all = available.join(', ');
       return { ok: false, message: `no device is called "${id}", and this run can render ${all}` };
     }
   }
