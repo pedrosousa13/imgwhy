@@ -65,6 +65,28 @@ export type Surface = {
   called: string[];
   /** Property names it writes to. */
   written: string[];
+  /**
+   * Every property it reads, as the dotted path it was written as.
+   *
+   * The path rather than the name, because one name answers two questions here
+   * and a check has to tell them apart: `img.baseURI` is the base a candidate
+   * URL resolves against, which the reader legitimately takes off the page's
+   * own element, and `document.baseURI` is the address of the page a reader is
+   * looking at. The name is the same in both.
+   *
+   * A path and not an allowlist. Every other list in this reading is one the
+   * package's own surface is checked against, and reads are the one surface too
+   * broad for that — a module that lays out text reads a property on nearly
+   * every line. So `privacy.test.ts` names the reads it refuses rather than the
+   * ones it permits, which is the one place in that file the direction is
+   * reversed and the reason is written there.
+   *
+   * `document['URL']` arrives as `document.URL`, the way `pathFrom` reads
+   * `chrome['tabs']`, so a spelling is not a way past. A receiver this reading
+   * cannot name — a call's result, a cast — keeps its own text, so the property
+   * at the end of the path is still there to be refused.
+   */
+  reads: string[];
   /** Every string it writes. */
   strings: string[];
   /** Reaches this reading cannot name, one line each. */
@@ -191,6 +213,30 @@ function isAliased(node: ts.Node): boolean {
   return false;
 }
 
+/**
+ * One property read as a dotted path, however it was spelled.
+ *
+ * A string key reads as a dot — `document['URL']` and `document.URL` are one
+ * read of one thing, and a check that saw two of them is a check the second
+ * spelling walks past. A receiver that is not a name or a chain of them keeps
+ * its own text instead: `held(document).URL` says what it can about where the
+ * value came from, and the property at the end is the half a rule can refuse.
+ */
+function readPath(node: ts.PropertyAccessExpression | ts.ElementAccessExpression): string {
+  const name = ts.isPropertyAccessExpression(node)
+    ? node.name.text
+    : ts.isStringLiteralLike(node.argumentExpression)
+      ? node.argumentExpression.text
+      : '';
+  const held = node.expression;
+  const base = ts.isIdentifier(held)
+    ? held.text
+    : ts.isPropertyAccessExpression(held) || ts.isElementAccessExpression(held)
+      ? readPath(held)
+      : held.getText().replace(/\s+/g, ' ');
+  return `${base}.${name}`;
+}
+
 /** Every name one module reaches for, out of TypeScript's own syntax tree. */
 export function surfaceOf(text: string): Surface {
   const bound = new Set<string>();
@@ -199,6 +245,7 @@ export function surfaceOf(text: string): Surface {
   const events = new Set<string>();
   const called = new Set<string>();
   const written = new Set<string>();
+  const reads = new Set<string>();
   const strings = new Set<string>();
   const refused = new Set<string>();
 
@@ -245,6 +292,7 @@ export function surfaceOf(text: string): Surface {
         else if (call) refused.add('calls a property it computes at run time');
       } else if (call) called.add(name);
       else if (isWritten(node)) written.add(name);
+      else reads.add(readPath(node));
     }
 
     // The event a listener is registered for, whichever object it hangs off.
@@ -277,6 +325,7 @@ export function surfaceOf(text: string): Surface {
     globals: [...used].filter((name) => !bound.has(name)).sort(),
     called: [...called].sort(),
     written: [...written].sort(),
+    reads: [...reads].sort(),
     strings: [...strings].sort(),
     refused: [...refused].sort(),
   };

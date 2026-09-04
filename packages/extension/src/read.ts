@@ -132,6 +132,37 @@ export type RawImage = {
    * `currentSrc` alone.
    */
   srcAttribute: string;
+  /**
+   * The file the browser loaded, and the empty string where it has loaded
+   * none.
+   *
+   * `currentSrc` alone, with no fallback to the `src` property behind it, and
+   * that is the fix for a defect rather than a preference. The two facts are
+   * different facts: `currentSrc` is empty until the browser has selected a
+   * source and begun fetching it, while the property reflects the attribute
+   * resolved against the document and is something the moment a `src` exists.
+   * So an image below the fold that has requested nothing — the ordinary lazy
+   * image, `complete: false`, `naturalWidth: 0`, no request in the network
+   * panel — arrived here as though it had loaded, and three separate claims
+   * were then made about a file the browser did not hold: the verdict read
+   * `fit`, which says the browser chose this file and chose well when it chose
+   * nothing; the `cache` mark went on a figure whose whole meaning is what the
+   * browser has; and the panel pointed a thumbnail at the URL, which provokes
+   * the download the page had declined to make, once per row on a page of lazy
+   * images.
+   *
+   * That last one is why this field is the narrow one. The thumbnail's request
+   * is allowed on the argument that it asks for "a URL the page has already
+   * requested, from a host it has already contacted, so nothing reaches
+   * anywhere it had not already reached" — and for a file nothing has requested
+   * that argument is simply false. Empty is what keeps it true: `explain.ts`
+   * reads `currentSrc !== ''` as the whole of whether there is a file to speak
+   * about, and a row with none gets no `loaded` line, no mark, no thumbnail and
+   * the `not loaded` verdict that was written for exactly it.
+   *
+   * What the page asked for is still here, under `srcAttribute` above, and the
+   * candidate work is what reads it. Neither field stands in for the other.
+   */
   currentSrc: string;
   loading: 'lazy' | 'eager' | null;
   /**
@@ -330,7 +361,10 @@ export function readPage(): Reading | null {
       // `<img>` that was never given a `src` and one given an empty one are
       // one value there and two findings here.
       srcAttribute: img.getAttribute('src') ?? '',
-      currentSrc: img.currentSrc || img.src,
+      // The file the browser loaded, and nothing standing in for it. Empty is
+      // the answer for an image that has requested nothing, and the field above
+      // is where "what the page asked for" lives.
+      currentSrc: img.currentSrc,
       loading: loading === 'lazy' ? 'lazy' : loading === 'eager' ? 'eager' : null,
       baseURI: img.baseURI,
     };

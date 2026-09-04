@@ -22,7 +22,10 @@ const src = fileURLToPath(new URL('../src', import.meta.url));
  * group into five things.
  *
  * `chrome` is the two extension calls `dormant.test.ts` allowlists. `document`
- * is the page both injected functions work in.
+ * is the page both injected functions work in — and it is the one entry here
+ * the address of the page hangs off, under three names, which is why `ADDRESS`
+ * below refuses those by path rather than trusting `location`'s absence to
+ * cover them.
  *
  * `window` and `Event` are the newest two, and they are the panel's mark. A box
  * drawn over an image is written in viewport coordinates, so the panel needs
@@ -241,12 +244,20 @@ const WRITTEN = new Set(['alt', 'className', 'id', 'open', 'src', 'textContent',
  * own image, `explain.ts` carries it as `file`, and `panel.ts` assigns
  * `row.file`. Nothing in the middle touches it.
  *
+ * "A file the page has already asked for" is a claim about the first link and
+ * not about this rule, and it is the claim #34 found broken: the reader fell
+ * back to the `src` property, so a lazy image that had requested nothing handed
+ * over a URL anyway and the panel went and fetched it. The rule below was quiet
+ * throughout, correctly — the value was whole and the shape was right, and the
+ * fact underneath it was wrong. `read.ts` is where that is kept true.
+ *
  * The check reads the shape of one expression, so a value laundered through a
  * function call — `pixel.src = leak(what)` — is a read of `leak(what)` and not
- * a plain one, which it refuses. A value laundered through a variable is the
- * hole: `const url = base + what; pixel.src = url` is a plain identifier. The
- * allowlists above are what narrow that — `location` is not a name this
- * package may reach, and `DESTINATIONS` refuses the string half.
+ * a plain one, which it refuses. A value laundered through a variable is what
+ * it cannot see: `const url = base + what; pixel.src = url` is a plain
+ * identifier. What narrows that is the allowlists above and `ADDRESS` below —
+ * `DESTINATIONS` refuses the string half, and the fact worth stitching in is
+ * refused at the read, which is where the laundering starts.
  */
 const WHOLE: Rules = [
   [/^src$/, 'a src is only ever a whole URL that arrived from the reading'],
@@ -273,6 +284,45 @@ const LEAKS: Rules = [
   [/^(?:fetch|XMLHttpRequest|WebSocket|sendBeacon)$/, 'a way to make a request'],
   [/^(?:localStorage|sessionStorage|indexedDB|setItem)$/, 'a place to keep page data'],
   [/^(?:srcset|href|action|poster)$/, 'a request made by assignment'],
+];
+
+/**
+ * The address of the page a reader is on, refused wherever it is read.
+ *
+ * The one list in this file that names what it refuses rather than what it
+ * permits, and the reason is that a read is not a surface an allowlist can
+ * cover: a module that lays out text reads a property on nearly every line, so
+ * a list of the permitted ones would be a list nobody could keep and a
+ * contributor would widen without thinking.
+ *
+ * What makes a short list enough here is that there is exactly one fact worth
+ * refusing. A leak needs a URL with something about the page stitched into it,
+ * `WHOLE` refuses the stitching, and the one thing left is the value that gets
+ * stitched in — so the address is refused at the read, before any shape rule
+ * has to see it. `const u = document.URL; thumb.src = u` was the hole:
+ * `location` is indeed not a name this package may reach, but `document` is one
+ * it cannot work without, and the address hangs off it under three names. That
+ * assignment is a plain identifier, holds no string literal, and calls nothing.
+ *
+ * `baseURI` is the reason these are paths rather than names. The reader reads
+ * `img.baseURI` on every image, and it has to — the worker compares a relative
+ * candidate with an absolute `currentSrc`, and the base is what makes them
+ * comparable — so refusing the name would refuse the reader for taking the
+ * narrower route. `document.baseURI` is the page's own address by a fourth
+ * name, and that is what the last rule refuses.
+ *
+ * The first three rules are anchored at the end of the path rather than the
+ * start, so the object in front makes no difference: `window.location`,
+ * `document.location`, `self.location` and a receiver this reading cannot name
+ * are all refused on the property, which is where the address is.
+ */
+const ADDRESS: Rules = [
+  [/(?:^|\.)location(?:\.|$)/, 'the address of the page a reader is looking at'],
+  [/\.(?:URL|documentURI)$/, 'the address of the page a reader is looking at'],
+  [
+    /(?:^|\.)document(?:Element)?\.baseURI$/,
+    "the document's own address rather than the base an element resolves against",
+  ],
 ];
 
 /** The one path off `chrome` that would keep something. */
@@ -318,9 +368,16 @@ function findings(text: string): string[] {
             .map((given) => `gives ${name} the value ${given.wrote}, and ${reason}`),
         ),
     ),
-    ...surface.globals.map((name) => refused('reaches', name, GLOBALS, LEAKS)),
+    // `ADDRESS` joins the globals as well as the reads, because `location` is a
+    // whole global and not a property of one: refused here by absence today, and
+    // refused by name for the day somebody adds it to the allowlist above.
+    ...surface.globals.map((name) => refused('reaches', name, GLOBALS, [...LEAKS, ...ADDRESS])),
     ...surface.called.map((name) => refused('calls', name, CALLED, LEAKS)),
     ...surface.written.map((name) => refused('writes', name, WRITTEN, LEAKS)),
+    ...surface.reads.map((path) => {
+      const reason = why(ADDRESS, path);
+      return reason === undefined ? null : `reads ${path}, which is ${reason}`;
+    }),
     ...surface.chrome.map((path) => {
       const reason = why(KEEPS, path);
       return reason === undefined ? null : `names ${path}, which is ${reason}`;
@@ -368,7 +425,11 @@ function findings(text: string): string[] {
  *   string has to reach an API to become a request, and every API this package
  *   may name is written out above.
  * - **A property named at run time.** `el[field] = value` is refused rather
- *   than read, which is why `surfaceOf` reports it as a refusal.
+ *   than read, which is why `surfaceOf` reports it as a refusal. A *read* of
+ *   one — `document[field]` — is not, and cannot be: array indexing is a
+ *   computed read and this package is full of it, so refusing the shape would
+ *   refuse `urls[at]`. `ADDRESS` reads the paths it can name, and a name
+ *   assembled at run time is past it.
  * - **A module reached at run time.** `boundary.test.ts` refuses a computed
  *   `import()` for the whole package, which is the backstop.
  */
@@ -425,13 +486,14 @@ describe('the extension, checked against storing or sending anything', () => {
     expect(givenTo(modules['explain.ts'] ?? '', 'currentSrc')).toEqual([
       { wrote: 'raw.currentSrc', whole: true },
     ]);
-    // The first link, and the one place the chain is not a single read: the
-    // reader falls back from the file the browser chose to the `src` the page
-    // wrote. Both halves are reads off the same element and nothing is built
-    // out of them, which is the property — a fallback between two of the
-    // page's own values cannot carry a fact the page did not already have.
+    // The first link, and now a single read like the two after it. It used to
+    // fall back to the `src` property, which was whole enough for this rule and
+    // wrong for the guarantee underneath it: the chain then carried a URL the
+    // page had never requested, and the request the panel makes is defended on
+    // the page having already made it. One read of one property is what keeps
+    // the whole chain about a file the browser actually holds.
     expect(givenTo(modules['read.ts'] ?? '', 'currentSrc')).toEqual([
-      { wrote: 'img.currentSrc || img.src', whole: false },
+      { wrote: 'img.currentSrc', whole: true },
     ]);
   });
 
@@ -534,6 +596,89 @@ describe('the privacy check, given an extension that keeps or sends something', 
       `gives src the value ${wrote}, and a src is only ever a whole URL that arrived from the ` +
         'reading',
     );
+  });
+
+  /**
+   * Every way the address of the page a reader is on could be read.
+   *
+   * The hole the paragraph above `WHOLE` named and did not close. `location` is
+   * not a name this package may reach, and that was offered as the mitigation —
+   * but `document` is a name it cannot work without, and a page's address hangs
+   * off it under three names. `const u = document.URL; thumb.src = u` is a
+   * whole value off a plain identifier, carries no string literal for
+   * `DESTINATIONS` to catch, and calls nothing, so every check in this file was
+   * quiet about it. The attack table above covers the same address in a
+   * concatenation, which the `WHOLE` rule refuses on shape; laundering it
+   * through one variable is all it took to get past.
+   *
+   * So the address is refused where it is read, by name, whatever it is then
+   * used for. That is a rule about the fact rather than about the route: a
+   * panel that has no reason to know which page it is on cannot encode it into
+   * anything, however the code around the read is written.
+   *
+   * The last two rows are the ones that make the rule more than a spelling
+   * check. `document.baseURI` is the same address by a fourth name and is
+   * refused — while `img.baseURI` is what the reader legitimately reads, so the
+   * rule tells an element's base from the document's own. And a receiver the
+   * reading cannot name is still refused on the property, because the tail is
+   * where the address is.
+   */
+  const addresses: [string, string, string][] = [
+    [
+      'the laundered form, which is a whole value off a plain identifier',
+      'const u = document.URL; thumb.src = u;',
+      'reads document.URL, which is the address of the page a reader is looking at',
+    ],
+    [
+      'documentURI, which is the same address under its DOM name',
+      'const u = document.documentURI; thumb.src = u;',
+      'reads document.documentURI, which is the address of the page a reader is looking at',
+    ],
+    [
+      'document.location, which is a whole object built around it',
+      'thumb.src = document.location.href;',
+      'reads document.location.href, which is the address of the page a reader is looking at',
+    ],
+    [
+      'window.location, which is the same object off the other global',
+      'const u = window.location.href; thumb.src = u;',
+      'reads window.location.href, which is the address of the page a reader is looking at',
+    ],
+    [
+      'the global on its own, with nothing in front of it',
+      'const u = location.href; thumb.src = u;',
+      'reads location.href, which is the address of the page a reader is looking at',
+    ],
+    [
+      'a read written around the dot, which a check on one spelling would miss',
+      'const u = document["URL"]; thumb.src = u;',
+      'reads document.URL, which is the address of the page a reader is looking at',
+    ],
+    [
+      'the document’s own base, which is its address by a fourth name',
+      'const u = document.baseURI; thumb.src = u;',
+      "reads document.baseURI, which is the document's own address rather than the base an " +
+        'element resolves against',
+    ],
+    [
+      'a receiver this reading cannot name, where the property still says what it is',
+      'const u = held(document).URL; thumb.src = u;',
+      'reads held(document).URL, which is the address of the page a reader is looking at',
+    ],
+  ];
+
+  it.each(addresses)('catches %s', (_route, line, finding) => {
+    expect(findings(`export const draw = (thumb) => { ${line} };`)).toContain(finding);
+  });
+
+  it('is quiet about the base of an element, which the reader legitimately reads', () => {
+    // `read.ts` reads `img.baseURI` on every image, and it has to: the worker
+    // compares a relative candidate with an absolute `currentSrc`, and the base
+    // is what makes the two comparable. It is read off the element rather than
+    // out of `location` precisely because that is the narrower reach — so a
+    // rule that refused `baseURI` by name alone would refuse the reader for
+    // taking the careful route.
+    expect(findings('export const baseOf = (img) => img.baseURI;')).toEqual([]);
   });
 
   it('is quiet about the one assignment the panel makes', () => {

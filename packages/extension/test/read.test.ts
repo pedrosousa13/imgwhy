@@ -217,15 +217,35 @@ describe('the reader a click sends into the page', () => {
     expect(read(host).images.map((one) => one.alt)).toEqual(['A person at a desk', '', null]);
   });
 
-  it('reads src where nothing has been chosen, and reports no file where neither is set', () => {
+  it('reports no file at all where the browser has chosen none, src attribute or not', () => {
+    // The reproduction, and the one character it was: `currentSrc || src`. A
+    // lazy image below the fold has a `src` attribute and has requested
+    // nothing — the browser reports `currentSrc: ''`, `complete: false`,
+    // `naturalWidth: 0`, and the page makes no image request at all. Falling
+    // back to the property put that file on the `loaded` line of a row whose
+    // browser held nothing, marked it as a copy the browser has, read the
+    // verdict as `fit`, and pointed the thumbnail at a URL the page had never
+    // asked for. Three claims about a file, none of them true, and the last of
+    // them provokes the download the page declined to make.
+    //
+    // Both images report the same thing, because they are the same finding:
+    // nothing has loaded here yet. Which of them wrote a `src` is
+    // `srcAttribute`'s answer, below, and nothing about it says a request was
+    // made.
     const host = page();
-    img(host, body(host), { src: 'https://example.com/one.png' });
+    img(host, body(host), {
+      src: 'https://example.com/i/800x600.png',
+      loading: 'lazy',
+      rect: box({ width: 300, height: 200, top: 4000 }),
+    });
     img(host, body(host));
 
-    expect(read(host).images.map((one) => one.currentSrc)).toEqual([
-      'https://example.com/one.png',
-      '',
-    ]);
+    expect(read(host).images.map((one) => one.currentSrc)).toEqual(['', '']);
+    expect(read(host).images[0]).toMatchObject({
+      currentSrc: '',
+      srcAttribute: 'https://example.com/i/800x600.png',
+      loading: 'lazy',
+    });
   });
 
   it('reads the src attribute as written, and tells an absent one from an empty one', () => {
@@ -237,18 +257,25 @@ describe('the reader a click sends into the page', () => {
     // written against, so the attribute is what is read.
     const host = page();
     img(host, body(host), { src: 'https://example.com/one.png' });
+    img(host, body(host), { src: '/i/640.png' });
     img(host, body(host), { src: '' });
     img(host, body(host));
 
     expect(read(host).images.map((one) => one.srcAttribute)).toEqual([
       'https://example.com/one.png',
+      '/i/640.png',
       '',
       '',
     ]);
-    // The property beside it, which is what the two empty cases differ on: a
-    // page, and nothing at all.
+    // The property beside it, which differs from the attribute on three of the
+    // four: a path arrives resolved, an empty attribute arrives as the page,
+    // and no attribute at all arrives as the empty string. Asserted here
+    // because the stand-in has to be the browser on exactly this point — a
+    // model where the two read alike is a model where reading the wrong one of
+    // them looks correct.
     expect(host.images.map((one) => one.src)).toEqual([
       'https://example.com/one.png',
+      'https://example.com/i/640.png',
       'https://example.com/',
       '',
     ]);
@@ -422,6 +449,10 @@ describe('the reader as the built module ships it, which is the copy a page gets
       // offers alongside itself — so the built copy is run over an attribute
       // that is there rather than only over one that is not.
       src: 'https://example.com/i/fallback.png',
+      // And the file the browser went and got, which is the matching source's
+      // and not the attribute's. Both are set because they are two facts and
+      // the built copy has to carry each of them to its own field.
+      currentSrc: 'https://example.com/i/mid.png',
       sizes: '120px',
       rect: box({ width: 475, height: 317 }),
     });
@@ -445,7 +476,7 @@ describe('the reader as the built module ships it, which is the copy a page gets
           renderedHeight: 317,
           alt: null,
           srcAttribute: 'https://example.com/i/fallback.png',
-          currentSrc: 'https://example.com/i/fallback.png',
+          currentSrc: 'https://example.com/i/mid.png',
           loading: null,
           baseURI: 'https://example.com/',
         },
