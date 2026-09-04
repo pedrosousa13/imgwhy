@@ -366,7 +366,11 @@ describe('the panel, given a page written to break out of it', () => {
 
     expect(words).toContain(`400w, ${DESCRIPTOR} (picked)`);
     expect(words).toContain(DESCRIPTOR);
-    expect(words.some((word) => word.startsWith(`Nothing has loaded yet; when it does, the arithmetic picks ${DESCRIPTOR} —`))).toBe(true);
+    expect(
+      words.some((word) =>
+        word.endsWith(`Nothing has loaded yet; when it does, the arithmetic picks ${DESCRIPTOR}.`),
+      ),
+    ).toBe(true);
     expect(nodes.filter((node) => node.name === 'mark')).toHaveLength(6);
   });
 

@@ -470,11 +470,11 @@ describe('the panel a click injects', () => {
     ]);
     expect(steps?.children[0]?.textContent).toBe('why, step by step');
     expect(steps?.children[1]?.textContent).toBe(
-      'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
-        'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser loaded 1080w, ' +
-        'which is larger. A held copy reused rather than chosen again is the likeliest cause, ' +
-        'and a viewport that shrank after load or script that rewrote sizes or srcset would read ' +
-        'the same; an empty cache is the only way to see the real pick.',
+      'On your 1440 px wide screen, sizes says 33vw, which comes to 475 px. At DPR 1 it needs a ' +
+        'file at least that wide. The arithmetic picks 640w, but the browser loaded 1080w, which is ' +
+        'larger. A held copy reused rather than chosen again is the likeliest cause, and a viewport ' +
+        'that shrank after load or script that rewrote sizes or srcset would read the same; an empty ' +
+        'cache is the only way to see the real pick.',
     );
     expect(files?.open).toBe(false);
     expect(files?.children.map((node) => node.name)).toEqual(['summary', 'dl']);
@@ -980,12 +980,14 @@ describe('the panel, checked as a boundary against page styles', () => {
     expect(css).not.toContain('url(');
   });
 
-  it('selects on tag names, and on the three tone classes the verdict carries, and no other', () => {
+  it('selects on tag names, and on the four state classes it writes, and no other', () => {
     // Which is why the elements are semantic ones. `privacy.test.ts` keeps
     // this package's list of written properties as short as the panel can be
-    // built with, and a class is on it for one reason: a tone is a state and
-    // not a kind of element, so no tag name can carry it. The three words are
-    // the extension's own, and this is the closed list of them.
+    // built with, and a class is on it for one reason: a state is not a kind of
+    // element, so no tag name can carry one. Three of these are the verdict's
+    // tone. The fourth is `waiting`, a row the browser has fetched no file for,
+    // which the panel sets back from the rest until one arrives — the same
+    // fact, on the row rather than on the word.
     const host = page();
     inPage(source, host);
     const classes = [...stylesheetIn(host).matchAll(/\.([a-z][a-z0-9-]*)/g)]
@@ -995,7 +997,7 @@ describe('the panel, checked as a boundary against page styles', () => {
       // ever follows `output`.
       .filter((name) => !/^\d/.test(name ?? ''));
 
-    expect([...new Set(classes)].sort()).toEqual(['good', 'quiet', 'warn']);
+    expect([...new Set(classes)].sort()).toEqual(['good', 'quiet', 'waiting', 'warn']);
     expect(stylesheetIn(host)).not.toMatch(/^\s*\.[a-z]/im);
   });
 });

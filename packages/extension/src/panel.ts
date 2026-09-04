@@ -460,6 +460,44 @@ export function renderPanel(panel: Panel, reading: Reading): 'opened' {
     }
 
     /*
+     * A row the browser has fetched no file for, set back from the rest.
+     *
+     * Every figure on such a row is a prediction with nothing to compare it
+     * against: no file loaded, so no descriptor, no thumbnail and no verdict on
+     * a choice. On a lazy page that is nine rows of twenty-three at the moment
+     * the panel opens, and at full strength they read as findings a reader has
+     * to work through rather than as rows still waiting for their image.
+     *
+     * A colour and not an opacity. An opacity would fade the verdict chip's own
+     * background with it, and a chip is a tinted word whose whole job is to be
+     * legible at a glance. This dims the text a step and leaves the chip alone.
+     *
+     * The row comes back to full strength on its own: the panel watches every
+     * image with no file and rewrites the list when one loads, so a reader who
+     * scrolls past a dimmed row sees it darken and take a verdict.
+     *
+     * No backticks anywhere in this comment, and that is not a style. The
+     * stylesheet is a template literal, so a pair of them ends it — the build
+     * catches it and no test does. The same trap is written into the commit
+     * for #32.
+     */
+    li.waiting p,
+    li.waiting code {
+      color: #8b9096;
+    }
+    li.waiting small {
+      color: #a2a7ad;
+      /*
+       * A step down, so the word inside the 44 pixel box fits on one line. At
+       * the size the box uses for a rendered size — three or four characters —
+       * seven of them wrap, and a word broken across two lines reads as a
+       * failure rather than as a state. The name beside the heading is the
+       * only other small on a row and a row waiting for a file has none.
+       */
+      font-size: 9px;
+    }
+
+    /*
      * The one clause, set to recede from the heading and to read in a column.
      *
      * The measure is what makes the row scannable rather than the wording
@@ -944,6 +982,11 @@ export function renderPanel(panel: Panel, reading: Reading): 'opened' {
      * drawn into the box is a square of one colour, which reads as a thumbnail
      * that failed, so the box says the size instead.
      */
+    // A row with no file is a row still waiting for its image, and it is set
+    // back from the rest until one arrives. The condition is the same one the
+    // box below uses, because it is the same fact: nothing has loaded.
+    if (row.file === '') item.className = 'waiting';
+
     if (row.tiny !== null) {
       const size = document.createElement('small');
       size.textContent = row.tiny;
