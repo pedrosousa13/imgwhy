@@ -311,32 +311,41 @@ describe('the panel the worker computes from a reading', () => {
     expect(said(rowOf({ srcset: '/i/one.png 800w' }).steps)).toEqual(['candidates  800w']);
   });
 
-  it('marks the loaded file on every row a file loaded, held copy or not', () => {
-    // The mark is not a warning about this image. It is a statement about what
-    // the figure is: `currentSrc` is what the browser has, and a browser that
-    // has a larger variant already never ran selection at all. There is no
-    // reading of the page that can tell the two apart, so the mark cannot be
-    // conditional on anything about the cache — only on there being a file for
-    // the cache to have supplied.
+  it('marks the loaded file on the rows a held copy would explain, and not the rest', () => {
+    // This asserted the opposite until #36: the mark on every row a file
+    // loaded, on the argument that `currentSrc` is what the browser has and no
+    // reading of the page says whether it chose it. That argument is still
+    // sound and it is the footer's, where it is made once about the panel. As a
+    // rule for a row it made the word unconditional, and a word on all
+    // twenty-three rows of a page tells a reader nothing about any of them —
+    // so the mark now goes where it changes the conclusion. `where the cache
+    // mark earns its place` below is the rule case by case; this is that the
+    // mark varies across one page at all.
     const panel = panelOf(
       reading({
         images: [
-          image({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/1080.png' }),
+          image({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' }),
+          image({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' }),
           image({ currentSrc: 'https://example.com/px.gif' }),
           image({ srcset: TWO, sizes: '100vw' }),
         ],
       }),
     );
 
+    expect(panel.rows.map((row) => row.mark)).toEqual([
+      'what the browser has, not what it chose',
+      null,
+      null,
+      null,
+    ]);
+    // The flag on the `loaded` line is untouched, on every row a file loaded.
+    // It says which figure the mark is about; whether the row draws one at all
+    // is the row's `mark`, and `panel.ts` reads the two together.
     expect(panel.rows.map((row) => row.details.filter((line) => line.held).map((l) => l.label))).toEqual([
       ['loaded'],
       ['loaded'],
+      ['loaded'],
       [],
-    ]);
-    expect(panel.rows.map((row) => row.mark)).toEqual([
-      'what the browser has, not what it chose',
-      'what the browser has, not what it chose',
-      null,
     ]);
   });
 
@@ -1135,6 +1144,169 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
       'On your 1440 px wide screen, sizes says 100px. At DPR 1 it needs a file at least that wide, ' +
         'and 640w is the smallest that is wide enough.',
     ]);
+  });
+});
+
+/**
+ * When the cache mark stands on a row, one case per line of the rule.
+ *
+ * It stood on every row a file loaded, and the argument for that was sound as
+ * far as it went: `currentSrc` is what the browser has, and no reading of a
+ * page says whether it chose it. What it left out is that the same is true of
+ * every row — on a page a person has browsed every image is cached, so the
+ * word stood on all twenty-three rows of the maintainer's own page and
+ * distinguished none of them from any other.
+ *
+ * So it stands where it changes the conclusion, which `markFor` states as two
+ * clauses: the loaded file is not the file the arithmetic picked, or a figure
+ * the row shows descends from the held file. Every case below is one line of
+ * that rule, and the cases that must not mark are as much of it as the ones
+ * that must — a word that appears everywhere and a word that appears nowhere
+ * are the same word.
+ *
+ * The footer is untouched, and `explains the mark once` above holds it. It
+ * makes its claim about the panel rather than about a row: nothing marked can
+ * be read as the outcome of the arithmetic, which is as true of the rows that
+ * carry the mark now as it was of all of them.
+ */
+describe('where the cache mark earns its place', () => {
+  const markAt = (fields: Parameters<typeof image>[0], dpr = 1, width = 1440): string | null =>
+    rowOf(fields, dpr, width).mark;
+
+  /** The two things the mark ever says. `markOf` is where they are worded. */
+  const HELD = 'what the browser has, not what it chose';
+  const DESCENDS = `${HELD} — and the width above descends from it`;
+
+  it('marks a row where a larger file than the pick loaded', () => {
+    // The case the mark was made for: a held copy reused rather than chosen
+    // again is the likeliest cause of the difference, so the mark is what
+    // explains the row rather than a fact repeated on every row beside it.
+    expect(
+      markAt({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' }),
+    ).toBe(HELD);
+  });
+
+  it('marks a row where a smaller file than the pick loaded', () => {
+    expect(markAt({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' })).toBe(
+      HELD,
+    );
+  });
+
+  it('marks a row where a different file shares the pick’s descriptor', () => {
+    // The pixels are the same either way, so the verdict is `fit` — and the
+    // file the browser has is still not the file the arithmetic picked, which
+    // is a difference nothing on the page explains and a held copy does.
+    expect(
+      markAt({ srcset: '/i/a.png 640w, /i/b.png 640w', sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/b.png' }),
+    ).toBe(HELD);
+  });
+
+  it('marks a row whose loaded file is not one the srcset offers', () => {
+    expect(
+      markAt({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/other.png' }),
+    ).toBe(HELD);
+  });
+
+  it('marks a row whose loaded descriptor cannot be ranked against the pick', () => {
+    expect(
+      markAt({ srcset: '/i/640.png 640w, /i/2x.png 2x', sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/2x.png' }),
+    ).toBe(HELD);
+  });
+
+  it('marks a no choice row whose loaded file is not the one file on offer', () => {
+    // One candidate is no choice at all, and the row still has a difference to
+    // explain: the srcset offered one file and the browser has another.
+    expect(markAt({ srcset: '/i/one.png 800w', currentSrc: 'https://example.com/i/other.png' })).toBe(
+      HELD,
+    );
+  });
+
+  it('marks a row whose width came from the layout the held file may have set', () => {
+    // The second clause, and the one the mark says more about: `auto` deferred
+    // to layout, the page sized nothing itself, so `css px` and every figure
+    // under it may be the loaded file's own doing. Which is also the reading
+    // that produces `can’t tell`, so the verdict and the mark agree by
+    // construction rather than by coincidence.
+    expect(
+      markAt({ srcset: TWO, sizes: 'auto', loading: 'lazy', renderedWidth: 1080, naturalWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
+    ).toBe(DESCENDS);
+  });
+
+  it('marks a no choice row whose figures descend from the one file it offers', () => {
+    // A `srcset` whose candidates all name one file made no choice, and its
+    // width came off the layout all the same. The device made no difference to
+    // the bytes; the held file may still have written the figure.
+    expect(
+      markAt({ srcset: '/clear.png 320w, /clear.png 640w', sizes: 'auto', loading: 'lazy', renderedWidth: 640, naturalWidth: 640, currentSrc: 'https://example.com/clear.png' }),
+    ).toBe(DESCENDS);
+  });
+
+  it('leaves an ordinary fit row unmarked, where the browser loaded the pick', () => {
+    // The row the rule exists for. The mark is true of it and it is true of
+    // every other row on the page alike, which is the definition of a word
+    // that costs a reader attention and buys nothing.
+    expect(
+      markAt({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' }),
+    ).toBeNull();
+  });
+
+  it('leaves an undersized row unmarked where the pick itself is what loaded', () => {
+    // A warning is not evidence of a held copy. The largest file on offer
+    // loaded and it does not cover the pixels needed, which is the srcset's
+    // doing and reads exactly the same cache-cold.
+    expect(markAt({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/1080.png' })).toBeNull();
+  });
+
+  it('leaves a no choice row unmarked where the file on offer is the one that loaded', () => {
+    // Both kinds: one candidate, and a srcset whose every candidate names one
+    // file. Neither has a difference to explain.
+    expect(markAt({ srcset: '/i/one.png 800w', currentSrc: 'https://example.com/i/one.png' })).toBeNull();
+    expect(
+      markAt({ srcset: '/clear.png 320w, /clear.png 640w', sizes: '100vw', currentSrc: 'https://example.com/clear.png' }),
+    ).toBeNull();
+  });
+
+  it('leaves a row with no srcset at all unmarked, because the page offered no other file', () => {
+    // The plainest row there is, and the case worth settling deliberately: the
+    // loaded file matches no candidate here because there are no candidates,
+    // not because the browser has something the page did not offer. Nothing
+    // was picked, so nothing differs from the pick — and the row's own answer,
+    // "your device made no difference here", is the same cache-hot or cold.
+    expect(markAt({ currentSrc: 'https://example.com/px.gif' })).toBeNull();
+  });
+
+  it('leaves a row unmarked where the sizes clause would not read, since nothing was picked', () => {
+    // `unknown` for a reason the cache has no part in: there is no width to
+    // select against, so there is no pick for the loaded file to differ from.
+    expect(
+      markAt({ srcset: TWO, sizes: '(min-width: 100px) wide', currentSrc: 'https://example.com/i/640.png' }),
+    ).toBeNull();
+  });
+
+  it('says nothing where nothing loaded, since no held copy could have supplied it', () => {
+    expect(markAt({ srcset: TWO, sizes: '33vw', renderedWidth: 475 })).toBeNull();
+  });
+
+  it('leaves a no width row unmarked rather than claim a width of zero descends from a file', () => {
+    // The edge the second clause has to settle: `sizes: auto` on an image this
+    // render drew no box for resolves to nothing, and `markFor` requires a
+    // width figure the row can use as well as a layout that produced it. "The
+    // width above descends from it" about `0px` is a claim about a figure the
+    // row does not usefully show, and the verdict here already says the
+    // arithmetic never ran — not that it ran on the file's own width.
+    expect(
+      markAt({ srcset: TWO, sizes: 'auto', loading: 'lazy', renderedWidth: 0, naturalWidth: 0, currentSrc: 'https://example.com/i/640.png' }),
+    ).toBeNull();
+  });
+
+  it('claims nothing about a zero width on a row it marks for the difference alone', () => {
+    // The other half of that decision. A `w` candidate beside an `x` one still
+    // has a density to judge, so this row is picked and judged with a width of
+    // zero — and the difference between the pick and the loaded file is real,
+    // so the row marks. What it must not do is add the clause about the width.
+    expect(
+      markAt({ srcset: '/i/640.png 640w, /i/2x.png 2x', sizes: 'auto', loading: 'lazy', renderedWidth: 0, naturalWidth: 0, currentSrc: 'https://example.com/i/640.png' }),
+    ).toBe(HELD);
   });
 });
 

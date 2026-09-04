@@ -200,8 +200,9 @@ export type Row = {
   why: string;
   /**
    * What the cache mark means on this row, said where the mark is. Null where
-   * nothing loaded, because there is then nothing a held copy could have
-   * supplied.
+   * the row carries no mark, which is most rows: `markFor` is the rule, and it
+   * puts the word where a held copy would change the conclusion rather than on
+   * every row a file loaded.
    */
   mark: string | null;
   /** The arithmetic as steps, opened once. */
@@ -795,6 +796,75 @@ const fromLayout = (selection: Selection): boolean =>
   selection.kind === 'width' && selection.widthFrom === 'layout-intrinsic';
 
 /**
+ * Whether the cache mark stands on this row, and what it says where it does.
+ *
+ * The whole rule, in one place, because "when the mark appears" is exactly the
+ * kind of rule that decays into a guess: three call sites each deciding it
+ * would be three rules within a slice or two.
+ *
+ * It used to be `has` alone — the mark on every row a file loaded. The argument
+ * for that was sound as far as it went, and it is the footer's: `currentSrc` is
+ * what the browser has, and no reading of a page says whether it chose it. What
+ * it left out is that the same is true of every row. On a page a person has
+ * browsed every image is cached, so the word stood on all twenty-three rows of
+ * the maintainer's own page and distinguished none of them from any other — a
+ * mark that never varies is decoration, and it costs a reader attention on
+ * every row it sits on.
+ *
+ * So it stands where it changes the conclusion, which is two clauses:
+ *
+ * - The loaded file is not the file the arithmetic picked — a held copy reused
+ *   rather than chosen again is the likeliest cause of that difference, so the
+ *   mark is what explains the row. Which is `oversized` and `undersized` where
+ *   the loaded file and the pick differ, a different file at the pick's own
+ *   descriptor, a loaded file the `srcset` never offered, two descriptors that
+ *   cannot be ranked, and the one file on offer where the browser has another.
+ * - A figure the row shows descends from the held file — `sizes: auto` deferred
+ *   to layout and the page sized nothing itself, so `css px` and every figure
+ *   under it may be the loaded file's own doing. `fromLayout` is that question,
+ *   and it is the same question `can’t tell` is: a verdict that depends on the
+ *   held file cannot arise without it, so it needs no clause of its own.
+ *
+ * And nowhere else. A row where the browser loaded the pick and no figure
+ * descends from what it held is a row the mark is true of exactly as much as it
+ * is true of every other row on the page.
+ *
+ * A width of zero is not a figure a row shows, which is the one edge here worth
+ * settling on purpose. `auto` on an image this render drew no box for resolves
+ * to nothing, and "the width above descends from it" about `0px` is a claim
+ * about a figure a reader cannot use — the verdict there is `no width`, which
+ * says the arithmetic never ran rather than that it ran on the file's own
+ * width. So the second clause asks for a width as well as a layout, and such a
+ * row marks only where the first clause holds. `kind` is asked again for the
+ * figure that follows it; `fromLayout` already answers for it.
+ *
+ * Null where nothing loaded, which is where it always was: there is then no
+ * file for a held copy to have supplied.
+ *
+ * `selection` is null at the one site where no arithmetic ran at all — fewer
+ * than two candidates, so nothing was selected and the single candidate on
+ * offer stands in for the pick. A row with no `srcset` offers none, and a
+ * browser that loaded the `src` has then loaded the only file there was.
+ */
+const markFor = (
+  has: boolean,
+  loaded: Candidate | null,
+  picked: Candidate | null,
+  selection: Selection | null,
+): string | null => {
+  if (!has) return null;
+
+  const differs = picked !== null && loaded !== picked;
+  const descends =
+    selection !== null &&
+    fromLayout(selection) &&
+    selection.kind === 'width' &&
+    selection.cssPx !== 0;
+
+  return differs || descends ? markOf(descends) : null;
+};
+
+/**
  * What a collapsed row says, per outcome: the pixels the arithmetic asked for
  * and the file that answers them, in one short clause.
  *
@@ -1153,11 +1223,12 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
   ];
 
   // Every file this row involves, whole. The loaded one first, because it is
-  // the one a reader came to check — and marked on every row a file loaded,
-  // held copy or not, because `currentSrc` is what the browser has and there
-  // is no reading of the page that says whether it chose it. Then every
-  // candidate in the order the page offered them, or one line where they all
-  // name one file: nine identical addresses say less than one sentence does.
+  // the one a reader came to check — and flagged on every row a file loaded,
+  // because `currentSrc` is what the browser has and there is no reading of the
+  // page that says whether it chose it. The flag says which figure the mark is
+  // about; whether the row draws one at all is `markFor`. Then every candidate
+  // in the order the page offered them, or one line where they all name one
+  // file: nine identical addresses say less than one sentence does.
   const files: Line[] = [
     ...(has ? [{ label: 'loaded', value: image.currentSrc, held: true }] : []),
     ...(sameFile
@@ -1189,7 +1260,7 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
         only === undefined
           ? 'No srcset, so your device made no difference here.'
           : 'Only one file on offer, so your device made no difference here.',
-      mark: has ? markOf(false) : null,
+      mark: markFor(has, matching[0] ?? null, only ?? null, null),
       steps: [{ label: 'candidates', value: only === undefined ? '(no srcset)' : only.raw, held: false }],
       // One candidate is one clause and no reasoning: "only one file on offer"
       // is the whole of it, and a note repeating the clause above would be the
@@ -1224,10 +1295,10 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
   // out at, and for an image the page gives no width of its own that is the
   // width of the file the browser already held.
   //
-  // `fromLayout` says why the mark covers every `auto` resolution rather than
-  // only the ones where the width provably came from the file, and the verdict
-  // asks it the same question: a row whose figures descend from the loaded file
-  // cannot read as a confirmation of it.
+  // `fromLayout` says which `auto` resolutions those are rather than only the
+  // ones where the width provably came from the file, and the verdict and the
+  // mark ask it the same question: a row whose figures descend from the loaded
+  // file cannot read as a confirmation of it.
   const laidOut = fromLayout(selection);
 
   const headline = !has ? '—' : loaded === null ? 'src' : loaded.raw;
@@ -1240,7 +1311,7 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
       verdict: NO_CHOICE,
       loaded: headline,
       why: `All ${urls.length} candidates name one file, so your device made no difference here.`,
-      mark: has ? markOf(laidOut) : null,
+      mark: markFor(has, loaded, picked, selection),
       steps,
       notes: [
         `All ${urls.length} candidates name one file, so your device made no difference here — ` +
@@ -1256,7 +1327,7 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
     verdict,
     loaded: headline,
     why,
-    mark: has ? markOf(laidOut) : null,
+    mark: markFor(has, loaded, picked, selection),
     steps,
     // The reasoning first and the circularity argument after it, in the order a
     // reader who opened the row reads them: what the arithmetic did, and then

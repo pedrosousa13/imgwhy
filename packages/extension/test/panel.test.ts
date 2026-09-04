@@ -400,7 +400,11 @@ describe('the panel a click injects', () => {
     // reading held the fit one first and the panel puts the findings on top.
     ).toEqual([
       ['output: oversized', 'button: 1080w1080.png', 'mark: cache'],
-      ['output: fit', 'button: 640w640.png', 'mark: cache'],
+      // And no chip on the second, because a held copy explains nothing about
+      // it: the browser loaded the file the arithmetic picked. `explain.ts`
+      // holds the rule; this holds that the heading carries a mark only where
+      // the row does.
+      ['output: fit', 'button: 640w640.png'],
     ]);
     expect(
       headings.map((h2) =>
@@ -534,16 +538,17 @@ describe('the panel a click injects', () => {
     inPage(source, host);
     const marks = nodesIn(host).filter((node) => node.name === 'mark');
 
-    expect(marks.map((node) => node.textContent)).toEqual(['cache', 'cache', 'cache', 'cache']);
-    // One chip in each row's heading, beside the descriptor that loaded, and
-    // one on the `loaded` URL inside the row's files.
-    expect(marks.map((node) => node.parent?.name)).toEqual(['h2', 'dd', 'h2', 'dd']);
+    expect(marks.map((node) => node.textContent)).toEqual(['cache', 'cache']);
+    // One chip in the oversized row's heading, beside the descriptor that
+    // loaded, and one on the `loaded` URL inside that row's files. The fit row
+    // draws neither: the browser loaded the pick, so "and marks nothing else"
+    // now covers whole rows rather than only the other figures on them.
+    expect(marks.map((node) => node.parent?.name)).toEqual(['h2', 'dd']);
     // The write order in `renderPanel` is what keeps the mark inside the
     // `dd`: `textContent` removes every existing child, so the value has to be
     // written before the mark is appended and never after.
     expect(marks.filter((node) => node.parent?.name === 'dd').map((node) => node.parent?.textContent)).toEqual([
       'https://example.com/i/1080.pngcache',
-      'https://example.com/i/640.pngcache',
     ]);
     // And every chip says what it means, where the mark is.
     expect([...new Set(marks.map((node) => node.title))]).toEqual([
