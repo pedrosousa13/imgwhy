@@ -218,6 +218,45 @@ export function renderPanel(panel: Panel): 'opened' {
       font-variant-numeric: tabular-nums;
     }
 
+    /*
+     * The order the list is in, and the control that changes it.
+     *
+     * The words say which order is showing rather than leaving a reader to
+     * work it out from the rows, because a list whose order is a mystery is
+     * worse than either order. They sit in the scroller above the first row
+     * and below the head, which is where the list begins.
+     *
+     * Outside the summary above, which is the arrangement rather than a
+     * detail: a button inside a summary is a control inside a control, so a
+     * click meant to re-order the list would toggle the disclosure holding it
+     * and collapse the panel. Two siblings cannot do that to each other.
+     *
+     * The control is set as a link rather than as a chip — underlined, in the
+     * one accent this panel has — because everything around it is a figure or
+     * a label, and the one thing on the line that does something has to look
+     * unlike them.
+     */
+    section > details > p {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      margin: 0;
+      padding: 5px 12px 4px;
+      border-bottom: 1px solid #d7dae0;
+      color: #5c6066;
+      font-size: 11px;
+    }
+    section > details > p > button {
+      color: #6b21a8;
+      font-size: 11px;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    section > details > p > button:hover {
+      color: #7e22ce;
+    }
+
     ol {
       margin: 0;
       padding: 0;
@@ -391,7 +430,14 @@ export function renderPanel(panel: Panel): 'opened' {
       color: #6b21a8;
     }
 
-    /* The one sentence, set to recede from the heading and to read in a column. */
+    /*
+     * The one clause, set to recede from the heading and to read in a column.
+     *
+     * The measure is what makes the row scannable rather than the wording
+     * alone, and the panel's own test reads the figure out of this rule and
+     * wraps every verdict's longest clause at it: two lines, so a row with its
+     * heading is three. A wider column would fit the words and lose the shape.
+     */
     header > p {
       margin: 0;
       max-width: 62ch;
@@ -781,10 +827,12 @@ export function renderPanel(panel: Panel): 'opened' {
   // in the path to reinterpret it. `escaping.test.ts` holds that as behaviour
   // and refuses the properties that would undo it.
   const count = document.createElement('p');
-  count.textContent = panel.head.images;
+  count.textContent = panel.head.counts;
   heading.appendChild(count);
 
-  // The two inputs, as fields. Every row's sentence names them again.
+  // The two inputs, as fields. They are stated here and nowhere else on a
+  // collapsed row: a row's reasoning names them again where a reader has asked
+  // for it, which is behind the disclosure.
   heading.appendChild(
     gridOf(
       [
@@ -798,7 +846,23 @@ export function renderPanel(panel: Panel): 'opened' {
 
   const list = document.createElement('ol');
 
-  for (const row of panel.rows) {
+  /**
+   * One row of the list, as the item a reader points at.
+   *
+   * A function rather than the body of a loop, because the list is built more
+   * than once: the order the rows are shown in is a reader's to change, and
+   * changing it means writing the list again. Everything a row is — its
+   * thumbnail, its heading, its clause, its two disclosures and its five
+   * listeners — hangs off the item this returns, so a rewritten list takes the
+   * old items and everything on them away with it.
+   *
+   * No return type written, the way `gridOf` above writes none: the element is
+   * whatever `createElement` says it is, and naming the interface would put
+   * one more DOM type in the list of names this package reaches for —
+   * `privacy.test.ts` keeps that list to the sixteen it cannot work without,
+   * and a type an inference already knows is not one of them.
+   */
+  const itemOf = (row: Row) => {
     const item = document.createElement('li');
 
     const top = document.createElement('header');
@@ -876,7 +940,8 @@ export function renderPanel(panel: Panel): 'opened' {
     }
     top.appendChild(named);
 
-    // The one sentence, which is the whole of what the collapsed row says.
+    // The one short clause, which is the whole of what the collapsed row
+    // says. `explain.ts` says why it is one clause and where the caveats went.
     const why = document.createElement('p');
     why.textContent = row.why;
     top.appendChild(why);
@@ -884,25 +949,34 @@ export function renderPanel(panel: Panel): 'opened' {
     item.appendChild(top);
 
     /**
-     * The arithmetic, which opens, and the files, which open again.
+     * The reasoning and the arithmetic, which open, and the files, which open
+     * again.
      *
      * Two disclosures nested rather than one, because they answer two
      * questions in the order a reader asks them. The first is "because x y z":
-     * the steps, aligned, no prose. The second is "which files, exactly": the
-     * whole URLs and where the image sat. Closed by default, both of them, so
-     * the default view of twenty-three images is twenty-three sentences.
+     * the reasoning in prose, and then the steps, aligned. The second is
+     * "which files, exactly": the whole URLs and where the image sat. Closed
+     * by default, both of them, so the default view of twenty-three images is
+     * twenty-three short clauses.
+     *
+     * The prose before the grid, which is the order this slice reversed. It
+     * holds the sentence the collapsed row used to say — the device, the
+     * clause, the pixels, the likely cause and the cure — so a reader who
+     * opened the row meets the answer in words before the figures it was
+     * worked out from.
      */
     const more = document.createElement('details');
     const opens = document.createElement('summary');
     opens.textContent = 'why, step by step';
     more.appendChild(opens);
-    more.appendChild(gridOf(row.steps, row.mark));
 
     for (const note of row.notes) {
       const said = document.createElement('p');
       said.textContent = note;
       more.appendChild(said);
     }
+
+    more.appendChild(gridOf(row.steps, row.mark));
 
     const deeper = document.createElement('details');
     const files = document.createElement('summary');
@@ -986,8 +1060,103 @@ export function renderPanel(panel: Panel): 'opened' {
       mark(row, named);
     });
 
-    list.appendChild(item);
+    return item;
+  };
+
+  /**
+   * The rows with the ones that are a finding first, which is what a reader of
+   * twenty-three images came for.
+   *
+   * Three passes over the same list rather than a comparator, and both halves
+   * of that are deliberate. A sort would need a comparison function and would
+   * reorder the list the panel was handed; three filters produce a new one,
+   * keep document order inside each group without anybody having to know
+   * whether the sort is stable, and are a comparison rather than arithmetic —
+   * `through-core.test.ts` refuses a multiplication and a division because
+   * those two lines are the selection algorithm, and a count and an order are
+   * neither.
+   *
+   * The tone rather than the word, because the tone is exactly the three-way
+   * question a reader is asking: is this a problem, can the panel not say, or
+   * is it fine. `explain.ts` chooses the tone for every verdict and the header
+   * counts them in the same order, so the list and the head agree about what
+   * "worst" means.
+   *
+   * What the sorted list carries is the rows themselves and not their
+   * positions. Every row holds `at`, the index into `document.images` that
+   * `imageFor` confirms and the mark and the scroll are aimed at, so a row that
+   * moved up the panel still points at the image it always described. That is
+   * the one thing a sorted view must not lose, and `pointing.test.ts` holds it.
+   */
+  const worstFirst = (rows: Row[]): Row[] => {
+    const toned = (tone: string): Row[] => rows.filter((row) => row.verdict.tone === tone);
+    return [...toned('warn'), ...toned('quiet'), ...toned('good')];
+  };
+
+  /** Whether the list is showing the rows that are a finding first. */
+  let worst = true;
+
+  /**
+   * Write the list, in whichever order is showing.
+   *
+   * `textContent` is what throws the old items away, and it takes every
+   * listener on them with it: they are all on nodes inside this closed root,
+   * which is the same property that makes the closing click one `remove()`.
+   * The one thing it does not reach is a mark, whose two window listeners are
+   * not on a node at all — so the caller that re-orders the list takes the
+   * mark down first, and says why.
+   *
+   * Nothing here touches the window, which is what keeps the first render a
+   * function of `document` alone: `panel.test.ts` builds the whole panel in a
+   * context holding a document and nothing else, and that is a claim worth
+   * keeping true.
+   */
+  const fill = (): void => {
+    list.textContent = '';
+    for (const row of worst ? worstFirst(panel.rows) : panel.rows) {
+      list.appendChild(itemOf(row));
+    }
+  };
+
+  /**
+   * Which order is showing, said, with the other one on the control.
+   *
+   * Only where there is more than one row, because a list of one has no order:
+   * the line would be a statement about nothing and the control would do
+   * nothing to it.
+   *
+   * The words before the control, in that order, for the reason the cache mark
+   * is appended after its figure: writing a node's text removes every child it
+   * had, so the other order deletes the button.
+   */
+  if (panel.rows.length > 1) {
+    const order = document.createElement('p');
+    const swap = document.createElement('button');
+
+    const showing = (): void => {
+      swap.textContent = worst ? 'Show document order' : 'Show warnings first';
+      order.textContent = worst ? 'Showing warnings first' : 'Showing document order';
+      order.appendChild(swap);
+    };
+
+    swap.addEventListener('click', () => {
+      worst = !worst;
+      // The mark comes down before the list is written again, and that is not
+      // tidiness. A mark is a closure over the row it went up for and the
+      // heading its `not found` word goes on, and both of those nodes are
+      // about to be thrown away — so a box left up across a re-order would be
+      // redrawn from a heading in no document, over an image whose row a
+      // reader can no longer find.
+      unmark();
+      showing();
+      fill();
+    });
+
+    showing();
+    card.appendChild(order);
   }
+
+  fill();
   card.appendChild(list);
 
   /**

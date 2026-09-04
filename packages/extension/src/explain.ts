@@ -61,9 +61,9 @@ export type Line = { label: string; value: string; held: boolean };
  * Three tones for eight words, because the words say what happened and the tone
  * says whether that is a problem. `good` is the file that should have loaded,
  * and it is quiet on purpose: the panel exists to find the rows that are not.
- * `warn` is bytes wasted or pixels stretched, and every sentence under one
- * carries a clause saying what to do about it, because a warning with no
- * action is noise. `quiet` is a row that is not a finding against the page —
+ * `warn` is bytes wasted or pixels stretched, and every one of them carries a
+ * clause saying what to do about it, one opening down, because a warning with
+ * no action is noise. `quiet` is a row that is not a finding against the page —
  * either the device had no say in it, or the panel cannot say. The second half
  * of that is deliberate and it is the only honest place for those rows: a
  * reading the panel cannot stand behind must not wear the tone that means
@@ -71,6 +71,10 @@ export type Line = { label: string; value: string; held: boolean };
  *
  * A closed set of three words the extension owns, and the one property the
  * renderer writes as a class. No page string can reach it.
+ *
+ * The tone is also the order. It is what puts the warnings at the top of the
+ * list and counts them first in the head, so "worst first" is decided in one
+ * place and both halves of the panel agree about what it means.
  */
 export type Tone = 'good' | 'warn' | 'quiet';
 
@@ -94,7 +98,7 @@ export type Tone = 'good' | 'warn' | 'quiet';
  *   something smaller than the pick.
  * - `no choice` — one candidate, no `srcset`, or every candidate naming one
  *   file. The device made no difference.
- * - `circular` — the pick agrees with the loaded file, and the width the pick
+ * - `can’t tell` — the pick agrees with the loaded file, and the width the pick
  *   was made against came from layout. So the loaded file may have produced the
  *   figure that confirms it, and the agreement is not evidence.
  * - `no width` — `sizes` resolved to nothing at all, so there was no width to
@@ -103,13 +107,23 @@ export type Tone = 'good' | 'warn' | 'quiet';
  *   image below the fold, most often.
  * - `unknown` — the comparison cannot settle it: nothing was picked because a
  *   `sizes` clause would not read, or the loaded file is not one the `srcset`
- *   offers. Unknown is the honest word, and the sentence says which it was.
+ *   offers. Unknown is the honest word, and the clause says which it was.
  *
  * The brief named four. `not loaded` and `unknown` are here because the four do
- * not cover a lazy image or a broken `sizes`, and `circular` and `no width`
+ * not cover a lazy image or a broken `sizes`, and `can’t tell` and `no width`
  * because they do not cover a reading that confirms itself or an element with
  * no box — and forcing any of the four into a category it does not belong to
  * would be a verdict that lies at a glance.
+ *
+ * Every one of the eight is plain English, and that is a requirement rather
+ * than a preference. `can’t tell` was `circular` for one slice, which is exact
+ * jargon for an honest idea — and the maintainer read the panel and asked what
+ * the tag meant, which is the whole argument against it: a verdict has one job,
+ * to be understood without being looked up, and a word a reader has to go and
+ * learn buys nothing at a glance. So the word names the consequence and the
+ * mechanism moved to the note the row already carried, where a reader who wants
+ * it is already asking. The apostrophe is the typographic one, because the panel
+ * writes `×`, `—` and `…` and this is copy rather than a token.
  *
  * What `oversized` deliberately does not mean, because the review of #24 asked:
  * the page having asked for more than it needed. `sizes="100px"` against 640w
@@ -128,9 +142,9 @@ export type Verdict = { word: string; tone: Tone };
  * The order of the fields is the order the panel reads them, and the three
  * levels the issue asks for. First what a reader sees without opening
  * anything: the verdict, the descriptor of the file that loaded, the name of
- * that file, and one sentence that says why. Then `steps`, the arithmetic as
- * aligned lines, opened once. Then `details`, the whole URLs and where the
- * image sat, opened again.
+ * that file, and one short clause that says why. Then `notes` and `steps`, the
+ * reasoning and the arithmetic, opened once. Then `details`, the whole URLs and
+ * where the image sat, opened again.
  *
  * The headline is the descriptor and not the file name, and that is the
  * maintainer's own words: "need to know the size that loaded like was it
@@ -167,7 +181,22 @@ export type Row = {
    * is drawn.
    */
   tiny: string | null;
-  /** The one sentence: what loaded and why, naming the reader's device. */
+  /**
+   * The one short clause a collapsed row says: what the arithmetic asked for,
+   * and which file answers it.
+   *
+   * One clause and no caveat, which is a change of shape rather than of
+   * wording. This was the answer followed by three hedges in one paragraph —
+   * about sixty words over seven lines on the row that needed them most — so
+   * three rows filled the panel and a reader met the hedge before the fact. The
+   * hedges are in `notes` now, behind the disclosure the row already had, and
+   * `why` is what a scan reads.
+   *
+   * The reader's device is named in `notes` and not here. Both figures are
+   * stated in the head as the inputs they are, and a row that repeated them was
+   * answering a question a reader can see the answer to — twenty-three times,
+   * three lines at a time.
+   */
   why: string;
   /**
    * What the cache mark means on this row, said where the mark is. Null where
@@ -179,18 +208,42 @@ export type Row = {
   steps: Line[];
   /** Every file whole, and where the image sat, opened again. */
   details: Line[];
-  /** Prose the arithmetic needs, shown with the steps. */
+  /**
+   * The reasoning, shown with the steps: the causal chain from the reader's
+   * device through `sizes` to the pixels needed, the cause named as a
+   * likelihood where the panel cannot know it, the cure, and the argument
+   * against trusting a width that came from layout.
+   *
+   * Every sentence here is a sentence the collapsed row used to say. Moved
+   * rather than rewritten, and moved rather than dropped: the reader who
+   * opened a row asked for exactly this, and a reader scanning twenty-three
+   * rows did not.
+   */
   notes: string[];
 };
 
 /**
- * The two inputs every row's sentence names, and the count.
+ * The two inputs every row's reasoning names, and what the page's images
+ * amount to.
  *
  * Separate fields rather than one line, because the viewport width and the
  * ratio are the two numbers that explain every row below them, and the panel
  * lays them out as inputs rather than as a line of metadata.
  */
-export type Head = { width: string; dpr: string; images: string };
+export type Head = {
+  width: string;
+  dpr: string;
+  /**
+   * How many images, and how many of each verdict — `23 images · 1 oversized ·
+   * 3 can’t tell · 19 fit`.
+   *
+   * The glance-level answer for a whole page, which is the thing a reader of
+   * twenty-three rows wanted and `23 images` did not say: how much there is to
+   * read, and nothing about what it says. The counts partition the page, so the
+   * line is an answer rather than a highlight reel.
+   */
+  counts: string;
+};
 
 /**
  * The whole panel as plain data, which is what crosses into the page.
@@ -209,13 +262,65 @@ const FIT: Verdict = { word: 'fit', tone: 'good' };
 const OVERSIZED: Verdict = { word: 'oversized', tone: 'warn' };
 const UNDERSIZED: Verdict = { word: 'undersized', tone: 'warn' };
 const NO_CHOICE: Verdict = { word: 'no choice', tone: 'quiet' };
-const CIRCULAR: Verdict = { word: 'circular', tone: 'quiet' };
+const CANT_TELL: Verdict = { word: 'can’t tell', tone: 'quiet' };
 const NO_WIDTH: Verdict = { word: 'no width', tone: 'quiet' };
 const NOT_LOADED: Verdict = { word: 'not loaded', tone: 'quiet' };
 // A literal rather than `UNKNOWN`, because `dormant.test.ts` reads a constant
 // initialised from another name as something that runs at load, and the word
 // is the same word either way.
 const UNSETTLED: Verdict = { word: 'unknown', tone: 'quiet' };
+
+/**
+ * Every verdict there is, worst first.
+ *
+ * The order the header's counts read in, and it is the same order on every
+ * page: a line whose words moved about with the page would be a line a reader
+ * has to read rather than recognise. Warnings, then the rows the panel cannot
+ * stand behind, then the ones that are fine — which is the tone order the list
+ * offers as "warnings first", so the header and the list agree.
+ *
+ * A function rather than a constant, and for the reason `footerOf` is one:
+ * `dormant.test.ts` reads a top-level array built out of other names as
+ * something that runs when the worker loads, and it is right to. Building the
+ * list on the one call that reads it costs a click nothing.
+ *
+ * A written list rather than a walk over the rows, so a verdict left out of it
+ * is a page the header under-reports. `explain.test.ts` sums the counts against
+ * the number of rows, which is what fails when the ninth verdict arrives
+ * without being added here.
+ */
+const everyVerdict = (): Verdict[] => [
+  OVERSIZED,
+  UNDERSIZED,
+  CANT_TELL,
+  NO_WIDTH,
+  NOT_LOADED,
+  UNSETTLED,
+  NO_CHOICE,
+  FIT,
+];
+
+/**
+ * How many images got each verdict, worst first, with the ones no image got
+ * left out.
+ *
+ * A count is a length and nothing else, which is what makes this arithmetic the
+ * extension is allowed: `through-core.test.ts` refuses a multiplication and a
+ * division because those two lines are the selection algorithm, and the number
+ * of items in a list is neither.
+ *
+ * Verdicts no image on the page got are dropped rather than shown at zero. A
+ * page of twenty-three photographs would otherwise carry five zeroes in the one
+ * line a reader is meant to take in without reading.
+ */
+const tally = (rows: Row[]): string[] =>
+  everyVerdict()
+    .map((verdict) => ({
+      word: verdict.word,
+      count: rows.filter((row) => row.verdict.word === verdict.word).length,
+    }))
+    .filter((one) => one.count > 0)
+    .map((one) => `${one.count} ${one.word}`);
 
 /**
  * What the footer says about the two things the extension cannot do.
@@ -559,13 +664,15 @@ function widthOf(resolution: Resolution, cssPx: number): string {
 
 /**
  * The causal chain from the reader's device to the pixels needed, which every
- * sentence below contains.
+ * row's reasoning contains.
  *
  * The device first and `sizes` second, in that order, because the reader's
  * question is "is it because of my device?" and the answer has to name the two
- * numbers on the line they are looking at. The viewport width and the ratio
- * are already in the panel head; naming them again in every sentence is
- * deliberate.
+ * numbers rather than point at them. Which is why the chain is here and not in
+ * the collapsed clause: the head states the width and the ratio as the inputs
+ * they are, so a row that named them again on every line was answering a
+ * question a reader could already see the answer to. Behind the disclosure it
+ * is answering one somebody asked.
  *
  * Lower case throughout, because the chain follows a dash as often as it opens
  * a sentence, and `capital` is what opens one.
@@ -649,6 +756,45 @@ function ranked(loaded: Candidate, picked: Candidate): 'larger' | 'smaller' | 'e
 const fromLayout = (selection: Selection): boolean =>
   selection.kind === 'width' && selection.resolution.kind === 'auto';
 
+/**
+ * What a collapsed row says, per outcome: the pixels the arithmetic asked for
+ * and the file that answers them, in one short clause.
+ *
+ * Four of them, and every one has the same two halves — what was needed, and
+ * which file covers it — because that is the pair the maintainer's own shape
+ * asks for: "**1920w loaded.** Needs 1468 px, and 1920w is the smallest that
+ * covers it." The first half of that is the headline the row already has, so
+ * these are the second.
+ *
+ * A width-selected row opens with the figure and a density-selected row cannot,
+ * because there is no width and no pixel count to open with: `sizes` never
+ * entered, the ratio is the whole cause, and the clause points at the head
+ * field that holds it rather than repeating the number. That is the same split
+ * `winning` and `stretched` make below, and for the same reason.
+ */
+const fits = (selection: Selection, picked: Candidate): string =>
+  selection.kind === 'width' && picked.w !== null
+    ? `Needs ${Math.round(selection.neededPx)} px, and ${picked.raw} is the smallest file that covers it.`
+    : `${picked.raw} is the smallest density at or above your pixel ratio.`;
+
+/** The clause for a pick that is the largest on offer and still falls short. */
+const biggest = (selection: Selection, picked: Candidate): string =>
+  selection.kind === 'width' && picked.w !== null
+    ? `Needs ${Math.round(selection.neededPx)} px, and ${picked.raw} is the largest file on offer.`
+    : `${picked.raw} is the densest on offer, and your pixel ratio is higher.`;
+
+/** The clause for a file larger than the one that would have covered it. */
+const spare = (selection: Selection, picked: Candidate, loaded: Candidate): string =>
+  selection.kind === 'width' && picked.w !== null
+    ? `Needs ${Math.round(selection.neededPx)} px, and ${picked.raw} covers it, so ${loaded.raw} is larger than needed.`
+    : `${picked.raw} covers your pixel ratio, so ${loaded.raw} is larger than needed.`;
+
+/** The clause for a file that does not reach what the device needs. */
+const short = (selection: Selection, picked: Candidate, loaded: Candidate): string =>
+  selection.kind === 'width' && picked.w !== null
+    ? `Needs ${Math.round(selection.neededPx)} px, and ${loaded.raw} does not cover it.`
+    : `${picked.raw} covers your pixel ratio, and ${loaded.raw} does not.`;
+
 /** The one clause that says why the pick wins, per kind of selection. */
 const winning = (selection: Selection, picked: Candidate): string =>
   selection.kind === 'width' && picked.w !== null
@@ -664,19 +810,26 @@ const stretched = (selection: Selection, picked: Candidate): string =>
       `add a candidate above ${picked.raw}`;
 
 /**
- * The verdict and the sentence for a row that had a real choice to make.
+ * The verdict, the clause and the reasoning for a row that had a real choice
+ * to make.
  *
- * One template per outcome, and every template has the same shape: the
- * outcome first, then the causal chain, then — where the outcome is a warning
- * — what to do about it. The reader who stops after the first clause has the
- * answer; the reader who goes on has the reason.
+ * Two levels rather than one sentence, which is the shape the disclosure
+ * already had and the sentence did not use. `why` is the outcome in one short
+ * clause; `because` is the causal chain, the cause named as a likelihood where
+ * the panel cannot know it, and the cure. The reader who scans has the answer
+ * and the reader who opens a row has the reason, and neither is made to read
+ * the other's half.
+ *
+ * Every sentence in `because` is the sentence this used to return. It was
+ * correct and it was too much to meet twenty-three times, which is a question
+ * about where prose goes rather than about what it says.
  */
 function judged(
   selection: Selection,
   device: DeviceProfile,
   loaded: Candidate | null,
   has: boolean,
-): { verdict: Verdict; why: string } {
+): { verdict: Verdict; why: string; because: string[] } {
   const picked = selection.picked;
   const chain = chainOf(selection, device);
 
@@ -699,28 +852,47 @@ function judged(
     if (selection.kind === 'width' && selection.cssPx === 0) {
       return {
         verdict: NO_WIDTH,
-        why:
+        // The clause names neither cause, because there are two of them and
+        // they are two different findings: a box this render drew nothing for,
+        // and a page that wrote `0px` itself. The note is where they are told
+        // apart, and a clause that named one of them would be wrong about the
+        // other half of the time.
+        why: 'No width to select against, so nothing was picked.',
+        because: [
           `${capital(widthOf(selection.resolution, selection.cssPx))}, so there was no width to ` +
-          'select against and nothing was picked — an image this render drew no box for, such ' +
-          'as a lazy one below the fold, is the ordinary cause. The srcset is not what to look ' +
-          'at here.',
+            'select against and nothing was picked — an image this render drew no box for, such ' +
+            'as a lazy one below the fold, is the ordinary cause. The srcset is not what to look ' +
+            'at here.',
+        ],
       };
     }
 
     return {
       verdict: UNSETTLED,
+      // The clause at fault is not named here and is named in the note. It is
+      // page content, so its length is the page's to choose, and a collapsed
+      // row is the one place in the panel that cannot afford an unbounded
+      // string — `clause used` is where a reader is already looking for it.
       why:
+        selection.kind === 'unreadable'
+          ? 'The sizes clause could not be read, so nothing was picked.'
+          : 'No candidate carries a readable descriptor, so nothing was picked.',
+      because: [
         selection.kind === 'unreadable'
           ? `The sizes clause ${selection.resolution.clause} could not be read as a length, so ` +
             'there is no width to select against and nothing was picked; fix the sizes attribute.'
           : 'No candidate carries a readable descriptor, so nothing was picked; fix the srcset.',
+      ],
     };
   }
 
   if (!has) {
     return {
       verdict: NOT_LOADED,
-      why: `Nothing has loaded yet; when it does, the arithmetic picks ${picked.raw} — ${chain}.`,
+      why: `Nothing has loaded yet, and the arithmetic picks ${picked.raw}.`,
+      because: [
+        `Nothing has loaded yet; when it does, the arithmetic picks ${picked.raw} — ${chain}.`,
+      ],
     };
   }
 
@@ -729,7 +901,8 @@ function judged(
   if (loaded === null) {
     return {
       verdict: UNSETTLED,
-      why: `${picks}the loaded file is not one the srcset offers; check what set this src.`,
+      why: 'The loaded file is not one the srcset offers.',
+      because: [`${picks}the loaded file is not one the srcset offers; check what set this src.`],
     };
   }
 
@@ -748,7 +921,11 @@ function judged(
           'so the pixels are the same either way.';
 
     if (!covers(selection, picked, device.dpr)) {
-      return { verdict: UNDERSIZED, why: `${capital(chain)} — ${stretched(selection, picked)}.${tie}` };
+      return {
+        verdict: UNDERSIZED,
+        why: biggest(selection, picked),
+        because: [`${capital(chain)} — ${stretched(selection, picked)}.${tie}`],
+      };
     }
 
     // The one place a good verdict is withheld. Every figure the agreement
@@ -756,16 +933,24 @@ function judged(
     // would be the row confirming its own coincidence — and it would do it in
     // the quietest words the panel has, which is the panel being least
     // sceptical exactly where it knows least.
+    //
+    // The clause says the consequence and not the arithmetic, which is the one
+    // outcome where those are different things: a row that opened with the
+    // figures would read exactly like `fit` at a glance, and the figures are
+    // the part a reader cannot use. `circular()` is the mechanism and it is
+    // appended after this, so the tail this sentence used to carry is not
+    // written twice into one disclosure.
     return fromLayout(selection)
       ? {
-          verdict: CIRCULAR,
-          why:
-            `${capital(chain)} — ${winning(selection, picked)}.${tie} But that width came from ` +
-            'layout, and for an image the page gives no width of its own the layout width is the ' +
-            'width of the file the browser already held — so the pick may agree with the loaded ' +
-            'file because one produced the other; an empty cache is the only way to tell.',
+          verdict: CANT_TELL,
+          why: 'The width came from the loaded file, so the pick cannot disagree with it.',
+          because: [`${capital(chain)} — ${winning(selection, picked)}.${tie}`],
         }
-      : { verdict: FIT, why: `${capital(chain)} — ${winning(selection, picked)}.${tie}` };
+      : {
+          verdict: FIT,
+          why: fits(selection, picked),
+          because: [`${capital(chain)} — ${winning(selection, picked)}.${tie}`],
+        };
   }
 
   switch (rank) {
@@ -777,11 +962,13 @@ function judged(
       // is named as a likelihood, which is what the panel can stand behind.
       return {
         verdict: OVERSIZED,
-        why:
+        why: spare(selection, picked, loaded),
+        because: [
           `${picks}the browser loaded ${loaded.raw}, which is larger. A held copy reused rather ` +
-          'than chosen again is the likeliest cause, and a viewport that shrank after load or ' +
-          'script that rewrote sizes or srcset would read the same; an empty cache is the only ' +
-          'way to see the real pick.',
+            'than chosen again is the likeliest cause, and a viewport that shrank after load or ' +
+            'script that rewrote sizes or srcset would read the same; an empty cache is the only ' +
+            'way to see the real pick.',
+        ],
       };
     case 'smaller':
       // The figure the shortfall is against is the one the row already shows,
@@ -790,17 +977,21 @@ function judged(
       // observation of the rendered image, which nothing here can make.
       return {
         verdict: UNDERSIZED,
-        why:
+        why: short(selection, picked, loaded),
+        because: [
           `${picks}the browser loaded ${loaded.raw}, which does not cover the pixels needed ` +
-          'above, so the image is upscaled wherever the page draws it at that size; check what ' +
-          'set this src.',
+            'above, so the image is upscaled wherever the page draws it at that size; check what ' +
+            'set this src.',
+        ],
       };
     case null:
       return {
         verdict: UNSETTLED,
-        why:
+        why: 'A w and an x descriptor cannot be ranked against each other.',
+        because: [
           `${picks}the browser loaded ${loaded.raw}, and a w and an x descriptor cannot be ` +
-          'ranked against each other.',
+            'ranked against each other.',
+        ],
       };
   }
 }
@@ -952,12 +1143,21 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
       loaded: !has ? '—' : only !== undefined && matching.length > 0 ? only.raw : 'src',
       why:
         only === undefined
-          ? 'No srcset, so your device made no difference here; the src attribute is the only ' +
-            'file on offer.'
+          ? 'No srcset, so your device made no difference here.'
           : 'Only one file on offer, so your device made no difference here.',
       mark: has ? markOf(false) : null,
       steps: [{ label: 'candidates', value: only === undefined ? '(no srcset)' : only.raw, held: false }],
-      notes: [],
+      // One candidate is one clause and no reasoning: "only one file on offer"
+      // is the whole of it, and a note repeating the clause above would be the
+      // reader reading the same words twice. A page with no `srcset` at all has
+      // one more fact to give, which is where its one file came from.
+      notes:
+        only === undefined
+          ? [
+              'No srcset, so your device made no difference here; the src attribute is the only ' +
+                'file on offer.',
+            ]
+          : [],
     };
   }
 
@@ -988,23 +1188,25 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
 
   const headline = !has ? '—' : loaded === null ? 'src' : loaded.raw;
   const steps = stepsOf(image, selection, device, loaded, laidOut);
-  const notes = laidOut ? [circular()] : [];
+  const circularity = laidOut ? [circular()] : [];
 
   if (sameFile) {
     return {
       ...carried,
       verdict: NO_CHOICE,
       loaded: headline,
-      why:
-        `All ${urls.length} candidates name one file, so your device made no difference here — ` +
-        'the descriptors differ and the bytes do not.',
+      why: `All ${urls.length} candidates name one file, so your device made no difference here.`,
       mark: has ? markOf(laidOut) : null,
       steps,
-      notes,
+      notes: [
+        `All ${urls.length} candidates name one file, so your device made no difference here — ` +
+          'the descriptors differ and the bytes do not.',
+        ...circularity,
+      ],
     };
   }
 
-  const { verdict, why } = judged(selection, device, loaded, has);
+  const { verdict, why, because } = judged(selection, device, loaded, has);
   return {
     ...carried,
     verdict,
@@ -1012,7 +1214,10 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
     why,
     mark: has ? markOf(laidOut) : null,
     steps,
-    notes,
+    // The reasoning first and the circularity argument after it, in the order a
+    // reader who opened the row reads them: what the arithmetic did, and then
+    // why its agreement with the loaded file is worth nothing.
+    notes: [...because, ...circularity],
   };
 }
 
@@ -1028,6 +1233,11 @@ function rowOf(raw: RawImage, device: DeviceProfile): Row {
  */
 export function panelOf(reading: Reading): Panel {
   const device = deviceOf(reading);
+
+  // Every row first, because the head is a statement about them: the counts are
+  // the verdicts the rows arrived at, and a header that guessed them from the
+  // reading would be a second answer to a question the rows have answered.
+  const rows = reading.images.map((raw) => rowOf(raw, device));
 
   // Nothing at all where nothing was painted. A line reading `0 background
   // images` on every page would bury the pages that have some.
@@ -1045,9 +1255,13 @@ export function panelOf(reading: Reading): Panel {
     head: {
       width: `${reading.viewport.width} px`,
       dpr: dprWord(reading.dpr),
-      images: plural(reading.images.length, 'image'),
+      // The count, then what the images amount to. A middle dot rather than a
+      // second line, because the two halves answer one question — how much is
+      // here, and how much of it is a problem — and a reader takes them in
+      // together or not at all.
+      counts: [plural(rows.length, 'image'), ...tally(rows)].join(' · '),
     },
-    rows: reading.images.map((raw) => rowOf(raw, device)),
+    rows,
     footer: [...footerOf(), ...backgrounds],
   };
 }
