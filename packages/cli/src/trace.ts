@@ -4,6 +4,81 @@ import { explainSelection } from '@imgwhy/core';
 /** One image as one device saw it. */
 type Sighting = { device: DeviceProfile; image: CapturedImage };
 
+/**
+ * A control character, written as the six characters that spell it.
+ *
+ * A page decides these bytes. `sizes` and `srcset` are attribute values, the
+ * HTML parser keeps every control character in one, and a terminal reads some
+ * of them as orders rather than as text: an ESC opens a sequence that can
+ * retitle the window or erase the line it lands on — the `← differs` marker
+ * included — and a CR or an LF ends this trace's line early and gives the rest
+ * of the attribute a line of its own, which is a fact a reader would credit to
+ * imgwhy rather than to the page.
+ *
+ * Written rather than dropped, and that is the whole of the choice. The same
+ * attribute already reads `\u001b` in `--json`, because `JSON.stringify`
+ * escapes it there, so dropping it here would give one run two spellings of
+ * one attribute across its two outputs, and the trace would be quietly short
+ * of what the page held. A tool whose subject is what the page said does not
+ * discard part of what it said.
+ *
+ * `\p{Cc}` is Unicode's control category and nothing besides: C0, DEL and C1,
+ * which is every character a terminal can read as an order and no character
+ * it prints. What comes back is printable ASCII, so `String.length` is a
+ * printed width again — which is what puts the table's columns back under each
+ * other — and escaping an escaped string changes nothing.
+ */
+const escape = (value: string): string =>
+  value.replace(/\p{Cc}/gu, (found) => `\\u${found.charCodeAt(0).toString(16).padStart(4, '0')}`);
+
+/**
+ * One finished line of the trace: escaped where it came off the page, or
+ * written as a literal part of a template here.
+ *
+ * `Line` is not exported and it holds its text privately, so nothing outside
+ * this module can make one. TypeScript compares a class with a private member
+ * by name rather than by shape, so no string and no object literal can stand
+ * in for one either. That is what makes `say` the only route to the trace: a
+ * string off the page reaching a line has to pass through an interpolation,
+ * and every interpolation escapes.
+ *
+ * There is no way to turn that off, and the reason is not distrust of the
+ * next contributor. It is that escaping at each call site is a thing to
+ * remember, and the line added to this trace next year is the one that would
+ * forget. `packages/report/src/html.ts` holds the same shape against the same
+ * problem and says the rest of why.
+ */
+class Line {
+  constructor(private readonly text: string) {}
+
+  toString(): string {
+    return this.text;
+  }
+}
+
+/**
+ * Anything an interpolation may carry.
+ *
+ * A `string` is page content until proven otherwise, so it is escaped — the
+ * labels and the sentences this file writes are strings too, and escaping one
+ * of those changes nothing. A `number` cannot carry a control character. A
+ * `Line` is already escaped, which is what lets a finished line be indented by
+ * writing it into another one.
+ */
+type Value = string | number | Line;
+
+const rendered = (value: Value): string =>
+  typeof value === 'string' ? escape(value) : String(value);
+
+/** Build one line from a template, escaping every interpolation. */
+function say(parts: TemplateStringsArray, ...values: Value[]): Line {
+  let out = parts[0];
+  for (let i = 0; i < values.length; i++) {
+    out += rendered(values[i]) + parts[i + 1];
+  }
+  return new Line(out);
+}
+
 const absolute = (url: string, base: string): string => {
   try {
     return new URL(url, base).href;
@@ -33,7 +108,7 @@ const bytesArrived = (transferBytes: number | null): string =>
   transferBytes === null ? 'unknown' : String(transferBytes);
 
 /** `label` and value, on the label column every image block shares. */
-const field = (label: string, value: string): string => `  ${label.padEnd(10)}  ${value}`;
+const field = (label: string, value: string): Line => say`  ${label.padEnd(10)}  ${value}`;
 
 const plural = (count: number, noun: string): string =>
   `${count} ${noun}${count === 1 ? '' : 's'}`;
@@ -110,7 +185,7 @@ function agreed(measurements: [device: string, value: string][]): string {
 const fieldPerValue = (
   label: string,
   measurements: [device: string, value: string][],
-): string[] => {
+): Line[] => {
   const groups = grouped(measurements);
   return groups.map(([value, measured]) =>
     field(label, groups.length === 1 ? value : `${value} on ${measured.join(', ')}`),
@@ -164,16 +239,21 @@ const COLUMNS: (keyof Row)[] = [
  * Every column is left aligned, so a reader can run an eye straight down one
  * of them and every row breaks in the same place.
  */
-function table(rows: Row[]): string[] {
-  const widths = COLUMNS.map((column) =>
-    Math.max(column.length, ...rows.map((row) => row[column].length)),
+function table(rows: Row[]): Line[] {
+  // Escaped before the widths are taken, because the width a column is padded
+  // to has to be the printed one. A control character is one character in the
+  // string the page wrote and six in the string a terminal shows, so a column
+  // measured before the escape is a column the next row does not line up
+  // under — which is the one defect here a reader sees rather than obeys.
+  const shown = rows.map((row) => COLUMNS.map((column) => escape(row[column])));
+  const widths = COLUMNS.map((column, i) =>
+    Math.max(column.length, ...shown.map((cells) => cells[i].length)),
   );
-  const line = (cells: string[]): string =>
-    cells
-      .map((cell, i) => cell.padEnd(widths[i]))
-      .join('  ')
-      .trimEnd();
-  return [line(COLUMNS), ...rows.map((row) => line(COLUMNS.map((column) => row[column])))];
+  const line = (cells: string[]): Line => {
+    const padded = cells.map((cell, i) => cell.padEnd(widths[i])).join('  ');
+    return say`${padded.trimEnd()}`;
+  };
+  return [line(COLUMNS), ...shown.map((cells) => line(cells))];
 }
 
 /**
@@ -190,12 +270,12 @@ function table(rows: Row[]): string[] {
 export function formatCapture(capture: Capture): string {
   const groups = groupById(capture);
   const head = [
-    `url      ${capture.url}`,
-    `images   ${groups.length} on ${capture.devices.length} devices`,
+    say`url      ${capture.url}`,
+    say`images   ${groups.length} on ${capture.devices.length} devices`,
     ...backgrounds(capture),
   ];
   const blocks = groups.flatMap(([id, sightings], index) => [
-    '',
+    say``,
     ...imageBlock(capture.url, capture.devices, id, sightings, index + 1, groups.length),
   ]);
   return [...head, ...blocks].join('\n');
@@ -219,7 +299,7 @@ export function formatCapture(capture: Capture): string {
  * Nothing at all where nothing was painted. A line reading `0 background
  * images` on every page would bury the pages that have some.
  */
-function backgrounds(capture: Capture): string[] {
+function backgrounds(capture: Capture): Line[] {
   if (capture.runs.every((run) => run.backgroundImageCount === 0)) return [];
 
   const counted: [string, string][] = [];
@@ -231,10 +311,12 @@ function backgrounds(capture: Capture): string[] {
     if (run) counted.push([device.name, plural(run.backgroundImageCount, 'background image')]);
   }
 
-  return [
-    `css      ${agreed(counted)}. A CSS background image has no selection mechanism at all, ` +
-      'so imgwhy counts them and explains nothing further.',
-  ];
+  // The sentence is its own string because a Line cannot be concatenated —
+  // that is the point of one — and it does not fit a template on one line.
+  const explains =
+    'A CSS background image has no selection mechanism at all, so imgwhy counts them and ' +
+    'explains nothing further.';
+  return [say`css      ${agreed(counted)}. ${explains}`];
 }
 
 /** Every image, keyed by the id that holds across runs, in first-seen order. */
@@ -262,12 +344,12 @@ function imageBlock(
   sightings: Sighting[],
   index: number,
   total: number,
-): string[] {
+): Line[] {
   const first = sightings[0];
   if (!first) throw new Error(`the capture groups image "${id}" with no sighting to explain`);
   const { candidates } = first.image;
   const lazy = sightings.some((s) => s.image.loading === 'lazy');
-  const lines = [`image ${index} of ${total}  ${id}${lazy ? '   loading=lazy' : ''}`];
+  const lines = [say`image ${index} of ${total}  ${id}${lazy ? '   loading=lazy' : ''}`];
 
   // Nothing to select means nothing to explain, and a table of five identical
   // rows would only bury the images that do choose. This is also what keeps a
@@ -276,7 +358,7 @@ function imageBlock(
   if (candidates.length < 2) {
     const files = perDevice(sightings, (image) => fileOf(image.currentSrc, base));
     const why = candidates.length === 0 ? 'no srcset' : 'one candidate only';
-    lines.push(`  ${why}, so nothing was selected — file  ${files}`);
+    lines.push(say`  ${why}, so nothing was selected — file  ${files}`);
     // Bytes still arrived for it, so they are still reported. A 1×1 tracking
     // pixel weighs what it weighs whether or not anything chose it.
     //
@@ -325,8 +407,8 @@ function imageBlock(
   const absent = devices.filter((d) => !sightings.some((s) => s.device.id === d.id));
   if (absent.length) lines.push(field('not on', absent.map((d) => d.name).join(', ')));
 
-  lines.push('');
-  lines.push(...table(sightings.map((s) => row(base, s))).map((l) => `  ${l}`));
+  lines.push(say``);
+  lines.push(...table(sightings.map((s) => row(base, s))).map((l) => say`  ${l}`));
   return lines;
 }
 
