@@ -14,7 +14,39 @@ export type Outcome = { code: number; stdout: string; stderr: string };
 const fail = (message: string): Outcome => ({ code: 1, stdout: '', stderr: `${message}\n` });
 
 /**
- * Render one page as every device profile and trace every image on it.
+ * Keep the profiles `--device` named, in the order the set holds them.
+ *
+ * A filter and never a replacement: the ids select from the set that was
+ * loaded, so `desktop` still means whatever `imgwhy.config.json` said it
+ * means, and the small-to-large order the set was written in survives a flag
+ * that named its devices in any other order.
+ *
+ * An id no profile carries is refused rather than skipped. Rendering four of
+ * the five devices asked for would answer a question nobody put, and a typo
+ * would read as a finding. The message lists the ids that do exist, because a
+ * config file can replace the set and the reader has no other way to see it.
+ */
+function selectDevices(
+  profiles: DeviceProfile[],
+  ids: string[] | null,
+): { ok: true; profiles: DeviceProfile[] } | { ok: false; message: string } {
+  if (ids === null) return { ok: true, profiles };
+
+  const known = new Set(profiles.map((profile) => profile.id));
+  for (const id of ids) {
+    if (!known.has(id)) {
+      const all = profiles.map((profile) => profile.id).join(', ');
+      return { ok: false, message: `no device is called "${id}", and this run can render ${all}` };
+    }
+  }
+
+  const wanted = new Set(ids);
+  return { ok: true, profiles: profiles.filter((profile) => wanted.has(profile.id)) };
+}
+
+/**
+ * Render one page as every device profile, or as the ones `--device` named,
+ * and trace every image on it.
  *
  * The command line, the URL and the device set are all checked before anything
  * opens a browser, so a typo in any of them costs no browser start.
@@ -51,9 +83,12 @@ export async function run(
   const devices = loadDeviceProfiles(cwd);
   if (!devices.ok) return fail(devices.message);
 
+  const rendering = selectDevices(devices.profiles, args.devices);
+  if (!rendering.ok) return fail(rendering.message);
+
   let captured: Capture;
   try {
-    captured = await capture({ url: target.url, profiles: devices.profiles });
+    captured = await capture({ url: target.url, profiles: rendering.profiles });
   } catch (error) {
     return fail(messageOf(error));
   }
