@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { refuseStaleBuild } from '../../../test/built.js';
 import type { Panel } from '../src/explain.js';
+import type { Reading } from '../src/read.js';
 import { panelOf } from '../src/explain.js';
 import { renderPanel } from '../src/panel.js';
 import type { El, Page } from './dom.js';
@@ -14,40 +15,48 @@ import { image, reading } from './reading.js';
 const HOST_ID = '__imgwhy_host__';
 
 /**
- * A panel of two images: one whose prediction and loaded file agree, and one
- * where they do not.
+ * Two images: one whose prediction and loaded file agree, and one where they
+ * do not.
  *
- * Built through `panelOf` rather than written out, so what the renderer is
- * handed is what the worker actually produces. A hand-written literal would
- * drift from the worker's shape and the drift would look like a passing test.
+ * The panel below is built through `panelOf` rather than written out, so what
+ * the renderer is handed is what the worker actually produces. A hand-written
+ * literal would drift from the worker's shape and the drift would look like a
+ * passing test.
+ *
+ * The reading goes over with it, because the renderer keeps it.
+ *
+ * The renderer keeps it: a row for an image the browser has not fetched cannot
+ * be judged, and the panel is what notices when the page finally fetches one.
+ * Both of these images have loaded, so nothing here is watched and the render
+ * stays a function of `document` alone.
  */
-const PANEL: Panel = panelOf(
-  reading({
-    images: [
-      image({
-        at: 0,
-        selector: 'html > body > img:nth-of-type(1)',
-        srcset: '/i/640.png 640w, /i/1080.png 1080w',
-        sizes: '33vw',
-        renderedWidth: 475,
-        renderedHeight: 317,
-        alt: 'A person at a desk',
-        currentSrc: 'https://example.com/i/640.png',
-      }),
-      image({
-        at: 1,
-        selector: 'html > body > img:nth-of-type(2)',
-        srcset: '/i/640.png 640w, /i/1080.png 1080w',
-        sizes: '33vw',
-        renderedWidth: 475,
-        renderedHeight: 317,
-        currentSrc: 'https://example.com/i/1080.png',
-        loading: 'lazy',
-      }),
-    ],
-    backgroundImageCount: 2,
-  }),
-);
+const READING = reading({
+  images: [
+    image({
+      at: 0,
+      selector: 'html > body > img:nth-of-type(1)',
+      srcset: '/i/640.png 640w, /i/1080.png 1080w',
+      sizes: '33vw',
+      renderedWidth: 475,
+      renderedHeight: 317,
+      alt: 'A person at a desk',
+      currentSrc: 'https://example.com/i/640.png',
+    }),
+    image({
+      at: 1,
+      selector: 'html > body > img:nth-of-type(2)',
+      srcset: '/i/640.png 640w, /i/1080.png 1080w',
+      sizes: '33vw',
+      renderedWidth: 475,
+      renderedHeight: 317,
+      currentSrc: 'https://example.com/i/1080.png',
+      loading: 'lazy',
+    }),
+  ],
+  backgroundImageCount: 2,
+});
+
+const PANEL: Panel = panelOf(READING);
 
 /**
  * The panel, run the way Chrome runs it: the text of the function, evaluated
@@ -64,9 +73,18 @@ const PANEL: Panel = panelOf(
  * JSON is something the page would never receive — which is what makes the
  * `Panel` type strings and booleans and nothing else.
  */
-const inPage = (source: string, host: Page, panel: Panel = PANEL): unknown => {
-  const context = vm.createContext({ document: host });
-  return vm.runInContext(`(${source})(${JSON.stringify(panel)})`, context);
+const inPage = (
+  source: string,
+  host: Page,
+  panel: Panel = PANEL,
+  read: Reading = READING,
+  world: Record<string, unknown> = {},
+): unknown => {
+  const context = vm.createContext({ document: host, ...world });
+  return vm.runInContext(
+    `(${source})(${JSON.stringify(panel)}, ${JSON.stringify(read)})`,
+    context,
+  );
 };
 
 /**
@@ -452,11 +470,11 @@ describe('the panel a click injects', () => {
     ]);
     expect(steps?.children[0]?.textContent).toBe('why, step by step');
     expect(steps?.children[1]?.textContent).toBe(
-      'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
-        'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser loaded 1080w, ' +
-        'which is larger. A held copy reused rather than chosen again is the likeliest cause, ' +
-        'and a viewport that shrank after load or script that rewrote sizes or srcset would read ' +
-        'the same; an empty cache is the only way to see the real pick.',
+      'On your 1440 px wide screen, sizes says 33vw, which comes to 475 px. At DPR 1 it needs a ' +
+        'file at least that wide. The arithmetic picks 640w, but the browser loaded 1080w, which is ' +
+        'larger. A held copy reused rather than chosen again is the likeliest cause, and a viewport ' +
+        'that shrank after load or script that rewrote sizes or srcset would read the same; an empty ' +
+        'cache is the only way to see the real pick.',
     );
     expect(files?.open).toBe(false);
     expect(files?.children.map((node) => node.name)).toEqual(['summary', 'dl']);
@@ -648,8 +666,9 @@ describe('the collapsed row, at the measure the stylesheet gives it', () => {
           image({ srcset: '/i/1920.png 1920w, /i/2880.png 2880w', sizes: '100vw', currentSrc: 'https://example.com/i/2880.png' }),
           // undersized: the loaded file is smaller than the pick.
           image({ srcset: '/i/1920.png 1920w, /i/4320.png 4320w', sizes: '100vw', currentSrc: 'https://example.com/i/1920.png' }),
-          // can't tell: the width the pick was made against came from layout.
-          image({ srcset: '/i/4320.png 4320w, /i/5760.png 5760w', sizes: 'auto', renderedWidth: 1440, currentSrc: 'https://example.com/i/4320.png' }),
+          // can't tell: lazy, so the browser read `auto`, and the page declares
+          // no width — so the box may be the loaded file's own.
+          image({ srcset: '/i/4320.png 4320w, /i/5760.png 5760w', sizes: 'auto', loading: 'lazy', renderedWidth: 1440, naturalWidth: 1440, currentSrc: 'https://example.com/i/4320.png' }),
           // not loaded.
           image({ srcset: '/i/4320.png 4320w, /i/5760.png 5760w', sizes: '100vw' }),
           // unknown: the loaded file is not on offer.
@@ -961,12 +980,14 @@ describe('the panel, checked as a boundary against page styles', () => {
     expect(css).not.toContain('url(');
   });
 
-  it('selects on tag names, and on the three tone classes the verdict carries, and no other', () => {
+  it('selects on tag names, and on the four state classes it writes, and no other', () => {
     // Which is why the elements are semantic ones. `privacy.test.ts` keeps
     // this package's list of written properties as short as the panel can be
-    // built with, and a class is on it for one reason: a tone is a state and
-    // not a kind of element, so no tag name can carry it. The three words are
-    // the extension's own, and this is the closed list of them.
+    // built with, and a class is on it for one reason: a state is not a kind of
+    // element, so no tag name can carry one. Three of these are the verdict's
+    // tone. The fourth is `waiting`, a row the browser has fetched no file for,
+    // which the panel sets back from the rest until one arrives — the same
+    // fact, on the row rather than on the word.
     const host = page();
     inPage(source, host);
     const classes = [...stylesheetIn(host).matchAll(/\.([a-z][a-z0-9-]*)/g)]
@@ -976,7 +997,7 @@ describe('the panel, checked as a boundary against page styles', () => {
       // ever follows `output`.
       .filter((name) => !/^\d/.test(name ?? ''));
 
-    expect([...new Set(classes)].sort()).toEqual(['good', 'quiet', 'warn']);
+    expect([...new Set(classes)].sort()).toEqual(['good', 'quiet', 'waiting', 'warn']);
     expect(stylesheetIn(host)).not.toMatch(/^\s*\.[a-z]/im);
   });
 });

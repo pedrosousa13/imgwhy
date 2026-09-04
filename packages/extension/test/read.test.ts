@@ -474,6 +474,8 @@ describe('the reader as the built module ships it, which is the copy a page gets
           sizesSource: 'source',
           renderedWidth: 475,
           renderedHeight: 317,
+          naturalWidth: 0,
+          declaresWidth: false,
           alt: null,
           srcAttribute: 'https://example.com/i/fallback.png',
           currentSrc: 'https://example.com/i/mid.png',

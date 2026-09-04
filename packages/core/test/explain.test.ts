@@ -19,6 +19,7 @@ const image = (over: Partial<CapturedImage> = {}): CapturedImage => ({
   sizes: '100vw',
   sizesSource: 'img',
   renderedWidth: 620,
+  declaresWidth: false,
   currentSrc: 'https://example.com/i/1080.png',
   naturalWidth: 1080,
   transferBytes: 118_231,
@@ -46,6 +47,7 @@ describe('explainSelection', () => {
     expect(explainSelection(image(), canonical)).toEqual({
       kind: 'width',
       resolution: { kind: 'length', px: 640, clause: '100vw', cond: null },
+      widthFrom: 'sizes',
       cssPx: 640,
       neededPx: 960,
       picked: { url: '/i/1080.png', w: 1080, x: null, raw: '1080w' },
@@ -82,14 +84,101 @@ describe('explainSelection', () => {
     // `auto` asks layout, and layout is the one thing a Capture already
     // measured. 620 × 1.5 is 930, so 1080w still wins — from a different
     // number, which is what makes the two paths distinguishable.
+    //
+    // `lazy` is what makes the browser read `auto` at all. An eager image
+    // carrying the same attribute is the case below this one.
     const selection = width(
-      explainSelection(image({ sizes: 'auto', renderedWidth: 620 }), canonical),
+      explainSelection(
+        image({ sizes: 'auto', renderedWidth: 620, loading: 'lazy' }),
+        canonical,
+      ),
     );
 
     expect(selection.resolution).toEqual({ kind: 'auto', clause: 'auto', cond: null });
     expect(selection.cssPx).toBe(620);
     expect(selection.neededPx).toBe(930);
     expect(selection.picked?.raw).toBe('1080w');
+  });
+
+  /**
+   * Where the width came from, which is the question a row's own agreement
+   * cannot answer for itself.
+   *
+   * A width `sizes` gave is a figure the page wrote. A width layout gave may be
+   * the loaded file's own size, and a pick made against that agrees with the
+   * file because the file wrote the number. These four cases are how the two
+   * are told apart, and only the last one is a width to distrust.
+   */
+  describe('where the width came from', () => {
+    const lazyAuto = (over: Partial<CapturedImage>): CapturedImage =>
+      image({ sizes: 'auto', loading: 'lazy', ...over });
+
+    it('names sizes where a clause resolved to a length', () => {
+      expect(width(explainSelection(image(), canonical)).widthFrom).toBe('sizes');
+    });
+
+    it('names sizes where auto was ignored, because a clause answered instead', () => {
+      // The attribute says `auto` and the browser never read it, so the width
+      // is the fallback clause's and there is nothing circular about it.
+      const selection = explainSelection(image({ sizes: 'auto, 50vw', loading: null }), canonical);
+
+      expect(width(selection).widthFrom).toBe('sizes');
+    });
+
+    it('names a declared width where the page gives the element one', () => {
+      expect(width(explainSelection(lazyAuto({ declaresWidth: true }), canonical)).widthFrom).toBe(
+        'layout-declared',
+      );
+    });
+
+    it('names an independent box where the box is not the width of the file', () => {
+      // `naturalWidth` is already in CSS pixels, so an element the page never
+      // sized is exactly as wide as the file reports. Any other width was
+      // somebody else's doing.
+      const selection = explainSelection(
+        lazyAuto({ declaresWidth: false, renderedWidth: 800, naturalWidth: 640 }),
+        canonical,
+      );
+
+      expect(width(selection).widthFrom).toBe('layout-independent');
+    });
+
+    it('names an independent box where the box is narrower than the file too', () => {
+      const selection = explainSelection(
+        lazyAuto({ declaresWidth: false, renderedWidth: 400, naturalWidth: 640 }),
+        canonical,
+      );
+
+      expect(width(selection).widthFrom).toBe('layout-independent');
+    });
+
+    it('reads a fractional box as the integer it lands on', () => {
+      // A real layout hands back 639.98, and an intrinsic box is the integer.
+      const selection = explainSelection(
+        lazyAuto({ declaresWidth: false, renderedWidth: 639.98, naturalWidth: 640 }),
+        canonical,
+      );
+
+      expect(width(selection).widthFrom).toBe('layout-intrinsic');
+    });
+
+    it('admits it cannot tell where the box is the width of the file', () => {
+      const selection = explainSelection(
+        lazyAuto({ declaresWidth: false, renderedWidth: 640, naturalWidth: 640 }),
+        canonical,
+      );
+
+      expect(width(selection).widthFrom).toBe('layout-intrinsic');
+    });
+
+    it('admits it cannot tell where nothing has loaded, so there are no pixels to compare', () => {
+      const selection = explainSelection(
+        lazyAuto({ declaresWidth: false, renderedWidth: 300, naturalWidth: 0 }),
+        canonical,
+      );
+
+      expect(width(selection).widthFrom).toBe('layout-intrinsic');
+    });
   });
 
   it('selects nothing when the clause that applied could not be read', () => {

@@ -5,6 +5,7 @@ export type RawImage = {
   sizes: string | null;
   sizesSource: 'img' | 'source';
   renderedWidth: number;
+  declaresWidth: boolean;
   currentSrc: string;
   naturalWidth: number;
   loading: 'lazy' | 'eager' | null;
@@ -96,6 +97,35 @@ export function collectImages(): RawImage[] {
     return { srcset: img.srcset, sizes: img.sizes || null, sizesSource: 'img' };
   };
 
+  /**
+   * Whether the page gives this element a width of its own.
+   *
+   * Three declarations, and every one of them is something the page wrote
+   * rather than something this measured. A `width` attribute is a width. An
+   * inline `width` is a width. A computed `aspect-ratio` other than `auto` ties
+   * one dimension to the other, which is the page deciding the box as surely as
+   * a length does — and Chrome reports the attributes as `auto 3 / 2` there, so
+   * this read covers the first case a second time rather than missing it.
+   *
+   * `core` asks for one thing only: when `sizes` resolves to `auto`, was the
+   * box the page's doing or the loaded file's? A declared width settles it,
+   * because a box built from a declaration is the same box whichever file
+   * arrived.
+   *
+   * What it does not reach is a width set from a stylesheet with no attribute,
+   * no inline style and no ratio. The cascade is not read here, so that page
+   * keeps the verdict it had before.
+   *
+   * This function is written twice. The other copy is `declaresWidth` in
+   * `packages/extension/src/read.ts`, and `test/no-drift.test.ts` refuses any
+   * difference between the two.
+   */
+  const declaresWidth = (img: HTMLImageElement): boolean => {
+    if (img.getAttribute('width') !== null) return true;
+    if (img.style.width !== '') return true;
+    return getComputedStyle(img).aspectRatio !== 'auto';
+  };
+
   // Every `<img>`, with nothing filtered out. A 1×1 tracking pixel and an
   // image the page never shows are both bytes the browser went and got, and
   // the runner is the measurement layer: dropping a row here would put it
@@ -110,6 +140,7 @@ export function collectImages(): RawImage[] {
       sizes,
       sizesSource,
       renderedWidth: img.getBoundingClientRect().width || img.width || 0,
+      declaresWidth: declaresWidth(img),
       currentSrc: img.currentSrc || img.src,
       // The intrinsic width in CSS pixels. The browser has already divided
       // the decoded file by the density it picked it at, so a 1080 pixel

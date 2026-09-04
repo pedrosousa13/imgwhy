@@ -522,14 +522,17 @@ const candidatesOf = (raw: RawImage): Candidate[] => {
 /**
  * One reading of one image, in the shape core takes.
  *
- * Two fields are filled in rather than read, and both for a reason worth
- * writing down. `transferBytes` is null because a page cannot measure one —
- * null is core's own word for unknown, so the honest value is the value the
- * type already has for it. `naturalWidth` is zero because the extension does
- * not read a pixel dimension the arithmetic has no use for: `explainSelection`
- * reads `candidates`, `sizes` and `renderedWidth` and nothing else, and a
- * dimension is the one ingredient a guessed weight takes. `non-goals.test.ts`
- * refuses a read of one.
+ * One field is filled in rather than read. `transferBytes` is null because a
+ * page cannot measure one — null is core's own word for unknown, so the honest
+ * value is the value the type already has for it.
+ *
+ * `naturalWidth` was the second such field and is now read. It stood at zero
+ * on the argument that a pixel dimension is the first ingredient of a guessed
+ * weight, and `non-goals.test.ts` refuses the guess. It still does: nothing
+ * here multiplies anything, and a weight is the recorded transfer or the word
+ * `unknown`. What the number buys is the comparison in `core` that tells a box
+ * the page sized from a box the loaded file sized, which is the difference
+ * between a row that can be judged and a row that cannot.
  */
 const captured = (raw: RawImage): CapturedImage => ({
   id: raw.selector,
@@ -538,8 +541,9 @@ const captured = (raw: RawImage): CapturedImage => ({
   sizes: raw.sizes,
   sizesSource: raw.sizesSource,
   renderedWidth: raw.renderedWidth,
+  declaresWidth: raw.declaresWidth,
   currentSrc: raw.currentSrc,
-  naturalWidth: 0,
+  naturalWidth: raw.naturalWidth,
   transferBytes: null,
   loading: raw.loading,
 });
@@ -637,26 +641,39 @@ const markOf = (laidOut: boolean): string =>
  *
  * One phrasing per kind of resolution, because each is a different cause. A
  * clause with a condition is named whole, so the reader can see which one
- * matched at this viewport; one without is the length alone. A length already
- * written in pixels is not followed by "which is N px", because that would say
- * the same number twice. The two defaults are separated because they are two
- * different findings about the page: no `sizes` at all, or a `sizes` whose
- * every condition missed this viewport.
+ * matched at this viewport; one without is the length alone. The two defaults
+ * are separated because they are two different findings about the page: no
+ * `sizes` at all, or a `sizes` whose every condition missed this viewport.
+ *
+ * "which is N px" is written only where N is a number the sentence has not
+ * already said. A length written in pixels is that number; so is `100vw` on a
+ * screen whose width the chain has just stated, which is the common case and
+ * was the one that read worst — the maintainer's own row said 1720 three times
+ * in one sentence and the reader had to check each one against the last.
  */
-function widthOf(resolution: Resolution, cssPx: number): string {
-  const px = `${Math.round(cssPx)} px`;
+function widthOf(resolution: Resolution, cssPx: number, viewportWidth: number): string {
+  const rounded = Math.round(cssPx);
+  const px = `${rounded} px`;
+  // The number, or the fact that it is the number already on the row. `sizes`
+  // resolving to the whole viewport is the common case — `100vw`, and both
+  // defaults — and writing the figure again there was the same value twice in
+  // one sentence and a third time in the clause after it.
+  const came = rounded === Math.round(viewportWidth)
+    ? 'so the image counts as full width'
+    : `which comes to ${px}`;
+
   switch (resolution.kind) {
     case 'length':
-      if (resolution.cond !== null) return `sizes matched ${resolution.clause}, which is ${px}`;
-      return resolution.clause === `${Math.round(cssPx)}px`
-        ? `sizes gives it ${resolution.clause}`
-        : `sizes gives it ${resolution.clause}, which is ${px}`;
+      if (resolution.cond !== null) return `sizes matched ${resolution.clause}, ${came}`;
+      return resolution.clause === `${rounded}px`
+        ? `sizes says ${resolution.clause}`
+        : `sizes says ${resolution.clause}, ${came}`;
     case 'auto':
-      return `sizes is auto, and the width came from layout: ${px}`;
+      return `sizes is auto, so the browser took the width from the layout, ${px}`;
     case 'default':
       return resolution.clause.startsWith('absent')
-        ? `no sizes is written, and the 100vw default gives it ${px}`
-        : `no sizes clause matched, and the 100vw default gives it ${px}`;
+        ? `there is no sizes, so the 100vw default counts the image as full width`
+        : `no sizes clause matched, so the 100vw default counts the image as full width`;
     case 'error':
       return `the sizes clause ${resolution.clause} could not be read`;
   }
@@ -687,12 +704,32 @@ function chainOf(selection: Selection, device: DeviceProfile): string {
         `the sizes clause ${selection.resolution.clause} could not be read as a length, ` +
         `so only the x candidates could be judged against ${at}`
       );
-    case 'width':
+    case 'width': {
+      // Two sentences, one step each: what the page asked for, and what the
+      // device makes of it. The old single sentence carried both behind a
+      // semicolon and said the same number three times — 1720 as the screen,
+      // 1720 as the width `sizes` resolved to, 1720 as the pixels needed — and
+      // a reader had to check each against the last to find they were one fact.
+      //
+      // So a number is written once, at the step where it arises, and a step
+      // that leaves it unchanged names the step rather than the value. `came`
+      // above is the first of those; `wide` is the second, and it is what DPR 1
+      // produces on every row.
+      //
+      // The unit is the file's, not the screen's. `device pixels` was a third
+      // unit a reader had met no definition of, and it put the figure on the
+      // screen when the thing being chosen is a file — while a `w` descriptor
+      // is literally a file's width in pixels. Comparing a file with a file is
+      // the comparison the browser made.
+      const needs = Math.round(selection.neededPx);
+      const wide = needs === Math.round(selection.cssPx) ? 'that' : `${needs} px`;
+
       return (
-        `your screen is ${device.viewport.width} px wide at ${at}; ` +
-        `${widthOf(selection.resolution, selection.cssPx)}, ` +
-        `so it needs ${Math.round(selection.neededPx)} device pixels`
+        `on your ${device.viewport.width} px wide screen, ` +
+        `${widthOf(selection.resolution, selection.cssPx, device.viewport.width)}. ` +
+        `At DPR ${device.dpr} it needs a file at least ${wide} wide`
       );
+    }
   }
 }
 
@@ -738,7 +775,7 @@ function ranked(loaded: Candidate, picked: Candidate): 'larger' | 'smaller' | 'e
 }
 
 /**
- * Whether the width core selected against is one this render's layout produced.
+ * Whether the width core selected against may be the loaded file's own doing.
  *
  * Which is what makes a row's own agreement worth nothing: `auto` defers to
  * layout, core answers with the width the element ended up at, and for an image
@@ -747,14 +784,15 @@ function ranked(loaded: Candidate, picked: Candidate): 'larger' | 'smaller' | 'e
  * selection run against `needed`, so the loaded file is upstream of the figure
  * that agrees with it.
  *
- * True for every `auto` resolution rather than only where the width provably
- * came from the file, for the reason the `cache` marks are drawn the same way:
- * an `auto` image the page *does* give a CSS width has a `css px` no cache
- * could have touched, and this package reads a laid-out box rather than a
- * cascade, so there is no reading of the page that tells the two apart.
+ * `core` answers it now, and the answer is narrower than the question this used
+ * to ask. This read `resolution.kind === 'auto'` and stopped there, which put
+ * the quietest verdict the panel has on every row of every page that writes
+ * `sizes="auto"` — 15 rows of 23 on an ordinary one, nearly all of them images
+ * the page had sized itself. `widthFrom` separates the three ways a layout
+ * width comes about, and only the last of them is a width to distrust.
  */
 const fromLayout = (selection: Selection): boolean =>
-  selection.kind === 'width' && selection.resolution.kind === 'auto';
+  selection.kind === 'width' && selection.widthFrom === 'layout-intrinsic';
 
 /**
  * What a collapsed row says, per outcome: the pixels the arithmetic asked for
@@ -795,19 +833,24 @@ const short = (selection: Selection, picked: Candidate, loaded: Candidate): stri
     ? `Needs ${Math.round(selection.neededPx)} px, and ${loaded.raw} does not cover it.`
     : `${picked.raw} covers your pixel ratio, and ${loaded.raw} does not.`;
 
-/** The one clause that says why the pick wins, per kind of selection. */
+/**
+ * The one clause that says why the pick wins, per kind of selection.
+ *
+ * "wide enough" rather than "covers that", because covering is vague about what
+ * is covered and the test the browser ran is a width against a width.
+ */
 const winning = (selection: Selection, picked: Candidate): string =>
   selection.kind === 'width' && picked.w !== null
-    ? `and ${picked.raw} is the smallest file that covers that`
+    ? `and ${picked.raw} is the smallest that is wide enough`
     : `and ${picked.raw} is the smallest density at or above it`;
 
 /** The clause for a pick that is the largest on offer and still falls short. */
 const stretched = (selection: Selection, picked: Candidate): string =>
   selection.kind === 'width' && picked.w !== null
-    ? `no file covers that, so ${picked.raw}, the largest on offer, is stretched to fit; ` +
-      `add a candidate above ${picked.raw}`
-    : `no candidate reaches that, so ${picked.raw}, the densest on offer, is stretched to fit; ` +
-      `add a candidate above ${picked.raw}`;
+    ? `but no file is wide enough, so the browser took the largest, ${picked.raw}, and the ` +
+      `image is stretched to fit; add a candidate above ${picked.raw}`
+    : `but no candidate reaches it, so the browser took the densest, ${picked.raw}, and the ` +
+      `image is stretched to fit; add a candidate above ${picked.raw}`;
 
 /**
  * The verdict, the clause and the reasoning for a row that had a real choice
@@ -859,10 +902,10 @@ function judged(
         // other half of the time.
         why: 'No width to select against, so nothing was picked.',
         because: [
-          `${capital(widthOf(selection.resolution, selection.cssPx))}, so there was no width to ` +
-            'select against and nothing was picked — an image this render drew no box for, such ' +
-            'as a lazy one below the fold, is the ordinary cause. The srcset is not what to look ' +
-            'at here.',
+          `${capital(widthOf(selection.resolution, selection.cssPx, device.viewport.width))}, ` +
+            'so there was no width to select against and nothing was picked — an image this ' +
+            'render drew no box for, such as a lazy one below the fold, is the ordinary cause. ' +
+            'The srcset is not what to look at here.',
         ],
       };
     }
@@ -891,12 +934,13 @@ function judged(
       verdict: NOT_LOADED,
       why: `Nothing has loaded yet, and the arithmetic picks ${picked.raw}.`,
       because: [
-        `Nothing has loaded yet; when it does, the arithmetic picks ${picked.raw} — ${chain}.`,
+        `${capital(chain)}. Nothing has loaded yet; when it does, the arithmetic picks ` +
+          `${picked.raw}.`,
       ],
     };
   }
 
-  const picks = `The arithmetic picks ${picked.raw} — ${chain} — but `;
+  const picks = `${capital(chain)}. The arithmetic picks ${picked.raw}, but `;
 
   if (loaded === null) {
     return {
@@ -924,7 +968,7 @@ function judged(
       return {
         verdict: UNDERSIZED,
         why: biggest(selection, picked),
-        because: [`${capital(chain)} — ${stretched(selection, picked)}.${tie}`],
+        because: [`${capital(chain)}, ${stretched(selection, picked)}.${tie}`],
       };
     }
 
@@ -943,13 +987,13 @@ function judged(
     return fromLayout(selection)
       ? {
           verdict: CANT_TELL,
-          why: 'The width came from the loaded file, so the pick cannot disagree with it.',
-          because: [`${capital(chain)} — ${winning(selection, picked)}.${tie}`],
+          why: 'The width may be the loaded file’s own, so the pick cannot disagree with it.',
+          because: [`${capital(chain)}, ${winning(selection, picked)}.${tie}`],
         }
       : {
           verdict: FIT,
           why: fits(selection, picked),
-          because: [`${capital(chain)} — ${winning(selection, picked)}.${tie}`],
+          because: [`${capital(chain)}, ${winning(selection, picked)}.${tie}`],
         };
   }
 

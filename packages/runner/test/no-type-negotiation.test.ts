@@ -30,10 +30,12 @@ const IN_PAGE = 'collect.ts';
  * name is a finding as much as a `type` read is.
  */
 const MEMBERS = new Set([
+  'aspectRatio',
   'backgroundImage',
   'children',
   'closest',
   'currentSrc',
+  'declaresWidth',
   'filter',
   'from',
   'getAttribute',
@@ -55,6 +57,7 @@ const MEMBERS = new Set([
   'sizes',
   'sizesSource',
   'src',
+  'style',
   'srcset',
   'tagName',
   'toLowerCase',
@@ -76,6 +79,7 @@ const STRINGS = new Set([
   ')',
   '*',
   ':nth-of-type(',
+  'auto',
   'eager',
   'img',
   'lazy',
@@ -84,6 +88,7 @@ const STRINGS = new Set([
   'picture',
   'source',
   'url(',
+  'width',
 ]);
 
 /**

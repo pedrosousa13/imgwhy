@@ -21,6 +21,8 @@ export const image = (fields: Partial<RawImage> = {}): RawImage => ({
   sizesSource: 'img',
   renderedWidth: 0,
   renderedHeight: 0,
+  naturalWidth: 0,
+  declaresWidth: false,
   alt: null,
   srcAttribute: '',
   currentSrc: '',

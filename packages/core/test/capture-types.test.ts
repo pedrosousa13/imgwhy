@@ -16,6 +16,7 @@ const hero: CapturedImage = {
   sizes: '100vw',
   sizesSource: 'img',
   renderedWidth: 640,
+  declaresWidth: false,
   currentSrc: 'https://example.com/i/a-1080.png',
   naturalWidth: 1080,
   transferBytes: 41_233,
@@ -39,7 +40,7 @@ describe('the Capture seam', () => {
   it('carries enough to replay the trace through core', () => {
     const image = capture.runs[0].images[0];
     const device = capture.devices[0];
-    const resolution = resolveSizes(image.sizes, device.viewport.width);
+    const resolution = resolveSizes(image.sizes, device.viewport.width, false);
 
     expect(resolution.kind).toBe('length');
     expect(selectCandidate(image.candidates, 1440, device.dpr)?.raw).toBe('1080w');

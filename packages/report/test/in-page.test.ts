@@ -47,6 +47,7 @@ const imageOf = (srcset: string, sizes: string | null, renderedWidth = 375): Cap
   renderedWidth,
   currentSrc: '',
   naturalWidth: 0,
+  declaresWidth: false,
   transferBytes: null,
   loading: null,
 });
@@ -227,6 +228,7 @@ describe('the shipped script, given a function that reaches outside itself', () 
     const selection: Selection = {
       kind: 'width',
       resolution: { kind: 'length', px: 375, clause: '100vw', cond: null },
+      widthFrom: 'sizes',
       cssPx: 375,
       neededPx: 750,
       picked: null,

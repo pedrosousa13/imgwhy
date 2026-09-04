@@ -363,7 +363,7 @@
 </ul>
 </section>
 </main>
-<script type="application/json">{"panels":[{"image":{"id":"html \u003e body \u003e header \u003e img","selector":"html \u003e body \u003e header \u003e img","candidates":[],"sizes":null,"sizesSource":"img","renderedWidth":120,"currentSrc":"https://example.com/i/logo.png","naturalWidth":120,"transferBytes":null,"loading":"lazy"},"device":{"id":"iphone-se","name":"iPhone SE","viewport":{"width":375,"height":667},"dpr":2}},{"image":{"id":"html \u003e body \u003e main \u003e img:nth-of-type(1)","selector":"html \u003e body \u003e main \u003e img:nth-of-type(1)","candidates":[{"url":"/i/640.png","w":640,"x":null,"raw":"640w"},{"url":"/i/1080.png","w":1080,"x":null,"raw":"1080w"},{"url":"/i/1920.png","w":1920,"x":null,"raw":"1920w"}],"sizes":"(min-width: 1000px) 50vw, 100vw","sizesSource":"img","renderedWidth":187,"currentSrc":"https://example.com/i/1080.png","naturalWidth":187,"transferBytes":118231,"loading":null},"device":{"id":"iphone-se","name":"iPhone SE","viewport":{"width":375,"height":667},"dpr":2}},{"image":{"id":"html \u003e body \u003e main \u003e img:nth-of-type(2)","selector":"html \u003e body \u003e main \u003e img:nth-of-type(2)","candidates":[{"url":"/i/200.png","w":null,"x":1,"raw":"1x"},{"url":"/i/300.png","w":null,"x":2,"raw":"2x"}],"sizes":null,"sizesSource":"img","renderedWidth":200,"currentSrc":"https://example.com/i/300.png","naturalWidth":200,"transferBytes":8210,"loading":null},"device":{"id":"iphone-se","name":"iPhone SE","viewport":{"width":375,"height":667},"dpr":2}}]}</script>
+<script type="application/json">{"panels":[{"image":{"id":"html \u003e body \u003e header \u003e img","selector":"html \u003e body \u003e header \u003e img","candidates":[],"sizes":null,"sizesSource":"img","renderedWidth":120,"currentSrc":"https://example.com/i/logo.png","naturalWidth":120,"declaresWidth":false,"transferBytes":null,"loading":"lazy"},"device":{"id":"iphone-se","name":"iPhone SE","viewport":{"width":375,"height":667},"dpr":2}},{"image":{"id":"html \u003e body \u003e main \u003e img:nth-of-type(1)","selector":"html \u003e body \u003e main \u003e img:nth-of-type(1)","candidates":[{"url":"/i/640.png","w":640,"x":null,"raw":"640w"},{"url":"/i/1080.png","w":1080,"x":null,"raw":"1080w"},{"url":"/i/1920.png","w":1920,"x":null,"raw":"1920w"}],"sizes":"(min-width: 1000px) 50vw, 100vw","sizesSource":"img","renderedWidth":187,"currentSrc":"https://example.com/i/1080.png","naturalWidth":187,"declaresWidth":false,"transferBytes":118231,"loading":null},"device":{"id":"iphone-se","name":"iPhone SE","viewport":{"width":375,"height":667},"dpr":2}},{"image":{"id":"html \u003e body \u003e main \u003e img:nth-of-type(2)","selector":"html \u003e body \u003e main \u003e img:nth-of-type(2)","candidates":[{"url":"/i/200.png","w":null,"x":1,"raw":"1x"},{"url":"/i/300.png","w":null,"x":2,"raw":"2x"}],"sizes":null,"sizesSource":"img","renderedWidth":200,"currentSrc":"https://example.com/i/300.png","naturalWidth":200,"declaresWidth":false,"transferBytes":8210,"loading":null},"device":{"id":"iphone-se","name":"iPhone SE","viewport":{"width":375,"height":667},"dpr":2}}]}</script>
 <script>
 const isWhitespace = (c) => /\s/.test(c);
 const parseSrcset = function parseSrcset(raw) {
@@ -473,23 +473,62 @@ const evalLen = function evalLen(str, vw) {
     return { px: t };
 };
 const asResolution = (len, clause, cond) => 'auto' in len ? { kind: 'auto', clause, cond } : { kind: 'length', px: len.px, clause, cond };
-const resolveSizes = function resolveSizes(sizesString, viewportWidth) {
+const allowsAutoSizes = (sizes, loading) => loading === 'lazy' && sizes !== null && /^\s*auto\s*(,|$)/i.test(sizes);
+const resolveSizes = function resolveSizes(sizesString, viewportWidth, allowsAuto) {
     if (!sizesString || !sizesString.trim()) {
         return { kind: 'default', px: viewportWidth, clause: 'absent → 100vw default' };
     }
-    for (const clause of splitTop(sizesString)) {
+    // The one entry a browser may read as a layout width is the first one, and
+    // only where the element allows auto-sizes. Anywhere else `auto` is a value
+    // the browser passes over, so this passes over it too and the next clause
+    // answers — including the 100vw default, where no clause is left.
+    let skippedAuto = false;
+    const readsAsLayout = (length, at, hasCond) => {
+        // The standard's condition is on the attribute's value, not on a clause:
+        // it is `auto`, or it starts with `auto,`. So the entry a browser may read
+        // is the first one and it carries no media condition. An `auto` behind
+        // `(min-width: …)` is one a browser passes over however early it is
+        // written.
+        const honored = allowsAuto && at === 0 && !hasCond;
+        const ignored = length !== null && 'auto' in length && !honored;
+        if (ignored)
+            skippedAuto = true;
+        return ignored;
+    };
+    for (const [at, clause] of splitTop(sizesString).entries()) {
         const mm = clause.match(/^(\(.*\))\s+(.+)$/);
         if (mm) {
             const cond = mm[1];
             if (!evalCond(cond, viewportWidth))
                 continue;
             const len = evalLen(mm[2], viewportWidth);
+            if (readsAsLayout(len, at, true))
+                continue;
             return len ? asResolution(len, clause, cond) : { kind: 'error', clause };
         }
         const len = evalLen(clause, viewportWidth);
+        if (readsAsLayout(len, at, false))
+            continue;
         return len ? asResolution(len, clause, null) : { kind: 'error', clause };
     }
-    return { kind: 'default', px: viewportWidth, clause: 'no condition matched → 100vw default' };
+    // The wording separates the two ways a sizes list runs out. A skipped `auto`
+    // is a clause that was there and that a browser passed over, and a trace
+    // saying no condition matched would be describing a different attribute.
+    return {
+        kind: 'default',
+        px: viewportWidth,
+        clause: skippedAuto ? 'auto ignored → 100vw default' : 'no condition matched → 100vw default',
+    };
+};
+const widthSource = (resolution, image) => {
+    if (resolution.kind !== 'auto')
+        return 'sizes';
+    if (image.declaresWidth)
+        return 'layout-declared';
+    const off = image.renderedWidth - image.naturalWidth;
+    if (image.naturalWidth > 0 && (off >= 1 || off <= -1))
+        return 'layout-independent';
+    return 'layout-intrinsic';
 };
 const resolvedPx = (resolution, renderedWidth) => {
     switch (resolution.kind) {
@@ -506,12 +545,19 @@ const explainSelection = function explainSelection(image, device) {
     if (!byWidth) {
         return { kind: 'density', picked: selectCandidate(image.candidates, null, device.dpr) };
     }
-    const resolution = resolveSizes(image.sizes, device.viewport.width);
+    const resolution = resolveSizes(image.sizes, device.viewport.width, allowsAutoSizes(image.sizes, image.loading));
     const cssPx = resolvedPx(resolution, image.renderedWidth);
     const picked = selectCandidate(image.candidates, cssPx, device.dpr);
     if (cssPx === null)
         return { kind: 'unreadable', resolution, picked };
-    return { kind: 'width', resolution, cssPx, neededPx: cssPx * device.dpr, picked };
+    return {
+        kind: 'width',
+        resolution,
+        widthFrom: widthSource(resolution, image),
+        cssPx,
+        neededPx: cssPx * device.dpr,
+        picked,
+    };
 };
 
 const readPanel = function readPanel(selection, candidates, dpr) {

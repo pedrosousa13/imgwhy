@@ -338,17 +338,30 @@ export type Given = { wrote: string; whole: boolean };
  * Whether one expression is a whole value read off something, rather than one
  * the code built.
  *
- * An identifier or a chain of property reads. Nothing else: a concatenation, a
- * template literal, a call, a conditional and a `??` are all expressions that
- * compute, and a URL with a fact about the page stitched into it is always one
- * of those. `privacy.test.ts` says why that is the property worth checking and
- * what it does not cover.
+ * An identifier or a chain of property reads, or a `||` fallback between
+ * several of those and a number. Nothing else: a concatenation, a template
+ * literal, a call, a conditional and a `??` are all expressions that compute,
+ * and a URL with a fact about the page stitched into it is always one of those.
+ * `privacy.test.ts` says why that is the property worth checking and what it
+ * does not cover.
+ *
+ * The `||` chain is in because it builds nothing. `box.width || img.width || 0`
+ * is three whole values and a choice between them, and every branch of it is a
+ * value that arrived rather than one the code made — which is the property this
+ * asks about. It is also the shape a box is read in throughout this package,
+ * because an element a page has hidden has no rect and its attributes are what
+ * the page asked for. A number is allowed beside the reads for the same reason:
+ * a literal carries no fact about the page.
  */
 function isWhole(node: ts.Expression): boolean {
   if (ts.isIdentifier(node)) return true;
   if (ts.isPropertyAccessExpression(node)) return isWhole(node.expression);
   if (ts.isParenthesizedExpression(node)) return isWhole(node.expression);
   if (node.kind === ts.SyntaxKind.ThisKeyword) return true;
+  if (ts.isNumericLiteral(node)) return true;
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+    return isWhole(node.left) && isWhole(node.right);
+  }
   return false;
 }
 
@@ -485,20 +498,19 @@ function isQuiet(statement: ts.Statement): boolean {
  * Every statement at one module's top level that does something, one line
  * each. Empty is a module that costs nothing to load.
  *
- * `exempt` is the one statement a module is allowed to run, given by the text
- * of the thing it calls. Manifest V3 requires the worker to register its
- * listener synchronously at the top level — a listener added later is a
+ * `exempt` is the statements a module is allowed to run, given by the text of
+ * the thing each one calls. Manifest V3 requires the worker to register its
+ * listeners synchronously at the top level — a listener added later is a
  * listener Chrome has already decided the worker does not have — so the
- * registration is not optional and cannot be moved inside anything. It is
- * named rather than pattern-matched so that a second registration, or a
- * different one, is a finding.
+ * registrations are not optional and cannot be moved inside anything. They are
+ * named rather than pattern-matched, so a registration nobody wrote down is a
+ * finding whatever it registers.
  */
-export function topLevelEffects(text: string, exempt?: string): string[] {
-  const isTheRegistration = (statement: ts.Statement): boolean =>
-    exempt !== undefined &&
+export function topLevelEffects(text: string, exempt: readonly string[] = []): string[] {
+  const isARegistration = (statement: ts.Statement): boolean =>
     ts.isExpressionStatement(statement) &&
     ts.isCallExpression(statement.expression) &&
-    statement.expression.expression.getText() === exempt;
+    exempt.includes(statement.expression.expression.getText());
 
   // One line per statement, undeduplicated, because the count is part of the
   // answer: two registrations are two listeners, the panel toggles twice, and
@@ -506,6 +518,6 @@ export function topLevelEffects(text: string, exempt?: string): string[] {
   // ran one statement when it ran two.
   return parse(text)
     .statements.filter((statement) => !isQuiet(statement))
-    .filter((statement) => !isTheRegistration(statement))
+    .filter((statement) => !isARegistration(statement))
     .map((statement) => `${nameOf(statement)} at its top level`);
 }

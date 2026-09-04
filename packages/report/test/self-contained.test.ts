@@ -193,6 +193,7 @@ const CALLED = new Set([
   'addEventListener',
   'assign',
   'endsWith',
+  'entries',
   'every',
   'filter',
   'find',
@@ -238,6 +239,7 @@ const KEYS = new Set([
   'url',
   'viewport',
   'w',
+  'widthFrom',
   'width',
   'x',
 ]);

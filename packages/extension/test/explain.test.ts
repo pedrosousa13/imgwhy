@@ -101,7 +101,7 @@ describe('the panel the worker computes from a reading', () => {
       // undersized
       { srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' },
       // can't tell
-      { srcset: TWO, sizes: 'auto', renderedWidth: 1080, currentSrc: 'https://example.com/i/1080.png' },
+      { srcset: TWO, sizes: 'auto', loading: 'lazy', renderedWidth: 1080, naturalWidth: 1080, currentSrc: 'https://example.com/i/1080.png' },
       // not loaded
       { srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: '' },
       // unknown
@@ -152,7 +152,7 @@ describe('the panel the worker computes from a reading', () => {
         Array.from({ length: count }, () => image(fields));
       const many = [
         ...copies(1, { srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' }),
-        ...copies(3, { srcset: TWO, sizes: 'auto', renderedWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
+        ...copies(3, { srcset: TWO, sizes: 'auto', loading: 'lazy', renderedWidth: 1080, naturalWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
         ...copies(19, { srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' }),
       ];
 
@@ -237,8 +237,9 @@ describe('the panel the worker computes from a reading', () => {
         sizes: live.sizes,
         sizesSource: live.sizesSource,
         renderedWidth: live.renderedWidth,
+        declaresWidth: live.declaresWidth,
+        naturalWidth: live.naturalWidth,
         currentSrc: live.currentSrc,
-        naturalWidth: 0,
         transferBytes: null,
         loading: live.loading,
       },
@@ -372,9 +373,10 @@ describe('the panel the worker computes from a reading', () => {
       'what the browser has, not what it chose — and the width above descends from it',
     );
     expect(row.notes).toEqual([
-      'Your screen is 1440 px wide at DPR 2 (retina); sizes is auto, and the width came from ' +
-        'layout: 1200 px, so it needs 2400 device pixels — no file covers that, so 1200w, the ' +
-        'largest on offer, is stretched to fit; add a candidate above 1200w.',
+      'On your 1440 px wide screen, sizes is auto, so the browser took the width from the layout, ' +
+        '1200 px. At DPR 2 it needs a file at least 2400 px wide, but no file is wide enough, so ' +
+        'the browser took the largest, 1200w, and the image is stretched to fit; add a candidate ' +
+        'above 1200w.',
       'sizes resolved to auto, so the width above is the width this render laid the image out ' +
         'at — and for an image the page gives no width of its own, that is the width of ' +
         'whichever file the browser already held. Every marked figure descends from it, so a ' +
@@ -567,8 +569,8 @@ describe('the clause a collapsed row leads with', () => {
       at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' }),
       at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' }),
       at({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' }),
-      at({ srcset: TWO, sizes: 'auto', renderedWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
-      at({ srcset: TWO, sizes: 'auto', renderedWidth: 0 }),
+      at({ srcset: TWO, sizes: 'auto', loading: 'lazy', renderedWidth: 1080, naturalWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
+      at({ srcset: TWO, sizes: 'auto', loading: 'lazy', renderedWidth: 0 }),
       at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: '' }),
       at({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/other.png' }),
       at({ currentSrc: 'https://example.com/px.gif' }),
@@ -610,8 +612,8 @@ describe('the reasoning a row holds behind its disclosure', () => {
     expect(
       only({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' }),
     ).toBe(
-      'Your screen is 1440 px wide at DPR 1 (standard); sizes gives it 33vw, which is 475 px, so ' +
-        'it needs 475 device pixels — and 640w is the smallest file that covers that.',
+      'On your 1440 px wide screen, sizes says 33vw, which comes to 475 px. At DPR 1 it needs a ' +
+        'file at least that wide, and 640w is the smallest that is wide enough.',
     );
   });
 
@@ -620,44 +622,43 @@ describe('the reasoning a row holds behind its disclosure', () => {
     // larger file than the pick is equally consistent with a viewport that
     // shrank after load and with script that rewrote either attribute.
     expect(only({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' })).toBe(
-      'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
-        'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser loaded 1080w, ' +
-        'which is larger. A held copy reused rather than chosen again is the likeliest cause, ' +
-        'and a viewport that shrank after load or script that rewrote sizes or srcset would read ' +
-        'the same; an empty cache is the only way to see the real pick.',
+      'On your 1440 px wide screen, sizes says 33vw, which comes to 475 px. At DPR 1 it needs a ' +
+        'file at least that wide. The arithmetic picks 640w, but the browser loaded 1080w, which is ' +
+        'larger. A held copy reused rather than chosen again is the likeliest cause, and a viewport ' +
+        'that shrank after load or script that rewrote sizes or srcset would read the same; an ' +
+        'empty cache is the only way to see the real pick.',
     );
   });
 
   it('width-selected and nothing covers it: says the largest stood in, and what to add', () => {
     expect(only({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/1080.png' }, 3)).toBe(
-      'Your screen is 1440 px wide at DPR 3 (retina); sizes gives it 100vw, which is 1440 px, so ' +
-        'it needs 4320 device pixels — no file covers that, so 1080w, the largest on offer, is ' +
-        'stretched to fit; add a candidate above 1080w.',
+      'On your 1440 px wide screen, sizes says 100vw, so the image counts as full width. At DPR 3 ' +
+        'it needs a file at least 4320 px wide, but no file is wide enough, so the browser took the ' +
+        'largest, 1080w, and the image is stretched to fit; add a candidate above 1080w.',
     );
   });
 
   it('width-selected and a smaller file loaded: says what it falls short of, and where to look', () => {
     expect(only({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' })).toBe(
-      'The arithmetic picks 1080w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
-        'it 100vw, which is 1440 px, so it needs 1440 device pixels — but the browser loaded ' +
-        '640w, which does not cover the pixels needed above, so the image is upscaled wherever ' +
-        'the page draws it at that size; check what set this src.',
+      'On your 1440 px wide screen, sizes says 100vw, so the image counts as full width. At DPR 1 ' +
+        'it needs a file at least that wide. The arithmetic picks 1080w, but the browser loaded ' +
+        '640w, which does not cover the pixels needed above, so the image is upscaled wherever the ' +
+        'page draws it at that size; check what set this src.',
     );
   });
 
   it('width-selected and nothing loaded yet: says what the arithmetic will pick, and why', () => {
     expect(only({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: '' })).toBe(
-      'Nothing has loaded yet; when it does, the arithmetic picks 640w — your screen is 1440 px ' +
-        'wide at DPR 1 (standard); sizes gives it 33vw, which is 475 px, so it needs 475 device ' +
-        'pixels.',
+      'On your 1440 px wide screen, sizes says 33vw, which comes to 475 px. At DPR 1 it needs a ' +
+        'file at least that wide. Nothing has loaded yet; when it does, the arithmetic picks 640w.',
     );
   });
 
   it('width-selected and the loaded file is not a candidate: says where to look', () => {
     expect(only({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/other.png' })).toBe(
-      'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
-        'it 33vw, which is 475 px, so it needs 475 device pixels — but the loaded file is not ' +
-        'one the srcset offers; check what set this src.',
+      'On your 1440 px wide screen, sizes says 33vw, which comes to 475 px. At DPR 1 it needs a ' +
+        'file at least that wide. The arithmetic picks 640w, but the loaded file is not one the ' +
+        'srcset offers; check what set this src.',
     );
   });
 
@@ -668,35 +669,44 @@ describe('the reasoning a row holds behind its disclosure', () => {
     // findings about the page, and are told apart.
     const loaded = 'https://example.com/i/640.png';
     expect(only({ srcset: TWO, sizes: '580px', currentSrc: loaded })).toContain(
-      '; sizes gives it 580px, so it needs 580 device pixels',
+      'On your 1440 px wide screen, sizes says 580px. At DPR 1 it needs a file at least that wide, ' +
+        'and 640w is the smallest that is wide enough.',
     );
     expect(only({ srcset: TWO, sizes: '(max-width: 768px) 100vw, 33vw', currentSrc: loaded }, 1, 600)).toContain(
-      '; sizes matched (max-width: 768px) 100vw, which is 600 px, so it needs 600 device pixels',
+      'On your 600 px wide screen, sizes matched (max-width: 768px) 100vw, so the image counts as ' +
+        'full width. At DPR 1 it needs a file at least that wide, and 640w is the smallest that is ' +
+        'wide enough.',
     );
     expect(only({ srcset: TWO, sizes: null, currentSrc: 'https://example.com/i/1080.png' })).toContain(
-      '; no sizes is written, and the 100vw default gives it 1440 px, so it needs 1440 device pixels',
+      'On your 1440 px wide screen, there is no sizes, so the 100vw default counts the image as ' +
+        'full width. At DPR 1 it needs a file at least that wide, but no file is wide enough, so ' +
+        'the browser took the largest, 1080w, and the image is stretched to fit; add a candidate ' +
+        'above 1080w.',
     );
     expect(
       only({ srcset: TWO, sizes: '(min-width: 2000px) 50vw', currentSrc: 'https://example.com/i/1080.png' }),
-    ).toContain('; no sizes clause matched, and the 100vw default gives it 1440 px, so it needs 1440');
+    ).toContain('On your 1440 px wide screen, no sizes clause matched, so the 100vw default ' +
+                  'counts the image as full width. At DPR 1 it needs a file at least that wide, but ' +
+                  'no file is wide enough, so the browser took the largest, 1080w, and the image is ' +
+                  'stretched to fit; add a candidate above 1080w.');
   });
 
   it('density-selected: names the ratio, and that sizes never entered', () => {
     expect(only({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' }, 2)).toBe(
-      'Your screen is DPR 2 (retina) and no candidate carries a width, so the ratio decided ' +
-        'alone — and 2x is the smallest density at or above it.',
+      'Your screen is DPR 2 (retina) and no candidate carries a width, so the ratio decided alone, ' +
+        'and 2x is the smallest density at or above it.',
     );
     expect(only({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' }, 3)).toBe(
       'Your screen is DPR 3 (retina) and no candidate carries a width, so the ratio decided ' +
-        'alone — no candidate reaches that, so 2x, the densest on offer, is stretched to fit; add ' +
-        'a candidate above 2x.',
+        'alone, but no candidate reaches it, so the browser took the densest, 2x, and the image is ' +
+        'stretched to fit; add a candidate above 2x.',
     );
     expect(only({ srcset: '/i/a.png 1x, /i/b.png 2x', currentSrc: 'https://example.com/i/b.png' })).toBe(
-      'The arithmetic picks 1x — your screen is DPR 1 (standard) and no candidate carries a ' +
-        'width, so the ratio decided alone — but the browser loaded 2x, which is larger. A held ' +
-        'copy reused rather than chosen again is the likeliest cause, and a viewport that shrank ' +
-        'after load or script that rewrote sizes or srcset would read the same; an empty cache ' +
-        'is the only way to see the real pick.',
+      'Your screen is DPR 1 (standard) and no candidate carries a width, so the ratio decided ' +
+        'alone. The arithmetic picks 1x, but the browser loaded 2x, which is larger. A held copy ' +
+        'reused rather than chosen again is the likeliest cause, and a viewport that shrank after ' +
+        'load or script that rewrote sizes or srcset would read the same; an empty cache is the ' +
+        'only way to see the real pick.',
     );
   });
 
@@ -712,21 +722,21 @@ describe('the reasoning a row holds behind its disclosure', () => {
       ),
     ).toBe(
       'The sizes clause (min-width: 100px) wide could not be read as a length, so only the x ' +
-        'candidates could be judged against DPR 2 (retina) — and 2x is the smallest density at ' +
-        'or above it.',
+        'candidates could be judged against DPR 2 (retina), and 2x is the smallest density at or ' +
+        'above it.',
     );
   });
 
   it('no width at all: names the box this render drew, or the length the page wrote', () => {
     expect(only({ srcset: TWO, sizes: 'auto', renderedWidth: 0, loading: 'lazy' })).toBe(
-      'Sizes is auto, and the width came from layout: 0 px, so there was no width to select ' +
-        'against and nothing was picked — an image this render drew no box for, such as a lazy ' +
-        'one below the fold, is the ordinary cause. The srcset is not what to look at here.',
+      'Sizes is auto, so the browser took the width from the layout, 0 px, so there was no width ' +
+        'to select against and nothing was picked — an image this render drew no box for, such as a ' +
+        'lazy one below the fold, is the ordinary cause. The srcset is not what to look at here.',
     );
     expect(only({ srcset: TWO, sizes: '0px' })).toBe(
-      'Sizes gives it 0px, so there was no width to select against and nothing was picked — an ' +
-        'image this render drew no box for, such as a lazy one below the fold, is the ordinary ' +
-        'cause. The srcset is not what to look at here.',
+      'Sizes says 0px, so there was no width to select against and nothing was picked — an image ' +
+        'this render drew no box for, such as a lazy one below the fold, is the ordinary cause. The ' +
+        'srcset is not what to look at here.',
     );
   });
 
@@ -734,15 +744,16 @@ describe('the reasoning a row holds behind its disclosure', () => {
     expect(
       only({ srcset: '/i/a.png 640w, /i/b.png 2x', sizes: '100vw', currentSrc: 'https://example.com/i/a.png' }),
     ).toBe(
-      'The arithmetic picks 2x — your screen is 1440 px wide at DPR 1 (standard); sizes gives it ' +
-        '100vw, which is 1440 px, so it needs 1440 device pixels — but the browser loaded 640w, ' +
+      'On your 1440 px wide screen, sizes says 100vw, so the image counts as full width. At DPR 1 ' +
+        'it needs a file at least that wide. The arithmetic picks 2x, but the browser loaded 640w, ' +
         'and a w and an x descriptor cannot be ranked against each other.',
     );
   });
 
   it('the device had no say: says where the one file came from, and what the descriptors cost', () => {
     expect(only({ currentSrc: 'https://example.com/px.gif' })).toBe(
-      'No srcset, so your device made no difference here; the src attribute is the only file on offer.',
+      'No srcset, so your device made no difference here; the src attribute is the only file on ' +
+        'offer.',
     );
     expect(
       only({ srcset: '/clear.png 320w, /clear.png 640w, /clear.png 1280w', sizes: '100vw', currentSrc: 'https://example.com/clear.png' }),
@@ -815,7 +826,8 @@ describe('the verdict a row leads with', () => {
 
   it('is no choice where the device had no say', () => {
     expect(verdictOf({ currentSrc: 'https://example.com/px.gif' })).toEqual(['no choice', 'quiet']);
-    expect(verdictOf({ srcset: '/i/one.png 800w', currentSrc: 'https://example.com/i/one.png' })).toEqual(['no choice', 'quiet']);
+    expect(verdictOf({ srcset: '/i/one.png 800w', currentSrc: 'https://example.com/i/one.png' })).toEqual(['no ' +
+                                                                                                             'choice', 'quiet']);
     expect(
       verdictOf({ srcset: '/clear.png 320w, /clear.png 640w', sizes: '100vw', currentSrc: 'https://example.com/clear.png' }),
     ).toEqual(['no choice', 'quiet']);
@@ -851,7 +863,7 @@ describe('the verdict a row leads with', () => {
     // gone — it is the note the row carries, one opening away, and the case
     // below is where every word of it is asserted.
     expect(
-      verdictOf({ srcset: TWO, sizes: 'auto', renderedWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
+      verdictOf({ srcset: TWO, sizes: 'auto', loading: 'lazy', renderedWidth: 1080, naturalWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
     ).toEqual(['can’t tell', 'quiet']);
   });
 
@@ -864,8 +876,8 @@ describe('the verdict a row leads with', () => {
       verdictOf({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/640.png' }),
       verdictOf({ srcset: TWO, sizes: '33vw', renderedWidth: 475, currentSrc: 'https://example.com/i/1080.png' }),
       verdictOf({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' }),
-      verdictOf({ srcset: TWO, sizes: 'auto', renderedWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
-      verdictOf({ srcset: TWO, sizes: 'auto', renderedWidth: 0 }),
+      verdictOf({ srcset: TWO, sizes: 'auto', loading: 'lazy', renderedWidth: 1080, naturalWidth: 1080, currentSrc: 'https://example.com/i/1080.png' }),
+      verdictOf({ srcset: TWO, sizes: 'auto', loading: 'lazy', renderedWidth: 0 }),
       verdictOf({ srcset: TWO, sizes: '33vw', currentSrc: '' }),
       verdictOf({ srcset: TWO, sizes: '(min-width: 100px) wide', currentSrc: 'https://example.com/i/640.png' }),
       verdictOf({ currentSrc: 'https://example.com/px.gif' }),
@@ -902,10 +914,15 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
     // agrees because one produced the other. The marks and the note were both
     // there and the verdict still read plain good, which is the panel being
     // quietest exactly where it knows least.
+    // `lazy` is what makes the browser read `auto` at all, and the natural
+    // width matching the box is what says the box may be the file's own: the
+    // page declares no width, so nothing else can have set it.
     const row = rowOf({
       srcset: TWO,
       sizes: 'auto',
+      loading: 'lazy',
       renderedWidth: 1080,
+      naturalWidth: 1080,
       currentSrc: 'https://example.com/i/1080.png',
     });
 
@@ -914,7 +931,7 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
     // check: the file laid the image out, the width became `needed`, `needed`
     // produced the pick, and the pick then agreed with the file.
     expect(row.why).toBe(
-      'The width came from the loaded file, so the pick cannot disagree with it.',
+      'The width may be the loaded file’s own, so the pick cannot disagree with it.',
     );
     // And the mechanism is intact, one opening away, in the two paragraphs the
     // row carries: the arithmetic as it ran, and why its agreement is worth
@@ -922,9 +939,9 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
     // this is where it said the same thing — twice in one disclosure would be
     // the reader reading it twice.
     expect(row.notes).toEqual([
-      'Your screen is 1440 px wide at DPR 1 (standard); sizes is auto, and the width came from ' +
-        'layout: 1080 px, so it needs 1080 device pixels — and 1080w is the smallest file that ' +
-        'covers that.',
+      'On your 1440 px wide screen, sizes is auto, so the browser took the width from the layout, ' +
+        '1080 px. At DPR 1 it needs a file at least that wide, and 1080w is the smallest that is ' +
+        'wide enough.',
       'sizes resolved to auto, so the width above is the width this render laid the image out ' +
         'at — and for an image the page gives no width of its own, that is the width of ' +
         'whichever file the browser already held. Every marked figure descends from it, so a ' +
@@ -951,7 +968,7 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
     expect(one.why).toBe('src (1x) is the smallest density at or above your pixel ratio.');
     expect(one.notes).toEqual([
       'Your screen is DPR 1 (standard) and no candidate carries a width, so the ratio decided ' +
-        'alone — and src (1x) is the smallest density at or above it.',
+        'alone, and src (1x) is the smallest density at or above it.',
     ]);
     expect(said(one.steps)).toEqual([
       'clause used  x descriptors only',
@@ -964,10 +981,10 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
     expect([two.verdict.word, two.verdict.tone]).toEqual(['undersized', 'warn']);
     expect(two.why).toBe('2x covers your pixel ratio, and src (1x) does not.');
     expect(two.notes).toEqual([
-      'The arithmetic picks 2x — your screen is DPR 2 (retina) and no candidate carries a ' +
-        'width, so the ratio decided alone — but the browser loaded src (1x), which does not ' +
-        'cover the pixels needed above, so the image is upscaled wherever the page draws it at ' +
-        'that size; check what set this src.',
+      'Your screen is DPR 2 (retina) and no candidate carries a width, so the ratio decided ' +
+        'alone. The arithmetic picks 2x, but the browser loaded src (1x), which does not cover the ' +
+        'pixels needed above, so the image is upscaled wherever the page draws it at that size; ' +
+        'check what set this src.',
     ]);
   });
 
@@ -1015,17 +1032,17 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
     // failing to give one: the second is the same argument every marked figure
     // on the panel carries, and a box of zero is a marked figure.
     expect(row.notes[0]).toBe(
-      'Sizes is auto, and the width came from layout: 0 px, so there was no width to select ' +
-        'against and nothing was picked — an image this render drew no box for, such as a lazy ' +
-        'one below the fold, is the ordinary cause. The srcset is not what to look at here.',
+      'Sizes is auto, so the browser took the width from the layout, 0 px, so there was no width ' +
+        'to select against and nothing was picked — an image this render drew no box for, such as a ' +
+        'lazy one below the fold, is the ordinary cause. The srcset is not what to look at here.',
     );
     expect(row.notes).toHaveLength(2);
     // And the same for a page that wrote the zero itself, which is the other
     // way core arrives at no width at all.
     expect(rowOf({ srcset: TWO, sizes: '0px' }).notes).toEqual([
-      'Sizes gives it 0px, so there was no width to select against and nothing was picked — an ' +
-        'image this render drew no box for, such as a lazy one below the fold, is the ordinary ' +
-        'cause. The srcset is not what to look at here.',
+      'Sizes says 0px, so there was no width to select against and nothing was picked — an image ' +
+        'this render drew no box for, such as a lazy one below the fold, is the ordinary cause. The ' +
+        'srcset is not what to look at here.',
     ]);
   });
 
@@ -1042,11 +1059,11 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
         currentSrc: 'https://example.com/i/1080.png',
       }).notes,
     ).toEqual([
-      'The arithmetic picks 640w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
-        'it 33vw, which is 475 px, so it needs 475 device pixels — but the browser loaded 1080w, ' +
-        'which is larger. A held copy reused rather than chosen again is the likeliest cause, ' +
-        'and a viewport that shrank after load or script that rewrote sizes or srcset would read ' +
-        'the same; an empty cache is the only way to see the real pick.',
+      'On your 1440 px wide screen, sizes says 33vw, which comes to 475 px. At DPR 1 it needs a ' +
+        'file at least that wide. The arithmetic picks 640w, but the browser loaded 1080w, which is ' +
+        'larger. A held copy reused rather than chosen again is the likeliest cause, and a viewport ' +
+        'that shrank after load or script that rewrote sizes or srcset would read the same; an ' +
+        'empty cache is the only way to see the real pick.',
     ]);
   });
 
@@ -1058,10 +1075,10 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
     expect(
       rowOf({ srcset: TWO, sizes: '100vw', currentSrc: 'https://example.com/i/640.png' }).notes,
     ).toEqual([
-      'The arithmetic picks 1080w — your screen is 1440 px wide at DPR 1 (standard); sizes gives ' +
-        'it 100vw, which is 1440 px, so it needs 1440 device pixels — but the browser loaded ' +
-        '640w, which does not cover the pixels needed above, so the image is upscaled wherever ' +
-        'the page draws it at that size; check what set this src.',
+      'On your 1440 px wide screen, sizes says 100vw, so the image counts as full width. At DPR 1 ' +
+        'it needs a file at least that wide. The arithmetic picks 1080w, but the browser loaded ' +
+        '640w, which does not cover the pixels needed above, so the image is upscaled wherever the ' +
+        'page draws it at that size; check what set this src.',
     ]);
   });
 
@@ -1080,10 +1097,9 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
     // The tie is a caveat about the file name beside the headline rather than
     // an outcome, so it went behind the disclosure with the rest of them.
     expect(row.notes).toEqual([
-      'Your screen is 1440 px wide at DPR 1 (standard); sizes gives it 320px, so it needs 320 ' +
-        'device pixels — and 640w is the smallest file that covers that. The browser loaded ' +
-        '640w, which is a different file at the same descriptor, so the pixels are the same ' +
-        'either way.',
+      'On your 1440 px wide screen, sizes says 320px. At DPR 1 it needs a file at least that ' +
+        'wide, and 640w is the smallest that is wide enough. The browser loaded 640w, which is a ' +
+        'different file at the same descriptor, so the pixels are the same either way.',
     ]);
 
     // And where neither of the two covers the need, the stretch is the
@@ -1096,10 +1112,11 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
     expect([short.verdict.word, short.verdict.tone]).toEqual(['undersized', 'warn']);
     expect(short.why).toBe('Needs 1440 px, and 640w is the largest file on offer.');
     expect(short.notes).toEqual([
-      'Your screen is 1440 px wide at DPR 1 (standard); sizes gives it 100vw, which is 1440 px, ' +
-        'so it needs 1440 device pixels — no file covers that, so 640w, the largest on offer, is ' +
-        'stretched to fit; add a candidate above 640w. The browser loaded 640w, which is a ' +
-        'different file at the same descriptor, so the pixels are the same either way.',
+      'On your 1440 px wide screen, sizes says 100vw, so the image counts as full width. At DPR 1 ' +
+        'it needs a file at least that wide, but no file is wide enough, so the browser took the ' +
+        'largest, 640w, and the image is stretched to fit; add a candidate above 640w. The browser ' +
+        'loaded 640w, which is a different file at the same descriptor, so the pixels are the same ' +
+        'either way.',
     ]);
   });
 
@@ -1115,8 +1132,8 @@ describe('the verdict, where a reading could confirm itself or blame the wrong t
     expect([row.verdict.word, row.verdict.tone]).toEqual(['fit', 'good']);
     expect(row.why).toBe('Needs 100 px, and 640w is the smallest file that covers it.');
     expect(row.notes).toEqual([
-      'Your screen is 1440 px wide at DPR 1 (standard); sizes gives it 100px, so it needs 100 ' +
-        'device pixels — and 640w is the smallest file that covers that.',
+      'On your 1440 px wide screen, sizes says 100px. At DPR 1 it needs a file at least that wide, ' +
+        'and 640w is the smallest that is wide enough.',
     ]);
   });
 });
@@ -1276,7 +1293,8 @@ describe('what a row says about which image it is', () => {
   });
 
   it('words the thumbnail’s own alt, so a box that will not draw still says what it was', () => {
-    expect(rowOf({ currentSrc: 'https://example.com/i/a.png', alt: 'A person' }).alt).toBe('A person');
+    expect(rowOf({ currentSrc: 'https://example.com/i/a.png', alt: 'A person' }).alt).toBe('A ' +
+                                                                                             'person');
     expect(rowOf({ currentSrc: 'https://example.com/i/a.png', alt: '' }).alt).toBe('a.png');
     expect(rowOf({ currentSrc: 'https://example.com/i/a.png' }).alt).toBe('a.png');
     expect(rowOf({ currentSrc: '' }).alt).toBe('nothing loaded');

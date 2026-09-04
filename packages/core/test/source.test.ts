@@ -51,6 +51,7 @@ const imageOf = (srcset: string, sizes: string | null, renderedWidth: number): C
   renderedWidth,
   currentSrc: '',
   naturalWidth: 0,
+  declaresWidth: false,
   transferBytes: null,
   loading: null,
 });

@@ -7,17 +7,25 @@ import type { Readout } from '../src/panel.js';
 const WIDTHS = '/i/640.png 640w, /i/1080.png 1080w, /i/1920.png 1920w';
 const DENSITIES = '/i/200.png 1x, /i/300.png 2x';
 
-const imageOf = (srcset: string, sizes: string | null, renderedWidth = 375): CapturedImage => ({
+const imageOf = (
+  srcset: string,
+  sizes: string | null,
+  renderedWidth = 375,
+  // `auto` is a width only for a lazy image, which is the standard's own
+  // condition, so a case about `auto` has to say which kind of image it is.
+  loading: CapturedImage['loading'] = null,
+): CapturedImage => ({
   id: 'main > img',
   selector: 'main > img',
   candidates: parseSrcset(srcset),
   sizes,
   sizesSource: 'img',
   renderedWidth,
+  declaresWidth: false,
   currentSrc: '',
   naturalWidth: 0,
   transferBytes: null,
-  loading: null,
+  loading,
 });
 
 const deviceOf = (width: number, dpr: number): DeviceProfile => ({
@@ -101,7 +109,7 @@ describe('readPanel', () => {
   });
 
   it('takes the width layout ended at where the clause said auto', () => {
-    const readout = read(imageOf(WIDTHS, 'auto', 300), deviceOf(1440, 2));
+    const readout = read(imageOf(WIDTHS, 'auto', 300, 'lazy'), deviceOf(1440, 2));
 
     expect(readout.cssPx).toBe('300px');
     expect(readout.needed).toBe('600px');

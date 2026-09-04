@@ -8,8 +8,35 @@ const src = fileURLToPath(new URL('../src', import.meta.url));
 /** The service worker, which is the only module Chrome ever loads on its own. */
 const WORKER = 'background.ts';
 
-/** The one call the worker is allowed to make when it loads. */
-const REGISTRATION = 'chrome.action.onClicked.addListener';
+/**
+ * The module a click puts in the page, and the one event it may listen for
+ * that a page load also fires.
+ *
+ * The exemption is one module and one word wide. `load` anywhere else in this
+ * package is a passive cost and is refused; here it is a listener on one
+ * `<img>` the reading found no file for, added by a panel a click opened and
+ * taken off again when that panel closes.
+ */
+const PANEL = 'panel.ts';
+const PANEL_EVENT = 'load';
+
+/**
+ * The calls the worker is allowed to make when it loads.
+ *
+ * Two, and both of them registrations. The click is the first. The second is
+ * the channel an open panel asks again on: a row for an image the browser has
+ * not fetched cannot be judged, so the panel watches for the load and sends
+ * the reading back — and a worker that has gone to sleep in between has to be
+ * able to hear it.
+ *
+ * A registration is still not a run. Nothing sends a message unless a panel is
+ * open, and a panel is open only because somebody clicked. The passive cost of
+ * the second line on a page nobody clicked is the same as the first: none.
+ */
+const REGISTRATIONS = [
+  'chrome.action.onClicked.addListener',
+  'chrome.runtime.onMessage.addListener',
+];
 
 /**
  * Every path off `chrome` this package may name.
@@ -24,10 +51,17 @@ const REGISTRATION = 'chrome.action.onClicked.addListener';
  * This one refuses everything not named, so a listener that fires without a
  * click cannot arrive by being forgotten. Adding a name is the deliberate act.
  *
- * Two names is the whole extension. One is the click. The other is what the
- * click does.
+ * Four names is the whole extension. One is the click, one is what the click
+ * does, and the other two are the channel the panel it opened asks again on —
+ * the page half and the worker half of one conversation that only an open
+ * panel can start.
  */
-const CHROME = new Set(['chrome.action.onClicked.addListener', 'chrome.scripting.executeScript']);
+const CHROME = new Set([
+  'chrome.action.onClicked.addListener',
+  'chrome.runtime.onMessage.addListener',
+  'chrome.runtime.sendMessage',
+  'chrome.scripting.executeScript',
+]);
 
 /**
  * Paths refused by name as well as by absence from the allowlist above.
@@ -48,7 +82,7 @@ const WAKES: Rules = [
     'a tab event, which fires on navigation with nothing clicked',
   ],
   [
-    /\.on(?:Installed|Startup|Suspend|SuspendCanceled|Connect|ConnectExternal|Message|MessageExternal|Alarm|StateChanged|Committed|BeforeNavigate|Completed|BeforeRequest|HeadersReceived|Determining|Changed)\b/,
+    /\.on(?:Installed|Startup|Suspend|SuspendCanceled|Connect|ConnectExternal|MessageExternal|Alarm|StateChanged|Committed|BeforeNavigate|Completed|BeforeRequest|HeadersReceived|Determining|Changed)\b/,
     'an event that fires without a click',
   ],
   [
@@ -87,13 +121,23 @@ const WAKES: Rules = [
  * event names rather than a ban on `addEventListener`, a ban the next slice
  * would have to loosen and might loosen carelessly.
  *
- * `scroll`, `resize` and `__imgwhy_closing__` are the panel's three and none
+ * `scroll`, `resize` and `__imgwhy_closing__` are three of the panel's and none
  * of them is refused, for that reason and one more: not one can fire before a
  * click. A scroll and a resize need a page a reader is already looking at, the
  * third is fired by the extension's own closing click, and all three are
  * registered when a mark goes up rather than when the panel opens — so a
  * dormant worker has none of them and an open panel has them only while a box
  * is being drawn.
+ *
+ * `load` is the fourth, and it is the one this list has to say something about
+ * rather than pass over. A page load is exactly what `load` names, and a
+ * listener for it in the worker or in a content script is a passive cost. The
+ * panel's is neither: it goes on one `<img>` that the reading found no file
+ * for, it is added by a panel that a click opened, it fires once when the
+ * page's own lazy loading fetches the file, and the closing event takes every
+ * one of them off again. So the refusal names the modules a page load can
+ * reach rather than the word, and `panel.ts` is exempt from that one event and
+ * from nothing else.
  */
 const WORKER_EVENTS: Rules = [
   [
@@ -113,7 +157,7 @@ const WORKER_EVENTS: Rules = [
  * because the worker imports them and an effect in one of them is an effect
  * the worker runs on load just the same.
  */
-function findings(text: string, exempt?: string): string[] {
+function findings(text: string, exempt: readonly string[] = [], inPanel = false): string[] {
   const surface = surfaceOf(text);
   const found = [
     ...surface.refused,
@@ -124,6 +168,7 @@ function findings(text: string, exempt?: string): string[] {
       return CHROME.has(path) ? null : `names ${path}`;
     }),
     ...surface.events.map((event) => {
+      if (inPanel && event === PANEL_EVENT) return null;
       const reason = why(WORKER_EVENTS, event);
       return reason === undefined ? null : `listens for "${event}", which is ${reason}`;
     }),
@@ -160,17 +205,19 @@ describe('the extension, checked against anything that runs before a click', () 
     expect(Object.keys(modules)).toContain(WORKER);
     // The check reads the module it meant to read, rather than passing on a
     // renamed file whose top level happens to be empty.
-    expect(surfaceOf(modules[WORKER] ?? '').chrome).toContain(REGISTRATION);
+    for (const call of REGISTRATIONS) {
+      expect(surfaceOf(modules[WORKER] ?? '').chrome).toContain(call);
+    }
   });
 
-  it('runs one statement when the worker loads, and that statement is the registration', () => {
-    expect(topLevelEffects(modules[WORKER] ?? '', REGISTRATION)).toEqual([]);
-    // Without the exemption the registration is the only thing reported, which
-    // is what says the line above is exempting one statement rather than
-    // finding none.
-    expect(topLevelEffects(modules[WORKER] ?? '')).toEqual([
-      `calls ${REGISTRATION} at its top level`,
-    ]);
+  it('runs two statements when the worker loads, and both of them are registrations', () => {
+    expect(topLevelEffects(modules[WORKER] ?? '', REGISTRATIONS)).toEqual([]);
+    // Without the exemption the registrations are the only things reported,
+    // which is what says the line above is exempting two statements rather
+    // than finding none.
+    expect(topLevelEffects(modules[WORKER] ?? '')).toEqual(
+      REGISTRATIONS.map((call) => `calls ${call} at its top level`),
+    );
   });
 
   it('runs nothing at all when the modules the worker imports load', () => {
@@ -181,7 +228,7 @@ describe('the extension, checked against anything that runs before a click', () 
     expect(found).toEqual([]);
   });
 
-  it('names two extension APIs across the whole package, and no others', () => {
+  it('names four extension APIs across the whole package, and no others', () => {
     const named = new Set(Object.values(modules).flatMap((text) => surfaceOf(text).chrome));
 
     expect([...named].sort()).toEqual([...CHROME].sort());
@@ -189,7 +236,9 @@ describe('the extension, checked against anything that runs before a click', () 
 
   it('registers no listener anywhere for an event a page load fires', () => {
     const found = Object.entries(modules).flatMap(([name, text]) =>
-      findings(text, name === WORKER ? REGISTRATION : undefined).map((line) => `${name} ${line}`),
+      findings(text, name === WORKER ? REGISTRATIONS : [], name === PANEL).map(
+        (line) => `${name} ${line}`,
+      ),
     );
 
     expect(found).toEqual([]);
@@ -217,7 +266,7 @@ describe('the extension, checked against anything that runs before a click', () 
  *   nothing having run. The manifest is what keeps that list to one entry.
  */
 describe('the dormancy check, given an extension that wakes on its own', () => {
-  const worker = (lines: string[]): string[] => findings(lines.join('\n'), REGISTRATION);
+  const worker = (lines: string[]): string[] => findings(lines.join('\n'), REGISTRATIONS);
 
   it('is quiet about the arrangement that ships', () => {
     expect(
@@ -367,11 +416,12 @@ describe('the dormancy check, given an extension that wakes on its own', () => {
       ['registers a listener for an event it names at run time'],
     ],
     [
-      'a message listener, which is a way in that no click opens',
-      ['chrome.runtime.onMessage.addListener(() => {});'],
+      'a message listener from outside the extension, which any page can open',
+      ['chrome.runtime.onMessageExternal.addListener(() => {});'],
       [
-        'calls chrome.runtime.onMessage.addListener at its top level',
-        'names chrome.runtime.onMessage.addListener, which is an event that fires without a click',
+        'calls chrome.runtime.onMessageExternal.addListener at its top level',
+        'names chrome.runtime.onMessageExternal.addListener, which is an event that fires ' +
+          'without a click',
       ],
     ],
     [
@@ -399,8 +449,8 @@ describe('the dormancy check, given an extension that wakes on its own', () => {
 
     expect(worker(twice.split('\n'))).toEqual([]);
     expect(topLevelEffects(twice)).toEqual([
-      `calls ${REGISTRATION} at its top level`,
-      `calls ${REGISTRATION} at its top level`,
+      `calls ${REGISTRATIONS[0]} at its top level`,
+      `calls ${REGISTRATIONS[0]} at its top level`,
     ]);
   });
 

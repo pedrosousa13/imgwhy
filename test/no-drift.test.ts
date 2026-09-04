@@ -28,8 +28,17 @@ const COPIES = [
   ['the extension', '../packages/extension/src/read.ts'],
 ] as const;
 
-/** The name both copies bind, inside the function each one sends to a page. */
-const RESOLUTION = 'active';
+/**
+ * Every function both packages bind, inside the function each one sends to a
+ * page.
+ *
+ * `active` resolves a `<picture>`'s `<source>`. `declaresWidth` answers whether
+ * the page gives an element a width of its own, which is what frees a row from
+ * `can't tell`. Both are page-side reads `core` cannot hold, because `core`
+ * declares no DOM types, and both are read by the command line and by the
+ * extension — which is the whole shape of the problem this file exists for.
+ */
+const SHARED = ['active', 'declaresWidth'] as const;
 
 /**
  * What a difference between the copies costs, said in the failure rather than
@@ -41,17 +50,23 @@ const RESOLUTION = 'active';
  * the browser read, off the same page, with each one looking right on its own
  * and no test anywhere else catching it.
  */
-const WHY = [
-  `The two copies of ${RESOLUTION}() have drifted.`,
-  'Fix both or neither: this function decides which <source> a browser read,',
-  'and the command line and the extension answer that question from separate',
-  'copies of it. One changed alone is two front ends disagreeing about which',
-  'file a page loaded, each of them looking right on its own.',
-].join('\n');
+const whyOf = (name: string): string =>
+  [
+    `The two copies of ${name}() have drifted.`,
+    'Fix both or neither: the command line and the extension answer the same',
+    'question from separate copies of this function. One changed alone is two',
+    'front ends disagreeing about the same page, each of them looking right on',
+    'its own.',
+  ].join('\n');
 
-/** One copy's text, by package. */
-const textOf = (path: string): string[] =>
-  functionsNamed(read(fileURLToPath(new URL(path, import.meta.url))), RESOLUTION);
+/** One copy's text, by package and by name. */
+const textOf = (path: string, name: string): string[] =>
+  functionsNamed(read(fileURLToPath(new URL(path, import.meta.url))), name);
+
+/** Every package against every shared function, as one table of cases. */
+const CASES = COPIES.flatMap(([where, path]) =>
+  SHARED.map((name): [string, string, string] => [name, where, path]),
+);
 
 /**
  * The lines that differ, named by line and by side.
@@ -61,7 +76,7 @@ const textOf = (path: string): string[] =>
  * long, and printing both of them puts the one line that matters somewhere in
  * the middle of twenty-six.
  */
-const drift = (left: string, right: string): string => {
+const drift = (name: string, left: string, right: string): string => {
   const [ours, theirs] = [left.split('\n'), right.split('\n')];
   const missing = '(the copy ends here)';
   const lines = [...ours, ...theirs]
@@ -76,21 +91,24 @@ const drift = (left: string, right: string): string => {
       ].join('\n'),
     );
 
-  return lines.length === 0 ? '' : [WHY, ...lines].join('\n\n');
+  return lines.length === 0 ? '' : [whyOf(name), ...lines].join('\n\n');
 };
 
-describe('the two copies of the picture source resolution', () => {
-  it.each(COPIES)('is declared exactly once in %s, so this reads what it means to', (_at, path) => {
-    // A second declaration of the name, or none at all, is a reading that has
-    // stopped answering the question — and comparing what it found would then
-    // be a test that passes because it looked at nothing.
-    expect(textOf(path)).toHaveLength(1);
-  });
+describe('the functions the command line and the extension both hold', () => {
+  it.each(CASES)(
+    'declares %s exactly once in %s, so this reads what it means to',
+    (name, _where, path) => {
+      // A second declaration of the name, or none at all, is a reading that has
+      // stopped answering the question — and comparing what it found would then
+      // be a test that passes because it looked at nothing.
+      expect(textOf(path, name)).toHaveLength(1);
+    },
+  );
 
-  it('resolves a source in the command line exactly as it does in the extension', () => {
-    const [ours, theirs] = COPIES.map(([, path]) => textOf(path)[0]);
+  it.each(SHARED)('holds %s identical in both, so the two cannot answer differently', (name) => {
+    const [ours, theirs] = COPIES.map(([, path]) => textOf(path, name)[0]);
 
-    expect(drift(ours, theirs)).toBe('');
+    expect(drift(name, ours, theirs)).toBe('');
   });
 });
 
@@ -109,23 +127,23 @@ describe('the reading, given copies that differ', () => {
   it('names the line and the side, rather than printing both copies', () => {
     const theirs = 'const active = (img) => {\n  return img.currentSrc;\n};';
 
-    expect(drift(ours, theirs)).toContain('line 2');
-    expect(drift(ours, theirs)).toContain('  the command line:   return img.srcset;');
-    expect(drift(ours, theirs)).toContain('  the extension:   return img.currentSrc;');
+    expect(drift('active', ours, theirs)).toContain('line 2');
+    expect(drift('active', ours, theirs)).toContain('  the command line:   return img.srcset;');
+    expect(drift('active', ours, theirs)).toContain('  the extension:   return img.currentSrc;');
   });
 
   it('says what a difference costs, so a reader is not left with two lines', () => {
-    expect(drift(ours, 'const active = (img) => {\n  return img.src;\n};')).toContain(WHY);
+    expect(drift('active', ours, 'const active = (img) => {\n  return img.src;\n};')).toContain(whyOf('active'));
   });
 
   it('fails on a copy that was only reformatted', () => {
-    expect(drift(ours, 'const active = (img) => {\n    return img.srcset;\n};')).not.toBe('');
+    expect(drift('active', ours, 'const active = (img) => {\n    return img.srcset;\n};')).not.toBe('');
   });
 
   it('fails on a copy with a line added to the end of it', () => {
     const longer = 'const active = (img) => {\n  return img.srcset;\n  // and one more\n};';
 
-    expect(drift(ours, longer)).toContain('(the copy ends here)');
+    expect(drift('active', ours, longer)).toContain('(the copy ends here)');
   });
 });
 
@@ -158,6 +176,6 @@ describe('reading a named function out of a module', () => {
   ];
 
   it.each(cases)('reads %s', (_shape, source, expected) => {
-    expect(functionsNamed(source, RESOLUTION)).toHaveLength(expected);
+    expect(functionsNamed(source, 'active')).toHaveLength(expected);
   });
 });

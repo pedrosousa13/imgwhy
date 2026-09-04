@@ -12,6 +12,7 @@ const imageAt = (path: string, srcset: string): CapturedImage => ({
   renderedWidth: 320,
   currentSrc: '',
   naturalWidth: 320,
+  declaresWidth: false,
   transferBytes: null,
   loading: null,
 });
