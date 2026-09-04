@@ -86,6 +86,14 @@ const WAKES: Rules = [
  * `click` handler in it costs a page nothing — which is why this is a list of
  * event names rather than a ban on `addEventListener`, a ban the next slice
  * would have to loosen and might loosen carelessly.
+ *
+ * `scroll`, `resize` and `__imgwhy_closing__` are the panel's three and none
+ * of them is refused, for that reason and one more: not one can fire before a
+ * click. A scroll and a resize need a page a reader is already looking at, the
+ * third is fired by the extension's own closing click, and all three are
+ * registered when a mark goes up rather than when the panel opens — so a
+ * dormant worker has none of them and an open panel has them only while a box
+ * is being drawn.
  */
 const WORKER_EVENTS: Rules = [
   [

@@ -1,4 +1,4 @@
-import type { Line, Panel } from './explain.js';
+import type { Line, Panel, Row } from './explain.js';
 
 /**
  * The panel, and the one function a click sends into the page second.
@@ -58,11 +58,14 @@ export function renderPanel(panel: Panel): 'opened' {
   // panel it was never given. Closed returns the root to this function and to
   // nothing else, so the only way in is the reference held here.
   //
-  // It is also what makes the whole of the pointing half removable. Every node
-  // below and every listener on one of them hangs off this root, so the
-  // closing click's single `remove()` takes the marks and the handlers with it
-  // — there is no listener anywhere on a page element, and nothing to
-  // remember to unregister.
+  // It is also what makes almost the whole of the pointing half removable.
+  // Every node below and every listener on one of them hangs off this root, so
+  // the closing click's single `remove()` takes the marks and the row handlers
+  // with it, and no page element carries one. The exception is the two
+  // listeners on the window that keep a mark on its image while the viewport
+  // moves: those are not on a node at all, so they are added when a mark goes
+  // up, removed when it comes down, and removed again on `CLOSING` for the
+  // case where the panel is closed with a mark still showing.
   const root = host.attachShadow({ mode: 'closed' });
 
   const style = document.createElement('style');
@@ -490,7 +493,9 @@ export function renderPanel(panel: Panel): 'opened' {
      *
      * \`position: fixed\` resolves against the viewport, which is the same
      * coordinate space \`getBoundingClientRect\` reports in, so the numbers go
-     * straight in with no scroll offset to add. Nothing on \`:host\` makes a
+     * straight in with no scroll offset to add — and it is also why the rect
+     * has to be read again when the viewport moves, which is what the two
+     * window listeners above are for. Nothing on \`:host\` makes a
      * containing block — \`all: initial !important\` resets \`transform\`,
      * \`filter\` and \`contain\` along with everything else, so no page rule can
      * make one either — and \`pointer-events: none\` keeps the box from taking a
@@ -532,25 +537,100 @@ export function renderPanel(panel: Panel): 'opened' {
   root.appendChild(spot);
 
   /**
-   * The image a row is about, or nothing where the page has moved on.
+   * The image a row is about, confirmed, or nothing where the page no longer
+   * holds it.
    *
-   * `read.ts` argues the handle: `readPage` walks `document.images` and hands
-   * each row its index into that collection, so the panel indexes the same
-   * live collection back. A page that inserted or removed an `<img>` between
-   * the read and the hover has shifted it — a row past the new end finds
-   * nothing, which is this guard, and a row before it can find the neighbour
-   * of the image it names, which is not corrected. The panel is one render's
-   * answer; a page that has moved on wants a second click.
+   * The handle is the index into `document.images` the reading minted, and it
+   * is the fast path rather than the answer. An `<img>` inserted or removed
+   * *before* that index shifts every later row onto a neighbouring element,
+   * with nothing anywhere saying so: an infinite-scroll page that lazy-inserts
+   * one image above the fold is enough, and the row for the hero then marks
+   * the thumbnail above it and scrolls to that instead. A row past the new end
+   * was the only case the previous version caught, which is the least likely
+   * of them.
+   *
+   * So the element the index resolves to is confirmed against the file the
+   * browser had loaded — `currentSrc`, which the reading already carries as
+   * `row.file` and the row already shows as its thumbnail. The selector was the
+   * alternative and it is the weaker of the two: it is a string built out of
+   * tag names and `nth-of-type` positions, so a page that re-orders siblings
+   * resolves it to a different element with no error anywhere, and handing it
+   * to `querySelector` would be this package parsing page content.
+   *
+   * Where the index misses, the same file is looked for across the collection,
+   * which is what recovers every row on a page that inserted one image above
+   * them. One match is a confirmation; two are two images a reading cannot tell
+   * apart, and guessing between them is the failure this exists to stop. Where
+   * the index hits it stands, ambiguity and all: a page's twentieth identical
+   * avatar is indistinguishable from its nineteenth, and refusing to mark
+   * either would be a worse panel than one that marks the element the index
+   * names.
+   *
+   * A row that recorded no file has nothing to be found by. The index is
+   * confirmed only as far as "the image here has still loaded nothing", and a
+   * lazy image that finished loading in between fails that — which is the
+   * honest outcome, because a row whose verdict, thumbnail and sentence are all
+   * about a file that has since arrived is a row describing something else.
    */
-  const imageAt = (at: number): HTMLImageElement | undefined => document.images[at];
+  const imageFor = (row: Row): HTMLImageElement | undefined => {
+    /** Whether one element is the image this row describes. */
+    const describes = (image: HTMLImageElement | undefined): boolean =>
+      image !== undefined && (image.currentSrc || image.src) === row.file;
 
-  /** Draw the box over one image, or draw nothing if it is not there. */
-  const mark = (at: number): void => {
-    const image = imageAt(at);
+    const at = document.images[row.at];
+    if (describes(at)) return at;
+    if (row.file === '') return undefined;
+
+    const same = [...document.images].filter(describes);
+    return same.length === 1 ? same[0] : undefined;
+  };
+
+  /**
+   * The row a mark is up for, as the closure that draws it again.
+   *
+   * A closure rather than the row, because what a scroll needs is not a number
+   * but the whole of "draw this row's box again" — the row and the heading the
+   * word below goes on.
+   */
+  let held: (() => void) | null = null;
+
+  /** The word one row is carrying about its own handle, or nothing. */
+  let lost: Element | null = null;
+
+  /** Draw the box over one row's image, or say the row cannot find it. */
+  const place = (row: Row, named: Element): void => {
+    const image = imageFor(row);
     if (image === undefined) {
+      // Criterion 5, and the claim #22's commit message made and did not keep:
+      // a row that cannot find its image says so rather than marking a
+      // neighbour. A `mark` beside the one that says a held copy could explain
+      // the figures, because both are a figure flagged for reference and the
+      // platform has an element for that. Its `title` says what to do about it.
       frame.textContent = '';
+      // One word at a time, on the row it is about. The heading is checked as
+      // well as the word's existence because a pointer can be on one row while
+      // a keyboard takes focus to another, and a word left on the row the
+      // pointer has moved off is a word on the wrong row.
+      if (lost === null || lost.parentElement !== named) {
+        lost?.remove();
+        const word = document.createElement('mark');
+        word.textContent = 'not found';
+        word.title =
+          'this image is no longer on the page as the reading found it, so there is nothing to ' +
+          'mark; close the panel and click again for a reading of the page as it is now';
+        named.appendChild(word);
+        lost = word;
+      }
       return;
     }
+
+    lost?.remove();
+    lost = null;
+    // Read again on every call rather than once, because a rect is a
+    // measurement of one moment: a scroll, a resize, a lazy ad slot or a late
+    // web font moves the box, and coordinates written into the sheet once are
+    // a box over blank space from then on.
+    //
     // Rounded because a rect is fractional and a border drawn on a half pixel
     // is a border a browser antialiases into two grey ones. An image the page
     // draws no box for — `display: none`, or nothing loaded and no size given
@@ -562,9 +642,62 @@ export function renderPanel(panel: Panel): 'opened' {
       `width: ${Math.round(box.width)}px; height: ${Math.round(box.height)}px }`;
   };
 
-  /** Take the box away, which is what leaving a row means. */
+  /** Read the box again, wherever the viewport has moved it to. */
+  const follow = (): void => {
+    if (held !== null) held();
+  };
+
+  /**
+   * Take the box away, which is what leaving a row means — and take down every
+   * listener the box needed.
+   *
+   * The same function answers the closing click, because the panel being taken
+   * away and the pointer leaving a row want exactly the same thing done.
+   */
   const unmark = (): void => {
+    held = null;
     frame.textContent = '';
+    lost?.remove();
+    lost = null;
+    window.removeEventListener('scroll', follow);
+    window.removeEventListener('resize', follow);
+    window.removeEventListener('__imgwhy_closing__', unmark);
+  };
+
+  /**
+   * Put the box on one row's image, and keep it there while it is up.
+   *
+   * `scroll` and `resize` are the two events the platform gives for free that
+   * mean the box may have moved, and they are the whole of the tracking. A
+   * `ResizeObserver` or a `MutationObserver` on the page's own element would
+   * catch the layout shifts that fire neither — and would be a reach into the
+   * page for a box that is already re-read on every signal there is, so
+   * neither is here. Nor is a loop that polls, which is a cost every frame for
+   * an answer that changes on an event.
+   *
+   * Registering the same function for the same event again is a no-op in a
+   * browser, so moving from row to row costs nothing and there is nothing to
+   * count.
+   *
+   * The third is the closing click, which is the one listener here that is not
+   * about geometry: removing the host takes every listener on a node with it
+   * and takes nothing off the window, so `read.ts` fires `__imgwhy_closing__`
+   * before it removes the host and this is what hears it. The name is written
+   * out at both registrations rather than held in a constant, because
+   * `dormant.test.ts` reads the event a listener is registered for and refuses
+   * one it cannot see — a listener for a name computed at run time is a
+   * listener no check can hold to the list of events that fire without a
+   * click. `read.ts` spells the same string, for the reason both files spell
+   * `HOST_ID`: an injected function arrives with nothing of its module around
+   * it.
+   */
+  const mark = (row: Row, named: Element): void => {
+    const draw = (): void => place(row, named);
+    held = draw;
+    window.addEventListener('scroll', follow);
+    window.addEventListener('resize', follow);
+    window.addEventListener('__imgwhy_closing__', unmark);
+    draw();
   };
 
   /**
@@ -761,9 +894,10 @@ export function renderPanel(panel: Panel): 'opened' {
      *
      * Four listeners on the row and one on its button, all of them on nodes
      * inside this closed root. Not one is on a page element, which is why the
-     * closing click's single `remove()` is the whole of the cleanup: there is
-     * nothing left to unregister and nothing on the page that outlives the
-     * panel.
+     * closing click's `remove()` takes them: there is nothing to unregister
+     * and nothing on the page that outlives the panel. The two the mark hangs
+     * on the window are the exception, and `mark` and `unmark` above are where
+     * they go up and come down.
      *
      * `mouseenter` and `mouseleave` rather than `mouseover` and `mouseout`,
      * because the pair that does not bubble is the pair that means what it
@@ -774,9 +908,9 @@ export function renderPanel(panel: Panel): 'opened' {
      * A keyboard reader gets exactly what a pointer reader gets, which is the
      * criterion.
      */
-    item.addEventListener('mouseenter', () => mark(row.at));
+    item.addEventListener('mouseenter', () => mark(row, named));
     item.addEventListener('mouseleave', unmark);
-    item.addEventListener('focusin', () => mark(row.at));
+    item.addEventListener('focusin', () => mark(row, named));
     item.addEventListener('focusout', unmark);
 
     /**
@@ -787,18 +921,45 @@ export function renderPanel(panel: Panel): 'opened' {
      * answers Enter and Space with a click of its own, so there is no key
      * handler here and no key this panel has taught anybody.
      *
+     * The window and nothing else, which is the one change to the page a click
+     * here makes. `scrollIntoView` was the call this replaced and it scrolls
+     * *every* scroll container between the image and the viewport — an
+     * `overflow: hidden` one included, which is programmatically scrollable
+     * with no scrollbar for a reader to undo it with. A page with a JavaScript
+     * carousel holds its track at an offset its own code chose; scrolling a
+     * slide into view moves that track while the carousel's index and dot
+     * indicator still say otherwise, and nothing here puts it back. So an
+     * image inside a clipped container stays clipped: the mark still says
+     * where it sits, and the panel does not reach into machinery it cannot
+     * restore.
+     *
+     * `scrollTo` takes a document coordinate where a rect is a viewport one,
+     * which is what `window.scrollY` is doing in the sum. The image's own top
+     * rather than its middle, and that is the one thing this gives up:
+     * centring means halving a viewport height, this package performs no
+     * division anywhere — `through-core.test.ts` refuses one, because a
+     * density is a division and the arithmetic is core's — and core cannot be
+     * asked, since a figure that depends on the box at click time is not a
+     * figure the worker had. The top of the viewport is what additions say
+     * exactly.
+     *
      * `behavior: 'instant'` rather than the default, and it is not a
      * preference. A page with `scroll-behavior: smooth` in its own stylesheet
-     * animates the scroll, and the rect read on the next line would then be
-     * the box's position before the animation — a mark drawn where the image
-     * used to be. Scroll position is the one thing about the page a click here
-     * changes, and it changes it because the criterion asks for it.
+     * animates the scroll, and a rect read while the animation is in flight is
+     * the box's position before it — a mark drawn where the image used to be.
+     * The `scroll` listener would catch up; an instant scroll leaves nothing
+     * to catch up on.
+     *
+     * A row whose image cannot be confirmed scrolls nowhere at all, and `mark`
+     * is what says so on the row.
      */
     name.addEventListener('click', () => {
-      const image = imageAt(row.at);
-      if (image === undefined) return;
-      image.scrollIntoView({ block: 'center', behavior: 'instant' });
-      mark(row.at);
+      const image = imageFor(row);
+      if (image !== undefined) {
+        const box = image.getBoundingClientRect();
+        window.scrollTo({ top: box.top + window.scrollY, behavior: 'instant' });
+      }
+      mark(row, named);
     });
 
     list.appendChild(item);
