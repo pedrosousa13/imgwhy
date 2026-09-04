@@ -440,3 +440,55 @@ describe('the imgwhy command, asked for the capture itself', () => {
     expect(capture.url).toBe(`${server.url}/gallery.html`);
   }, 120_000);
 });
+
+/**
+ * The page from #41's reproduction, served on loopback and rendered by a real
+ * Chromium.
+ *
+ * This owns the premise the finding rests on, which is the one claim no
+ * hand-written Capture can make: that a page can get an escape sequence as far
+ * as a Capture in the first place. `escaping.test.ts` owns the other half —
+ * it writes its Capture by hand, so it can carry a bare CR and a NUL that no
+ * HTML parser would pass, and it reads the whole rendered trace back for any
+ * control character at all. Neither test covers the other's claim.
+ *
+ * So what is asserted here is what a browser leaves intact rather than what a
+ * Capture can hold. ESC and BEL arrive as the page wrote them. The CR does
+ * not: the HTML parser normalises it to a newline in the input stream, and a
+ * newline inside a descriptor is exactly what ended a line of the trace early.
+ * A NUL would arrive as U+FFFD, so the page writes none, and that character
+ * stays the unit check's to cover.
+ */
+describe('the imgwhy command, given a page written to break the trace', () => {
+  it('takes the page control characters into the capture and none of them to the terminal', async () => {
+    const url = `${server.url}/control-characters.html`;
+
+    // One run per output, because the command writes one or the other — and
+    // the two outputs are the one thing this case needs to disagree about.
+    const asJson = await imgwhy(plain, '--json', url);
+    const ran = await imgwhy(plain, url);
+
+    expect(asJson.code).toBe(0);
+    const capture: Capture = JSON.parse(asJson.stdout);
+    const image = capture.runs[0].images[0];
+
+    // What the page delivered. The `sizes` string retitles a terminal window
+    // and the descriptor erases the line it lands on before writing its own,
+    // and both of them reached the runner as the markup had them.
+    expect(image.sizes).toBe('100vw\u001b]0;imgwhy-pwned\u0007');
+    expect(image.candidates.map((candidate) => candidate.raw)).toEqual([
+      '640w\u001b[2K\nFORGED CANDIDATE LINE',
+      '1080w',
+    ]);
+
+    // And what the terminal was asked to print of it: nothing it obeys, and
+    // no line the page wrote.
+    expect(ran.code).toBe(0);
+    expect(lines(ran.stdout).filter((line) => /\p{Cc}/u.test(line))).toEqual([]);
+    expect(lines(ran.stdout).filter((line) => line.trimStart().startsWith('FORGED'))).toEqual([]);
+    expect(ran.stdout).toContain(String.raw`  sizes       100vw\u001b]0;imgwhy-pwned\u0007`);
+    expect(ran.stdout).toContain(
+      String.raw`  candidates  640w\u001b[2K\nFORGED CANDIDATE LINE, 1080w`,
+    );
+  }, 120_000);
+});

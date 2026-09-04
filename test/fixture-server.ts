@@ -98,6 +98,27 @@ const PAGES: Record<string, string> = {
   src="/img/640.png" alt="hero"></main>`,
   ),
 
+  // The two attributes #41 was found with: a `sizes` string that retitles a
+  // terminal window, and a descriptor that erases the line it lands on and
+  // then writes a line of its own.
+  //
+  // Both are attribute values, so the HTML parser hands them to the page with
+  // their control characters intact — the ESC and the BEL as written, and the
+  // CR as a newline, because the parser normalises one in the input stream. A
+  // newline in a descriptor is what ended a line of the trace early, and a
+  // descriptor is where it has to be: one runs to the next comma, whitespace
+  // and all, where a URL runs to the first space.
+  //
+  // The forged descriptor is not one a browser can read, so Blink drops that
+  // candidate and chooses from the other. imgwhy reads the attribute itself,
+  // and what it reports is what the attribute held.
+  '/control-characters.html': shell(
+    'control characters',
+    `<main><img class="hero" sizes="100vw\u001b]0;imgwhy-pwned\u0007"
+  srcset="/img/640.png 640w\u001b[2K\rFORGED CANDIDATE LINE, /img/1080.png 1080w"
+  src="/img/640.png" alt="hero"></main>`,
+  ),
+
   // Candidates written relative to the page, so the base a trace resolves them
   // against decides whether they land. Reached through the redirect below.
   '/nested/': shell(
