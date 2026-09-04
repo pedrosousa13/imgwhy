@@ -711,7 +711,54 @@ describe('the thumbnail, checked as the rule that draws it', () => {
     inPage(source, host);
 
     expect(thumbRule(host).some((line) => /^background-image: repeating-conic-gradient\(/.test(line))).toBe(true);
-    expect(thumbRule(host)).toContain('background-size: 10px 10px');
+    expect(thumbRule(host)).toContain('background-size: 8px 8px');
+  });
+
+  /**
+   * Every colour the ground is drawn from, as a relative luminance.
+   *
+   * Read out of the rule rather than written down here, so the check is
+   * against what ships. Six-digit hex only, which is every colour this
+   * stylesheet uses; a shorthand or a named colour would read as no colour at
+   * all, so the count is asserted before the luminances are.
+   */
+  const groundTones = (host: Page): number[] => {
+    const ground = thumbRule(host).filter((line) => /^background-(color|image):/.test(line)).join(' ');
+    const channel = (pair: string): number => {
+      const unit = Number.parseInt(pair, 16) / 255;
+      return unit <= 0.03928 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
+    };
+    return [...ground.matchAll(/#([0-9a-f]{6})/gi)].map(([, hex]) => {
+      const [r, g, b] = [hex.slice(0, 2), hex.slice(2, 4), hex.slice(4, 6)].map(channel);
+      return 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0);
+    });
+  };
+
+  it('draws that ground in a middle tone, so white content on it is not invisible', () => {
+    // The bug this holds shut: a light check is the convention an image editor
+    // uses, and it assumes the artwork is dark. Two transparent banners whose
+    // only content was white type drew as empty boxes on `#ffffff` with
+    // `#e3e5e9` — nothing failed and nothing was missing, and a reader saw
+    // nothing. A ground a page's own white logo disappears into is not a
+    // ground.
+    //
+    // A band rather than a contrast ratio, because no single tone clears a
+    // ratio against white and black at once: the best any tone manages is
+    // 4.6:1 both ways, at a luminance near 0.18, which is darker than a
+    // texture behind a picture should be. The band says the thing that
+    // actually matters — every tone is somewhere in the middle, so neither
+    // end of the range vanishes into it. The old light check fails it: the
+    // white was 1.0 and the grey 0.79.
+    const host = page();
+    inPage(source, host);
+
+    const tones = groundTones(host);
+    expect(tones).toHaveLength(3);
+
+    for (const tone of tones) {
+      expect(tone).toBeGreaterThan(0.12);
+      expect(tone).toBeLessThan(0.6);
+    }
   });
 
   it('keeps the box small, because it is an identifier and not a preview', () => {
