@@ -30,10 +30,18 @@
  * someone's browser and nothing at all in a test that called it directly.
  *
  * `globals` below is the other half of the same argument. `matchMedia`,
- * `getComputedStyle`, `innerWidth`, `innerHeight` and `devicePixelRatio` are
- * names the reader has because a page has them, and a `vm` context holds
- * nothing that is not put in it — so a reader reaching for a sixth name fails
- * here rather than in somebody's browser.
+ * `getComputedStyle`, `innerWidth`, `innerHeight`, `devicePixelRatio`,
+ * `window` and `Event` are names the injected functions have because a page
+ * has them, and a `vm` context holds nothing that is not put in it — so a
+ * function reaching for a name that is not one of those eight fails here
+ * rather than in somebody's browser.
+ *
+ * `windowOf` is the newest of them and the one with the most semantics in it:
+ * a scroll offset that moves, every box on the page moving with it, and a
+ * listener a second registration of the same function does not duplicate. All
+ * three are what a mark that follows its image rests on, and a window that
+ * only recorded the calls made to it would report a mark drawn once from a
+ * stale rect as a mark that follows.
  */
 
 /** What `attachShadow` is handed, which is one field of interest. */
@@ -71,6 +79,27 @@ export const box = (fields: Partial<Box> = {}): Box => ({
  * drawn where the image used to be.
  */
 export type ScrollAsked = { block?: string; behavior?: string };
+
+/**
+ * How the window was asked to scroll, which is the one change a click makes.
+ *
+ * `top` is a document coordinate where a rect is a viewport one, which is the
+ * whole reason `scrollY` is on the window below: a panel that handed
+ * `scrollTo` a rect's own `top` would scroll to the right place only while the
+ * page happened to be at the top of itself.
+ */
+export type ScrollToAsked = { top?: number; left?: number; behavior?: string };
+
+/**
+ * An event, as much of one as a dispatch needs.
+ *
+ * Named `Ev` here and handed to the reader as `Event`, the way `El` is handed
+ * over as an element: what the injected functions have is the page's globals,
+ * and `readPage` reaches for that one to say the panel is closing.
+ */
+export class Ev {
+  constructor(readonly type: string) {}
+}
 
 /**
  * Which events bubble.
@@ -177,6 +206,28 @@ export class El {
   background = 'none';
 
   /**
+   * How this element clips what overflows it, which is what makes it a scroll
+   * container.
+   *
+   * `visible` is not one; every other value is, and `hidden` is the value that
+   * matters. A `hidden` box has no scrollbar for a reader to drag and is
+   * scrollable all the same — a carousel's track is one, held at an offset its
+   * own script chose — so it is a position a panel can move and nobody can put
+   * back.
+   */
+  overflow = 'visible';
+
+  /**
+   * Where this element is scrolled to, which is the page's own state.
+   *
+   * A field rather than nothing, because "the panel changed a scroll offset it
+   * cannot restore" is a claim about a number that moved, and a stand-in with
+   * no number cannot fail it. `scrollIntoView` below is what moves it, which
+   * is the defect it exists to show.
+   */
+  scrollTop = 0;
+
+  /**
    * Every listener registered on this element, by event name.
    *
    * Kept rather than counted, because the claim they answer is about where
@@ -217,8 +268,32 @@ export class El {
     this.listeners.set(type, held);
   }
 
+  /**
+   * Bring this element into view the way a browser does, which is by scrolling
+   * every scroll container between it and the viewport.
+   *
+   * The ancestors are the reason this is modelled rather than recorded. The
+   * spec has `scrollIntoView` scroll the element's ancestor scroll boxes, and
+   * an `overflow: hidden` container is one of them — so a call meant to move
+   * the viewport moves a carousel's track with it, the carousel's own index
+   * and dot indicator still say otherwise, and nothing in the page or the
+   * panel puts the track back. A stand-in that only pushed the options onto a
+   * list would report all of that as no change at all.
+   *
+   * The offset written brings the element to the container's top rather than
+   * to the figure a browser lands on for `block: 'center'`. What a case here
+   * asks is whether a container the panel has no business touching moved; how
+   * far it moved is a number no claim in this package rests on.
+   *
+   * The viewport half is deliberately not here. The panel's route to the
+   * window scroll is `window.scrollTo`, so the window models its own offset
+   * and a case reads it off the thing that owns it.
+   */
   scrollIntoView(asked: ScrollAsked = {}): void {
     this.scrolled.push(asked);
+    for (let node = this.parent; node !== null; node = node.parent) {
+      if (node.overflow !== 'visible') node.scrollTop += this.rect.top - node.rect.top;
+    }
   }
 
   /** The nearest ancestor with this tag name, itself included. */
@@ -349,6 +424,98 @@ export function page(): Page {
   };
 }
 
+/**
+ * The window a panel is injected into: the one scroll offset a click may
+ * change, and the events a mark listens for.
+ *
+ * A model rather than a pair of spies, for the reason `El` is one. Both claims
+ * this exists for are about a number that moves and a box that moves with it:
+ * a `scrollTo` that only recorded its argument would pass a mark that read the
+ * rect once and wrote fixed viewport coordinates into the sheet, because
+ * nothing in the page would have moved between the two reads.
+ */
+export type Win = {
+  /**
+   * Where the document is scrolled to, which is the panel's one sanctioned
+   * change to the page and the one a reader can undo with a scroll.
+   */
+  scrollX: number;
+  scrollY: number;
+  /** Every scroll the panel asked the window for, in order. */
+  readonly scrolled: ScrollToAsked[];
+  /** Every listener on the window, by event name. */
+  readonly listeners: Map<string, (() => void)[]>;
+  addEventListener(type: string, handler: () => void): void;
+  removeEventListener(type: string, handler: () => void): void;
+  scrollTo(asked: ScrollToAsked): void;
+  dispatchEvent(event: { type: string }): void;
+};
+
+/**
+ * The window around one page.
+ *
+ * Three details are modelled rather than stubbed, and each of them is a way a
+ * green test could otherwise ship a broken panel:
+ *
+ * - **A duplicate registration is ignored.** A browser keeps one listener per
+ *   event, function and phase, which is what lets the panel add its two on
+ *   every mark without counting the marks before. A stub that appended would
+ *   fire a handler once per hover and pass a panel that leaked one listener a
+ *   row.
+ * - **A scroll moves every box on the page.** A rect is measured against the
+ *   viewport, so scrolling the document down by 300 puts every element 300
+ *   nearer the top of it. That coupling is the whole of what "the mark follows
+ *   its image" means, and a stub that moved the offset alone would let a
+ *   cached rect pass.
+ * - **The scroll event fires from the scroll.** Synchronously here, where a
+ *   browser fires it on the next frame. The difference does not reach any
+ *   claim below: what is asserted is that a listener was registered and that
+ *   what it draws comes from a fresh reading.
+ *
+ * Every box is moved, which is a simplification worth naming: a page's own
+ * `position: fixed` element does not move with a scroll, and nothing here
+ * knows which elements those are. No case in this directory has one.
+ */
+export function windowOf(host: Page): Win {
+  const listeners = new Map<string, (() => void)[]>();
+
+  const win: Win = {
+    scrollX: 0,
+    scrollY: 0,
+    scrolled: [],
+    listeners,
+    addEventListener: (type, handler) => {
+      const held = listeners.get(type) ?? [];
+      if (!held.includes(handler)) held.push(handler);
+      listeners.set(type, held);
+    },
+    removeEventListener: (type, handler) => {
+      const held = (listeners.get(type) ?? []).filter((one) => one !== handler);
+      if (held.length === 0) listeners.delete(type);
+      else listeners.set(type, held);
+    },
+    dispatchEvent: (event) => {
+      for (const handler of [...(listeners.get(event.type) ?? [])]) handler();
+    },
+    scrollTo: (asked) => {
+      win.scrolled.push(asked);
+      const top = asked.top ?? win.scrollY;
+      const left = asked.left ?? win.scrollX;
+      // A new box per element rather than a mutated one, because a case builds
+      // its page out of shared `box()` literals and a scroll is not allowed to
+      // reach back into the next case's fixture.
+      for (const node of host.light()) {
+        node.rect = { ...node.rect, top: node.rect.top - (top - win.scrollY) };
+      }
+      win.scrollY = top;
+      win.scrollX = left;
+      win.dispatchEvent(new Ev('scroll'));
+    },
+  };
+
+  return win;
+}
+
 /** The browser around the page: the viewport it renders at and its ratio. */
 export type World = { width: number; height: number; dpr: number };
 
@@ -372,19 +539,31 @@ const matches = (query: string, width: number): boolean =>
     });
 
 /**
- * The `vm` context an injected function runs in: a document and the five
- * names a page supplies that the reader reads.
+ * The `vm` context an injected function runs in: a document, the five names a
+ * page supplies that the reader reads, and the two more the panel's mark and
+ * the closing click need — the window, and the event fired on it.
  *
  * Nothing else is here, deliberately. The context is the claim — a function
- * that reaches for a sixth global is a function whose stringified copy would
+ * that reaches for a ninth global is a function whose stringified copy would
  * throw in a browser, and the only way to catch that is to hand it a world
  * with nothing in it that was not written down.
+ *
+ * `win` is a parameter rather than a fresh window every time because the panel
+ * and the click that closes it are two injections into one page: a case that
+ * asks whether the closing click took the panel's window listeners down has to
+ * hand both halves the same window.
  */
-export const globals = (host: Page, world: World): Record<string, unknown> => ({
+export const globals = (
+  host: Page,
+  world: World,
+  win: Win = windowOf(host),
+): Record<string, unknown> => ({
   document: host,
   innerWidth: world.width,
   innerHeight: world.height,
   devicePixelRatio: world.dpr,
   matchMedia: (query: string) => ({ matches: matches(query, world.width) }),
   getComputedStyle: (element: El) => ({ backgroundImage: element.background }),
+  window: win,
+  Event: Ev,
 });

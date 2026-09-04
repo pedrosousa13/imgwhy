@@ -43,15 +43,22 @@ export type RawImage = {
    * functions.
    *
    * What it costs is a page that mutates. An `<img>` inserted or removed
-   * between the read and the hover shifts the collection, so the mark can land
-   * on the neighbour of the row a reader pointed at, and a row past the new end
-   * marks nothing at all — which is the case `renderPanel` guards. Neither is
-   * corrected, because the panel is one render's answer: it reports the page as
-   * the click found it, and the honest fix for a page that has moved on is to
-   * close it and click again. Verifying the handle against the row's own
-   * `currentSrc` was considered and rejected — a lazy image that finished
-   * loading in between would fail that check while the handle was right, and
-   * refusing to mark the correct image is worse than marking its neighbour.
+   * between the read and the hover shifts the collection, so the index can
+   * resolve to the neighbour of the row a reader pointed at — and an
+   * infinite-scroll page that lazy-inserts one image above the fold shifts
+   * every row on the panel at once.
+   *
+   * So the index is the fast path and `currentSrc` below is what confirms it.
+   * `renderPanel` marks an element only where the file that element loaded is
+   * the file this reading recorded for the row, looks for that file across the
+   * collection where the index misses, and says `not found` on the row where
+   * it cannot settle which element is meant. An earlier version of this
+   * comment rejected exactly that check, on the argument that a lazy image
+   * which finished loading in between would fail it while the handle was
+   * right; what that argument missed is that such a row is describing a file
+   * that has since arrived, so its verdict, its thumbnail and its sentence are
+   * all about something else, and saying so is more use than a box drawn
+   * confidently over the wrong image.
    */
   at: number;
   selector: string;
@@ -149,8 +156,8 @@ export type Reading = {
  * click opens rather than trying to close something that is no longer there.
  *
  * Null is the closing click. The worker asks core nothing and injects nothing
- * further when it gets one, so a second click costs the page one function call
- * and a node removal.
+ * further when it gets one, so a second click costs the page one function
+ * call, one event nothing but the panel listens for, and a node removal.
  */
 export function readPage(): Reading | null {
   // Underscored and prefixed, because it lands in the page's id namespace and
@@ -160,8 +167,25 @@ export function readPage(): Reading | null {
   // over with a stringified function.
   const HOST_ID = '__imgwhy_host__';
 
+  /**
+   * What the panel is told before it goes.
+   *
+   * The panel keeps a mark on the image a row is about, and a box in viewport
+   * coordinates has to be redrawn when the viewport moves — so while a mark is
+   * up the panel holds a `scroll` and a `resize` listener on the window, and
+   * the window is the one thing in the arrangement that removing the host does
+   * not take with it. A page closed with the pointer still on a row would
+   * otherwise leave a handler holding a shadow tree that is in no document.
+   *
+   * So the closing click says so out loud, and the panel's own handler takes
+   * the listeners down. Declared twice, here and in `panel.ts`, for the same
+   * reason `HOST_ID` is: neither copy can see the other.
+   */
+  const CLOSING = '__imgwhy_closing__';
+
   const open = document.getElementById(HOST_ID);
   if (open !== null) {
+    window.dispatchEvent(new Event(CLOSING));
     open.remove();
     return null;
   }

@@ -18,11 +18,24 @@ const src = fileURLToPath(new URL('../src', import.meta.url));
  * refuses everything not named, so a way out cannot arrive by being
  * forgotten. Adding a name is the deliberate act.
  *
- * Fourteen names is the whole of the outside world this package sees, and they
- * group into four things.
+ * Sixteen names is the whole of the outside world this package sees, and they
+ * group into five things.
  *
  * `chrome` is the two extension calls `dormant.test.ts` allowlists. `document`
  * is the page both injected functions work in.
+ *
+ * `window` and `Event` are the newest two, and they are the panel's mark. A box
+ * drawn over an image is written in viewport coordinates, so the panel needs
+ * the viewport: `window.scrollTo` to bring an image into view, `window.scrollY`
+ * to say where the page already is, and `window.addEventListener` to hear that
+ * either has moved. `Event` is an object with a name in it, which is what the
+ * closing click's `dispatchEvent` takes so the panel can take those listeners
+ * down. Neither can name a destination — a scroll offset is a number and the
+ * event name is a string this package wrote — but `window` is the one entry on
+ * this list that is a path to every global there is, and that is why the call
+ * lists below carry more weight for it than for `document`: `window.fetch(…)`
+ * is a call to `fetch` however it is spelled, and `LEAKS` refuses it by name
+ * wherever the allowlist has been widened.
  *
  * `innerWidth`, `innerHeight`, `devicePixelRatio`, `matchMedia` and
  * `getComputedStyle` are the browser the page is being looked at in, and they
@@ -47,6 +60,7 @@ const src = fileURLToPath(new URL('../src', import.meta.url));
  */
 const GLOBALS = new Set([
   'Element',
+  'Event',
   'HTMLImageElement',
   'HTMLSourceElement',
   'Math',
@@ -60,6 +74,7 @@ const GLOBALS = new Set([
   'innerWidth',
   'matchMedia',
   'undefined',
+  'window',
 ]);
 
 /**
@@ -70,7 +85,7 @@ const GLOBALS = new Set([
  * as innocent as it gets — and `caches.open` or `chrome.storage.local.set`
  * would name none either if their objects were ever allowed.
  *
- * Twenty-eight names, and the list is longer than it was because the panel says
+ * Thirty names, and the list is longer than it was because the panel says
  * more than it did. It still groups into four things and nothing else.
  *
  * The extension's own work: register, inject, and swallow the one rejection an
@@ -103,17 +118,28 @@ const GLOBALS = new Set([
  * `toUpperCase` capitalises the first letter of a sentence that otherwise
  * follows a dash.
  *
- * `addEventListener` and `scrollIntoView` are the pointing half, and they are
- * the two entries that read like a reach into the page. Neither is.
- * `addEventListener` is only ever called on a node the panel made inside its
- * own closed root — `pointing.test.ts` walks the page and finds none — so it
- * registers nothing that outlives the host's removal, and `dormant.test.ts`
- * refuses the event names that would fire without a click.
- * `scrollIntoView` is the one thing on this list that reaches a page element,
- * and it changes the page's scroll offset and nothing else: no style, no
- * class, no attribute. The issue asks for it in those words — "clicking a row
- * brings that image into view" — so it is a sanctioned change rather than a
- * tolerated one.
+ * `addEventListener`, `removeEventListener`, `scrollTo` and `dispatchEvent`
+ * are the pointing half, and they are the four entries that read like a reach
+ * into the page. Not one of them is.
+ *
+ * `addEventListener` is called on nodes the panel made inside its own closed
+ * root — `pointing.test.ts` walks the page and finds none — and on the window,
+ * where a mark keeps two listeners while it is up so the box can be redrawn
+ * where the image now is. `removeEventListener` is what takes those two down:
+ * when the mark comes down, and on the closing click, which is the one thing
+ * `dispatchEvent` is for. `dormant.test.ts` refuses the event names that would
+ * fire without a click.
+ *
+ * `scrollTo` is where `scrollIntoView` used to be, and the swap is this
+ * slice's whole first fix rather than a detail. `scrollIntoView` reaches a
+ * page element and scrolls *every* scroll container between it and the
+ * viewport, an `overflow: hidden` one included, so one click could leave a
+ * carousel's track at an offset its own script did not choose and nothing
+ * restores. `scrollTo` is on the window and moves one number, the document's
+ * own scroll offset: no style, no class, no attribute, nothing inside the page
+ * moved, and the one change a reader can undo with a wheel. The issue asks for
+ * it in those words — "clicking a row brings that image into view" — so it is
+ * a sanctioned change rather than a tolerated one.
  */
 const CALLED = new Set([
   'addEventListener',
@@ -123,6 +149,7 @@ const CALLED = new Set([
   'catch',
   'closest',
   'createElement',
+  'dispatchEvent',
   'executeScript',
   'filter',
   'getAttribute',
@@ -134,8 +161,9 @@ const CALLED = new Set([
   'map',
   'querySelectorAll',
   'remove',
+  'removeEventListener',
   'round',
-  'scrollIntoView',
+  'scrollTo',
   'slice',
   'split',
   'startsWith',
@@ -360,13 +388,13 @@ describe('the extension, checked against storing or sending anything', () => {
     expect(surfaceOf(modules['read.ts'] ?? '').globals).toContain('matchMedia');
   });
 
-  it('reaches fourteen names outside itself, and no others', () => {
+  it('reaches sixteen names outside itself, and no others', () => {
     const reached = new Set(Object.values(modules).flatMap((text) => surfaceOf(text).globals));
 
     expect([...reached].sort()).toEqual([...GLOBALS].sort());
   });
 
-  it('calls twenty-eight properties, and no others', () => {
+  it('calls thirty properties, and no others', () => {
     const calls = new Set(Object.values(modules).flatMap((text) => surfaceOf(text).called));
 
     expect([...calls].sort()).toEqual([...CALLED].sort());
