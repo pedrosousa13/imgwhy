@@ -17,6 +17,11 @@ type Injection = {
 
 /** Every handler the worker registered, and every injection it asked for. */
 const registered: ((tab: { id?: number }) => void)[] = [];
+const asked: ((
+  message: unknown,
+  sender: unknown,
+  respond: (answer: unknown) => void,
+) => boolean | undefined)[] = [];
 const injected: Injection[] = [];
 
 /**
@@ -58,6 +63,27 @@ let refuse: Error | null = null;
         registered.push(handler);
       },
     },
+  },
+  /**
+   * The channel an open panel asks again on.
+   *
+   * Held the way `onClicked` is, because the worker registers both at its top
+   * level and the test drives them the same way: the handler is captured here
+   * and called below with a message the panel could have sent.
+   */
+  runtime: {
+    onMessage: {
+      addListener: (
+        handler: (
+          message: unknown,
+          sender: unknown,
+          respond: (answer: unknown) => void,
+        ) => boolean | undefined,
+      ): void => {
+        asked.push(handler);
+      },
+    },
+    sendMessage: (): Promise<unknown> => Promise.resolve(undefined),
   },
   scripting: {
     executeScript: (injection: Injection): Promise<{ result: unknown }[]> => {
@@ -119,7 +145,9 @@ describe('the toolbar click', () => {
     expect(injected[1]).toEqual({
       target: { tabId: 42 },
       func: renderPanel,
-      args: [panelOf(reads)],
+      // The reading travels with the panel, because the panel is what finds
+      // out that a lazy image has loaded and the worker keeps nothing.
+      args: [panelOf(reads), reads],
     });
     reads = reading();
   });
@@ -204,7 +232,8 @@ describe('the toolbar click', () => {
     expect(vm.runInContext(`(${String(first.func)})()`, world)).not.toBeNull();
     expect(
       vm.runInContext(
-        `(${String(second.func)})(${JSON.stringify(second.args?.[0])})`,
+        `(${String(second.func)})(${JSON.stringify(second.args?.[0])}, ` +
+          `${JSON.stringify(second.args?.[1])})`,
         vm.createContext({ document: host }),
       ),
     ).toBe('opened');

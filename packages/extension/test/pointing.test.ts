@@ -1,6 +1,5 @@
 import vm from 'node:vm';
 import { describe, expect, it } from 'vitest';
-import type { Panel } from '../src/explain.js';
 import { panelOf } from '../src/explain.js';
 import { renderPanel } from '../src/panel.js';
 import type { Reading } from '../src/read.js';
@@ -152,10 +151,16 @@ function removeImage(host: Page, at: number): void {
   img?.remove();
 }
 
-/** One panel, rendered into `host` the way Chrome renders it. */
-function paint(host: Page, panel: Panel, win: Win = windowOf(host)): void {
+/**
+ * One panel, rendered into `host` the way Chrome renders it.
+ *
+ * The reading goes over beside the panel, because the renderer keeps it: a row
+ * for an image the browser has not fetched is one the panel re-asks about when
+ * the page finally fetches it.
+ */
+function paint(host: Page, read: Reading, win: Win = windowOf(host)): void {
   vm.runInContext(
-    `(${String(renderPanel)})(${JSON.stringify(panel)})`,
+    `(${String(renderPanel)})(${JSON.stringify(panelOf(read))}, ${JSON.stringify(read)})`,
     vm.createContext({ document: host, window: win }),
   );
 }
@@ -166,7 +171,7 @@ function render(
   images: Parameters<typeof image>[0][],
   win: Win = windowOf(host),
 ): void {
-  paint(host, panelOf(reading({ images: images.map((fields) => image(fields)) })), win);
+  paint(host, reading({ images: images.map((fields) => image(fields)) }), win);
 }
 
 /** The reader, run the way Chrome runs it, which is the click that closes. */
@@ -190,7 +195,7 @@ function clickIn(host: Page, win: Win = windowOf(host)): Reading {
   ) as Reading | null;
   if (found === null) throw new Error('the reader removed a panel instead of reading the page');
 
-  paint(host, panelOf(found), win);
+  paint(host, found, win);
   return found;
 }
 
@@ -1023,25 +1028,25 @@ describe('the thumbnail, which identifies the image in the panel', () => {
     expect(thumb?.src).toBe('https://example.com/i/640.png?w=640&q=80');
   });
 
-  it('asks for nothing where the image has loaded nothing, and says so instead', () => {
-    // An empty `src` resolves to the page's own address, so a browser pointed
-    // at one fetches the document. The panel points it at nothing at all, and
-    // the `alt` beside it is what a reader gets in the box's place.
+  it('makes no image at all where the browser has fetched nothing, and says why', () => {
+    // No `<img>` rather than one with no `src`, which is what this drew
+    // before. An empty `src` resolves to the page's own address, so the
+    // element could never be given one — and an `<img>` with none draws its
+    // `alt` in a broken-image box, which is what a reader met on nine rows of
+    // a lazy page. It reads as an image that failed rather than as one the
+    // browser has not asked for, and the maintainer read it exactly that way.
     //
-    // Both halves are asserted, because they are two different states and one
-    // of them is the bug. The attribute was never set, which is what "asks for
-    // nothing" means; the property is empty *because* of that. An unconditional
-    // assignment would leave the attribute set to `''` and the property reading
-    // the page's own address — which is the request, made by a panel that
-    // looks, on a stand-in modelling `src` as a plain string, exactly like one
-    // that made none.
+    // The box says the state instead. Nothing here is a request: there is no
+    // element to make one.
     const host = pageOf([box()]);
     render(host, [image({ srcset: '/i/640.png 640w, /i/1080.png 1080w', currentSrc: '' })]);
-    const [thumb] = of(host, 'img');
 
-    expect(thumb?.srcAttribute).toBeNull();
-    expect(thumb?.src).toBe('');
-    expect(thumb?.alt).toBe('nothing loaded');
+    expect(of(host, 'img')).toEqual([]);
+    expect(
+      of(host, 'small')
+        .filter((node) => node.parent?.name === 'header')
+        .map((node) => node.textContent),
+    ).toEqual(['waiting']);
   });
 
   it('says what the page called the image, so a box that will not draw still names it', () => {
@@ -1055,7 +1060,8 @@ describe('the thumbnail, which identifies the image in the panel', () => {
 
   it('sits inside the row it belongs to, one per image and no more', () => {
     const host = pageOf([box(), box()]);
-    render(host, [image({ at: 0 }), image({ at: 1 })]);
+    const loaded = { currentSrc: 'https://example.com/i/640.png' };
+    render(host, [image({ at: 0, ...loaded }), image({ at: 1, ...loaded })]);
 
     expect(of(host, 'img')).toHaveLength(2);
     expect(of(host, 'img').map((node) => node.parent?.name)).toEqual(['header', 'header']);
@@ -1108,15 +1114,17 @@ describe('a lazy image nothing has requested, from the click through to the thum
       ['https://example.com/i/800x600.png', ''],
       ['https://example.com/i/1200x900.png', ''],
     ]);
-    // Not one thumbnail carries a `src` attribute, so not one request leaves
-    // the page for a file the page itself declined to ask for. The attribute
-    // rather than the property, because an absent one is no request and an
-    // empty one is a request for the document.
-    expect(of(host, 'img').map((thumb) => thumb.srcAttribute)).toEqual([null, null]);
-    expect(of(host, 'img').map((thumb) => thumb.alt)).toEqual([
-      'nothing loaded',
-      'nothing loaded',
-    ]);
+    // Not one thumbnail exists, so not one request leaves the page for a file
+    // the page itself declined to ask for. No element at all rather than an
+    // element with no `src`: an empty `src` resolves to the page's own address
+    // and would fetch the document, and an `<img>` that draws nothing reads to
+    // a person as an image that failed.
+    expect(of(host, 'img')).toEqual([]);
+    expect(
+      of(host, 'small')
+        .filter((node) => node.parent?.name === 'header')
+        .map((box) => box.textContent),
+    ).toEqual(['waiting', 'waiting']);
     // And no row claims a file: the verdict is the one that was already written
     // for this row and never reached, no `cache` mark sits on a heading, and
     // there is no `loaded` address among the ones a row opens to.
@@ -1284,11 +1292,14 @@ describe('the list, re-ordered', () => {
 
     /** Every row, as the box it marks against the box it should mark. */
     const marked = (): string[] =>
-      rows(host).map((row, at) => {
+      rows(host).map((row) => {
         dispatch(row, 'mouseenter');
         const drew = drawn(host);
         dispatch(row, 'mouseleave');
-        const named = of(host, 'button')[at + 1]?.children[1]?.textContent;
+        // The row's own control rather than the nth button in the panel: the
+        // heading carries controls of its own, and counting past them is a
+        // count that changes whenever the heading does.
+        const named = nameIn(row).children[1]?.textContent;
         return `${named ?? '?'}: ${drew}`;
       });
 
@@ -1429,5 +1440,175 @@ describe('the panel, laid out so twenty-three images can be read', () => {
       'oversized1080w1080.pngcache',
       'Needs 475 px, and 640w covers it, so 1080w is larger than needed.',
     ]);
+  });
+});
+
+/**
+ * The panel after the page loads an image it had no file for.
+ *
+ * The one thing the panel cannot do for itself is judge a row: verdicts are
+ * core's arithmetic, core is a module, and the page has no modules. So a lazy
+ * image below the fold arrives as `not loaded`, the reader scrolls, the page
+ * fetches the file — and the row is out of date with no click to bring it up
+ * to date, because the click is what opened the panel.
+ *
+ * These run that whole loop with the page's own `load` event as the trigger and
+ * the worker's answer stubbed, because the worker's half is `panelOf` and
+ * `explain.test.ts` holds it. What is checked here is the wiring: which
+ * elements are watched, what the message carries, what the panel does with the
+ * answer, and what it leaves on the page afterwards.
+ */
+describe('a row for an image the page has not fetched', () => {
+  /** The page's `<img>` that nothing has loaded, and the panel around it. */
+  function watching(): { host: Page; win: Win; img: El; sent: unknown[]; answer: () => void } {
+    const host = page();
+    const body = host.documentElement.children[0];
+    if (body === undefined) throw new Error('the page has no body');
+
+    const img = imageIn(host, body, { width: 300, height: 200, top: 4000 }, '');
+    img.srcAttribute = 'https://example.com/i/1080.png';
+    img.srcset = '/i/640.png 640w, /i/1080.png 1080w';
+    img.sizes = '33vw';
+    img.loading = 'lazy';
+    host.images.push(img);
+
+    const before = reading({
+      images: [
+        image({
+          at: 0,
+          selector: 'html > body > img',
+          srcset: '/i/640.png 640w, /i/1080.png 1080w',
+          sizes: '33vw',
+          renderedWidth: 300,
+          renderedHeight: 200,
+          loading: 'lazy',
+          srcAttribute: 'https://example.com/i/1080.png',
+          currentSrc: '',
+        }),
+      ],
+    });
+
+    const sent: unknown[] = [];
+    const answers: ((panel: unknown) => void)[] = [];
+    const win = windowOf(host);
+    const context = vm.createContext({
+      document: host,
+      window: win,
+      // The debounce runs its callback the moment it is asked to, so a case
+      // reads the message the panel sent rather than the clock it waited on.
+      setTimeout: (run: () => void): number => {
+        run();
+        return 1;
+      },
+      Event: Ev,
+      chrome: {
+        runtime: {
+          sendMessage: (message: unknown): Promise<unknown> => {
+            sent.push(message);
+            return new Promise((resolve) => answers.push(resolve));
+          },
+        },
+      },
+    });
+
+    vm.runInContext(
+      `(${String(renderPanel)})(${JSON.stringify(panelOf(before))}, ${JSON.stringify(before)})`,
+      context,
+    );
+
+    /** The worker answering, with the panel it would compute from what it was sent. */
+    const answer = (): void => {
+      const asked = sent[sent.length - 1] as { reading: Reading };
+      for (const resolve of answers.splice(0)) resolve(panelOf(asked.reading));
+    };
+
+    return { host, win, img, sent, answer };
+  }
+
+  /** The page fetching the file, which is what the panel is waiting for. */
+  function loads(img: El): void {
+    img.currentSrc = 'https://example.com/i/1080.png';
+    img.naturalWidth = 1080;
+    img.rect = box({ width: 300, height: 200, top: 4000 });
+    dispatch(img, 'load');
+  }
+
+  it('opens saying the browser has fetched nothing, and draws no thumbnail for it', () => {
+    const { host } = watching();
+
+    expect(of(host, 'output').map((word) => word.textContent)).toEqual(['not loaded']);
+    expect(of(host, 'img')).toEqual([]);
+  });
+
+  it('watches the image, which is the only listener it leaves on the page', () => {
+    const { host } = watching();
+
+    expect(listenersIn(host)).toEqual(['img: load']);
+  });
+
+  it('sends the reading back with the file the page fetched, and nothing else changed', async () => {
+    const { img, sent } = watching();
+
+    loads(img);
+    await Promise.resolve();
+
+    expect(sent).toHaveLength(1);
+    const asked = sent[0] as { imgwhy: string; reading: Reading };
+    expect(asked.imgwhy).toBe('again');
+    expect(asked.reading.images[0]?.currentSrc).toBe('https://example.com/i/1080.png');
+    expect(asked.reading.images[0]?.naturalWidth).toBe(1080);
+    // The page's own facts are the page's, and a load does not move them.
+    expect(asked.reading.images[0]?.srcset).toBe('/i/640.png 640w, /i/1080.png 1080w');
+    expect(asked.reading.images[0]?.sizes).toBe('33vw');
+  });
+
+  it('judges the row when the answer comes back, head and all', async () => {
+    const { host, img, answer } = watching();
+
+    loads(img);
+    await Promise.resolve();
+    answer();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Judged, rather than `not loaded`: 33vw of 1440 is 475, which 640w covers,
+    // so the 1080w the page fetched is larger than the row needed.
+    expect(of(host, 'output').map((word) => word.textContent)).toEqual(['oversized']);
+    expect(of(host, 'img').map((thumb) => thumb.src)).toEqual([
+      'https://example.com/i/1080.png',
+    ]);
+    expect(of(host, 'p')[0]?.textContent).toContain('1 oversized');
+  });
+
+  it('asks once for a burst of loads rather than once each', async () => {
+    const { img, sent } = watching();
+
+    loads(img);
+    loads(img);
+    await Promise.resolve();
+
+    // The second `load` cannot fire — the listener is one-shot and the browser
+    // has already dropped it — so a page that loads an image twice is one
+    // question, and so is a page that loads three images at once.
+    expect(sent).toHaveLength(1);
+  });
+
+  it('takes its watch off the page when the panel closes', () => {
+    const { host, win } = watching();
+
+    win.dispatchEvent({ type: '__imgwhy_closing__' });
+
+    expect(listenersIn(host)).toEqual([]);
+  });
+
+  it('takes its watch off the page when the close button is clicked', () => {
+    const { host } = watching();
+    const shut = of(host, 'button').find((node) => node.textContent === 'Close');
+    if (shut === undefined) throw new Error('the panel has no close button');
+
+    dispatch(shut, 'click');
+
+    expect(listenersIn(host)).toEqual([]);
+    expect(host.getElementById(HOST_ID)).toBeNull();
   });
 });

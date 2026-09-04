@@ -99,6 +99,26 @@ export type ScrollToAsked = { top?: number; left?: number; behavior?: string };
  */
 export class Ev {
   constructor(readonly type: string) {}
+
+  /**
+   * The two calls a handler makes to stop what a click would otherwise do.
+   *
+   * Modelled because the panel's close button needs both: it sits inside the
+   * card's `summary`, where a click's default action is to toggle the card
+   * shut and its path to the summary is the bubble. A double whose handlers
+   * took no event at all would fail a button that calls either one, and would
+   * pass one that forgot to.
+   */
+  defaultPrevented = false;
+  stopped = false;
+
+  preventDefault(): void {
+    this.defaultPrevented = true;
+  }
+
+  stopPropagation(): void {
+    this.stopped = true;
+  }
 }
 
 /**
@@ -116,6 +136,10 @@ export class Ev {
  */
 const BUBBLES: Record<string, boolean> = {
   click: true,
+  // A `load` on an image does not bubble, which is what makes it safe to put
+  // one on each image the panel found no file for: a load anywhere else on the
+  // page reaches none of them.
+  load: false,
   focusin: true,
   focusout: true,
   focus: false,
@@ -295,7 +319,17 @@ export class El {
    * element is left carrying anything. A test can only say that by walking the
    * page and finding none.
    */
-  readonly listeners: Map<string, (() => void)[]> = new Map();
+  readonly listeners: Map<string, ((event: Ev) => void)[]> = new Map();
+  /**
+   * The handlers the browser drops after one call.
+   *
+   * Held beside the listeners rather than wrapped around them, because a
+   * browser removes a `once` listener by the handler that was registered:
+   * `removeEventListener(type, handler)` takes it off before it has fired, and
+   * a double that stored a wrapper would keep a listener the panel had asked to
+   * be rid of.
+   */
+  readonly onceOnly: Set<(event: Ev) => void> = new Set();
 
   /** Every `scrollIntoView` this element was asked for, in order. */
   readonly scrolled: ScrollAsked[] = [];
@@ -367,11 +401,30 @@ export class El {
     return null;
   }
 
-  addEventListener(type: string, handler: () => void): void {
+  /**
+   * `once` is modelled because the panel relies on it.
+   *
+   * A watch on an image the reading found no file for is a listener the panel
+   * puts on a page element, and the browser dropping it after one call is what
+   * keeps a page that loads an image twice from being two questions. A double
+   * that kept the handler would report a panel asking again and again, and a
+   * panel that leaked one listener per load would pass.
+   */
+  addEventListener(type: string, handler: (event: Ev) => void, options?: { once?: boolean }): void {
     const held = this.listeners.get(type) ?? [];
     held.push(handler);
     this.listeners.set(type, held);
+    if (options?.once === true) this.onceOnly.add(handler);
   }
+
+  removeEventListener(type: string, handler: (event: Ev) => void): void {
+    const held = (this.listeners.get(type) ?? []).filter((one) => one !== handler);
+    if (held.length === 0) this.listeners.delete(type);
+    else this.listeners.set(type, held);
+    this.onceOnly.delete(handler);
+  }
+
+
 
   /**
    * Bring this element into view the way a browser does, which is by scrolling
@@ -466,10 +519,17 @@ export function dispatch(target: El, type: string): void {
   const bubbles = BUBBLES[type];
   if (bubbles === undefined) throw new Error(`no test models the "${type}" event`);
 
+  const event = new Ev(type);
   let node: El | null = target;
   while (node !== null) {
-    for (const handler of node.listeners.get(type) ?? []) handler();
-    node = bubbles ? node.parent : null;
+    const at: El = node;
+    for (const handler of [...(at.listeners.get(type) ?? [])]) {
+      // Dropped before it runs, the way a browser drops it, so a handler that
+      // dispatches the same event again cannot re-enter itself.
+      if (at.onceOnly.has(handler)) at.removeEventListener(type, handler);
+      handler(event);
+    }
+    node = bubbles && !event.stopped ? at.parent : null;
   }
 }
 
@@ -565,8 +625,9 @@ export type Win = {
   /** Every scroll the panel asked the window for, in order. */
   readonly scrolled: ScrollToAsked[];
   /** Every listener on the window, by event name. */
-  readonly listeners: Map<string, (() => void)[]>;
-  addEventListener(type: string, handler: () => void): void;
+  readonly listeners: Map<string, ((event: Ev) => void)[]>;
+  addEventListener(type: string, handler: (event: Ev) => void, options?: { once?: boolean }): void;
+  removeEventListener(type: string, handler: (event: Ev) => void): void;
   removeEventListener(type: string, handler: () => void): void;
   scrollTo(asked: ScrollToAsked): void;
   dispatchEvent(event: { type: string }): void;
@@ -602,7 +663,7 @@ export type Win = {
  * knows which elements those are. No case in this directory has one.
  */
 export function windowOf(host: Page): Win {
-  const listeners = new Map<string, (() => void)[]>();
+  const listeners = new Map<string, ((event: Ev) => void)[]>();
 
   const win: Win = {
     scrollX: 0,
@@ -620,7 +681,8 @@ export function windowOf(host: Page): Win {
       else listeners.set(type, held);
     },
     dispatchEvent: (event) => {
-      for (const handler of [...(listeners.get(event.type) ?? [])]) handler();
+      const sent = new Ev(event.type);
+      for (const handler of [...(listeners.get(event.type) ?? [])]) handler(sent);
     },
     scrollTo: (asked) => {
       win.scrolled.push(asked);

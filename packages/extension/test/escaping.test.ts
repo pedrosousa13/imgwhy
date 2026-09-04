@@ -141,8 +141,9 @@ const MARKUP: Rules = [
 function rendered(): { nodes: El[]; host: Page } {
   const host = page();
   const context = vm.createContext({ document: host });
+  const read = hostile();
   vm.runInContext(
-    `(${String(renderPanel)})(${JSON.stringify(panelOf(hostile()))})`,
+    `(${String(renderPanel)})(${JSON.stringify(panelOf(read))}, ${JSON.stringify(read)})`,
     context,
   );
   const element = host.getElementById(HOST_ID);
@@ -291,12 +292,17 @@ describe('the panel, given a page written to break out of it', () => {
     // a name from, so the scheme is what a reader gets; a `javascript:` URL is
     // the same shape; the ordinary one is a file name; and a row that loaded
     // nothing is named by the verdict beside it rather than by a file.
+    //
+    // The row that loaded nothing also draws no thumbnail, and the box in its
+    // place is a `small` too — the only one of these that is not page content,
+    // which is why it is a word this file wrote rather than one the page did.
     const { nodes } = rendered();
     const names = nodes.filter((node) => node.name === 'small');
 
     expect(names.map((node) => node.textContent)).toEqual([
       "data:text/html,<script>alert('current src')</script>",
       '300.png',
+      'waiting',
       '',
       'javascript:alert(4)',
     ]);
@@ -311,10 +317,12 @@ describe('the panel, given a page written to break out of it', () => {
     const thumbs = nodes.filter((node) => node.name === 'img');
     const live = hostile().images;
 
+    // Three thumbnails and four images: the row whose image loaded nothing has
+    // no `<img>` at all, because a thumbnail with no file is a broken-image box
+    // and a reader reads that as a failure rather than as a fetch nobody made.
     expect(thumbs.map((node) => node.alt)).toEqual([
       live[0].alt,
       '300.png',
-      'nothing loaded',
       'javascript:alert(4)',
     ]);
   });
@@ -336,13 +344,12 @@ describe('the panel, given a page written to break out of it', () => {
     expect(thumbs.map((node) => node.src)).toEqual([
       live[0].currentSrc,
       live[1].currentSrc,
-      '',
       live[3].currentSrc,
     ]);
-    // And the row that loaded nothing is pointed at nothing at all rather than
-    // at the empty string, which a browser resolves against the document.
-    expect(thumbs[2]?.srcAttribute).toBeNull();
-    expect(thumbs[2]?.alt).toBe('nothing loaded');
+    // And the row that loaded nothing has no thumbnail to point anywhere: one
+    // fewer `<img>` than there are images, so there is no element to be given
+    // the empty string a browser would resolve against the document.
+    expect(thumbs).toHaveLength(live.length - 1);
   });
 
   it('writes a descriptor the page invented as a word, forged mark and all', () => {

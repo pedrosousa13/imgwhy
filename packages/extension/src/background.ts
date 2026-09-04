@@ -1,5 +1,6 @@
 import { panelOf } from './explain.js';
 import { renderPanel } from './panel.js';
+import type { Reading } from './read.js';
 import { readPage } from './read.js';
 
 /**
@@ -86,8 +87,49 @@ chrome.action.onClicked.addListener((tab) => {
       return chrome.scripting.executeScript({
         target: { tabId },
         func: renderPanel,
-        args: [panelOf(reading)],
+        // The reading goes over with the panel, and the panel keeps it. A row
+        // for an image the browser has not fetched cannot be judged yet, and
+        // the panel is what finds out when it is — so it needs the reading to
+        // update and send back.
+        args: [panelOf(reading), reading],
       });
     })
     .catch(() => {});
+});
+
+/**
+ * The open panel, asking again.
+ *
+ * A lazy image below the fold has requested nothing, so its row says `not
+ * loaded` and there is nothing to judge. The reader then scrolls, the page
+ * fetches the file, and the row is out of date — with no click to bring it up
+ * to date, because the click is what opened the panel in the first place.
+ *
+ * So the panel watches the images its rows found nothing for, updates its own
+ * copy of the reading when one loads, and sends it here. This does what the
+ * click's second step does and nothing else: it asks core, and hands back a
+ * panel. No tab is read, no page is injected into, and nothing is stored — the
+ * message carries the whole reading, so the worker can answer it having just
+ * woken up with no memory of the click at all.
+ *
+ * Registered at the top level, which Manifest V3 requires and dormancy
+ * survives: a registration is not a run, nothing sends a message unless a
+ * panel is open, and a panel is open only after a click. `dormant.test.ts`
+ * holds the allowlist that says so.
+ *
+ * The `true` is Chrome's protocol for "the answer is coming later", and this
+ * answer is not: `panelOf` is synchronous, so the response goes back inside
+ * the handler and the return says the channel is done with.
+ */
+chrome.runtime.onMessage.addListener((message, _sender, respond) => {
+  // The message crossed a boundary, so its shape is a claim rather than a
+  // fact. A page can send anything to an extension that listens, and the only
+  // safe posture is to answer nothing that does not look like what the panel
+  // sends. The reading is data the panel already had: every field of it came
+  // out of the page it is about.
+  const asked = message as { imgwhy?: string; reading?: Reading };
+  if (asked.imgwhy !== 'again' || asked.reading === undefined) return undefined;
+
+  respond(panelOf(asked.reading));
+  return undefined;
 });

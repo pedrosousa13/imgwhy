@@ -68,6 +68,7 @@ const GLOBALS = new Set([
   'HTMLSourceElement',
   'Math',
   'Promise',
+  'Set',
   'URL',
   'chrome',
   'devicePixelRatio',
@@ -76,6 +77,7 @@ const GLOBALS = new Set([
   'innerHeight',
   'innerWidth',
   'matchMedia',
+  'setTimeout',
   'undefined',
   'window',
 ]);
@@ -145,32 +147,41 @@ const GLOBALS = new Set([
  * a sanctioned change rather than a tolerated one.
  */
 const CALLED = new Set([
+  'add',
   'addEventListener',
   'addListener',
   'appendChild',
   'attachShadow',
   'catch',
+  'clear',
   'closest',
   'createElement',
+  'delete',
   'dispatchEvent',
   'executeScript',
   'filter',
   'getAttribute',
   'getBoundingClientRect',
   'getElementById',
+  'has',
   'includes',
   'indexOf',
   'join',
   'map',
+  'preventDefault',
+  'push',
   'querySelectorAll',
   'remove',
   'removeEventListener',
   'round',
   'scrollTo',
+  'sendMessage',
   'slice',
   'some',
+  'splice',
   'split',
   'startsWith',
+  'stopPropagation',
   'test',
   'then',
   'toLowerCase',
@@ -214,7 +225,19 @@ const CALLED = new Set([
  * `innerHTML` is still refused, by absence here and by name in
  * `escaping.test.ts`.
  */
-const WRITTEN = new Set(['alt', 'className', 'id', 'open', 'src', 'textContent', 'title']);
+const WRITTEN = new Set([
+  'alt',
+  'className',
+  'currentSrc',
+  'id',
+  'naturalWidth',
+  'open',
+  'renderedHeight',
+  'renderedWidth',
+  'src',
+  'textContent',
+  'title',
+]);
 
 /**
  * Properties whose value may only ever be a whole value read off something.
@@ -261,6 +284,11 @@ const WRITTEN = new Set(['alt', 'className', 'id', 'open', 'src', 'textContent',
  */
 const WHOLE: Rules = [
   [/^src$/, 'a src is only ever a whole URL that arrived from the reading'],
+  [
+    /^(?:currentSrc|naturalWidth|renderedWidth|renderedHeight)$/,
+    'a field of the panel’s own copy of the reading, only ever a whole value read off the ' +
+      'element the row is about',
+  ],
 ];
 
 /**
@@ -450,19 +478,19 @@ describe('the extension, checked against storing or sending anything', () => {
     expect(surfaceOf(modules['read.ts'] ?? '').globals).toContain('matchMedia');
   });
 
-  it('reaches sixteen names outside itself, and no others', () => {
+  it('reaches eighteen names outside itself, and no others', () => {
     const reached = new Set(Object.values(modules).flatMap((text) => surfaceOf(text).globals));
 
     expect([...reached].sort()).toEqual([...GLOBALS].sort());
   });
 
-  it('calls thirty-one properties, and no others', () => {
+  it('calls thirty-eight properties, and no others', () => {
     const calls = new Set(Object.values(modules).flatMap((text) => surfaceOf(text).called));
 
     expect([...calls].sort()).toEqual([...CALLED].sort());
   });
 
-  it('writes seven properties, and no others', () => {
+  it('writes eleven properties, and no others', () => {
     const writes = new Set(Object.values(modules).flatMap((text) => surfaceOf(text).written));
 
     expect([...writes].sort()).toEqual([...WRITTEN].sort());

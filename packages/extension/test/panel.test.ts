@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { refuseStaleBuild } from '../../../test/built.js';
 import type { Panel } from '../src/explain.js';
+import type { Reading } from '../src/read.js';
 import { panelOf } from '../src/explain.js';
 import { renderPanel } from '../src/panel.js';
 import type { El, Page } from './dom.js';
@@ -14,40 +15,48 @@ import { image, reading } from './reading.js';
 const HOST_ID = '__imgwhy_host__';
 
 /**
- * A panel of two images: one whose prediction and loaded file agree, and one
- * where they do not.
+ * Two images: one whose prediction and loaded file agree, and one where they
+ * do not.
  *
- * Built through `panelOf` rather than written out, so what the renderer is
- * handed is what the worker actually produces. A hand-written literal would
- * drift from the worker's shape and the drift would look like a passing test.
+ * The panel below is built through `panelOf` rather than written out, so what
+ * the renderer is handed is what the worker actually produces. A hand-written
+ * literal would drift from the worker's shape and the drift would look like a
+ * passing test.
+ *
+ * The reading goes over with it, because the renderer keeps it.
+ *
+ * The renderer keeps it: a row for an image the browser has not fetched cannot
+ * be judged, and the panel is what notices when the page finally fetches one.
+ * Both of these images have loaded, so nothing here is watched and the render
+ * stays a function of `document` alone.
  */
-const PANEL: Panel = panelOf(
-  reading({
-    images: [
-      image({
-        at: 0,
-        selector: 'html > body > img:nth-of-type(1)',
-        srcset: '/i/640.png 640w, /i/1080.png 1080w',
-        sizes: '33vw',
-        renderedWidth: 475,
-        renderedHeight: 317,
-        alt: 'A person at a desk',
-        currentSrc: 'https://example.com/i/640.png',
-      }),
-      image({
-        at: 1,
-        selector: 'html > body > img:nth-of-type(2)',
-        srcset: '/i/640.png 640w, /i/1080.png 1080w',
-        sizes: '33vw',
-        renderedWidth: 475,
-        renderedHeight: 317,
-        currentSrc: 'https://example.com/i/1080.png',
-        loading: 'lazy',
-      }),
-    ],
-    backgroundImageCount: 2,
-  }),
-);
+const READING = reading({
+  images: [
+    image({
+      at: 0,
+      selector: 'html > body > img:nth-of-type(1)',
+      srcset: '/i/640.png 640w, /i/1080.png 1080w',
+      sizes: '33vw',
+      renderedWidth: 475,
+      renderedHeight: 317,
+      alt: 'A person at a desk',
+      currentSrc: 'https://example.com/i/640.png',
+    }),
+    image({
+      at: 1,
+      selector: 'html > body > img:nth-of-type(2)',
+      srcset: '/i/640.png 640w, /i/1080.png 1080w',
+      sizes: '33vw',
+      renderedWidth: 475,
+      renderedHeight: 317,
+      currentSrc: 'https://example.com/i/1080.png',
+      loading: 'lazy',
+    }),
+  ],
+  backgroundImageCount: 2,
+});
+
+const PANEL: Panel = panelOf(READING);
 
 /**
  * The panel, run the way Chrome runs it: the text of the function, evaluated
@@ -64,9 +73,18 @@ const PANEL: Panel = panelOf(
  * JSON is something the page would never receive — which is what makes the
  * `Panel` type strings and booleans and nothing else.
  */
-const inPage = (source: string, host: Page, panel: Panel = PANEL): unknown => {
-  const context = vm.createContext({ document: host });
-  return vm.runInContext(`(${source})(${JSON.stringify(panel)})`, context);
+const inPage = (
+  source: string,
+  host: Page,
+  panel: Panel = PANEL,
+  read: Reading = READING,
+  world: Record<string, unknown> = {},
+): unknown => {
+  const context = vm.createContext({ document: host, ...world });
+  return vm.runInContext(
+    `(${source})(${JSON.stringify(panel)}, ${JSON.stringify(read)})`,
+    context,
+  );
 };
 
 /**

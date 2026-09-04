@@ -1,5 +1,5 @@
 /**
- * The two extension APIs this package uses, declared here rather than pulled
+ * The three extension APIs this package uses, declared here rather than pulled
  * in from `@types/chrome`.
  *
  * The design's dependency table gives this package one dependency, `core`, and
@@ -26,6 +26,35 @@ declare const chrome: {
     onClicked: {
       addListener(handler: (tab: { id?: number }) => void): void;
     };
+  };
+  /**
+   * The channel an open panel talks back on, and nothing else.
+   *
+   * A panel in the page cannot judge a row. Verdicts are core's arithmetic and
+   * core is a module, so it stays in the worker — `through-core.test.ts`
+   * holds that. When a lazy image finally loads, the
+   * panel therefore has a new reading and no way to read it, and this is the
+   * way back: the page sends the reading, the worker asks core, and a new
+   * panel comes back.
+   *
+   * `onMessage` is registered at the worker's top level for the same reason
+   * `onClicked` is, and it is the same argument about dormancy: registering a
+   * listener is not running, nothing sends a message unless a panel is open,
+   * and a panel is only open after a click. `dormant.test.ts` holds the
+   * allowlist this widened by one entry.
+   */
+  runtime: {
+    onMessage: {
+      addListener(
+        handler: (
+          message: unknown,
+          sender: unknown,
+          respond: (answer: unknown) => void,
+        ) => boolean | undefined,
+      ): void;
+    };
+    /** The page half of the same channel. The answer is whatever the worker sent. */
+    sendMessage<Answer>(message: unknown): Promise<Answer>;
   };
   scripting: {
     /**

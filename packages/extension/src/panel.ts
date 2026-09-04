@@ -1,4 +1,5 @@
 import type { Line, Panel, Row } from './explain.js';
+import type { Reading } from './read.js';
 
 /**
  * The panel, and the one function a click sends into the page second.
@@ -41,7 +42,7 @@ import type { Line, Panel, Row } from './explain.js';
  * one return value here, and it is the one the worker never reads — the panel
  * appearing is the report.
  */
-export function renderPanel(panel: Panel): 'opened' {
+export function renderPanel(panel: Panel, reading: Reading): 'opened' {
   // Underscored and prefixed, because it lands in the page's id namespace and
   // has to not collide with anything a site happens to have called its own.
   // Declared twice, here and in `read.ts`, because neither copy can see the
@@ -194,6 +195,25 @@ export function renderPanel(panel: Panel): 'opened' {
       color: #5c6066;
       font-variant-numeric: tabular-nums;
     }
+    /*
+     * The way out, at the end of the line the panel opens with.
+     *
+     * Underlined and in the panel's one accent, the same as the control that
+     * re-orders the list, because they are the same kind of thing: a word that
+     * does something when a reader asks it to. Floated to the right of the
+     * heading so it sits where a reader of any panel looks for it, and out of
+     * the way of the counts, which are the sentence the heading is for.
+     */
+    section > details > summary > button {
+      float: right;
+      color: #6b21a8;
+      font-size: 11px;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    section > details > summary > button:hover {
+      color: #7e22ce;
+    }
     section > details > summary > dl {
       display: grid;
       grid-template-columns: auto auto;
@@ -344,6 +364,15 @@ export function renderPanel(panel: Panel): 'opened' {
       color: #5c6066;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 10px;
+      /*
+       * The box holds two words as well as a size now: an image the browser
+       * has not fetched says so here rather than drawing an empty frame. Both
+       * are short, and both have to stay inside 44 pixels without pushing the
+       * heading beside them out of line.
+       */
+      overflow-wrap: anywhere;
+      text-align: center;
+      line-height: 1.2;
     }
 
     /*
@@ -830,6 +859,32 @@ export function renderPanel(panel: Panel): 'opened' {
   count.textContent = panel.head.counts;
   heading.appendChild(count);
 
+  /**
+   * The way out, which the toolbar button was the only one of.
+   *
+   * A reader who has read the panel should not have to remember which icon
+   * opened it. The click does what the icon's second click does and in the
+   * same order: the closing event first, so a mark comes down off the page
+   * while its two window listeners are still there to be removed, and then the
+   * host, which takes the panel and every listener inside this root with it.
+   *
+   * `read.ts` fires the same event for the same reason, and the constant is
+   * written out here rather than shared because neither copy can see the other:
+   * both functions arrive in the page as text.
+   */
+  const shut = document.createElement('button');
+  shut.textContent = 'Close';
+  shut.title = 'Close imgwhy';
+  shut.addEventListener('click', (event) => {
+    // The summary above would toggle the card shut under the click, so the
+    // button's own act is the whole of what the click does.
+    event.preventDefault();
+    event.stopPropagation();
+    window.dispatchEvent(new Event('__imgwhy_closing__'));
+    host.remove();
+  });
+  heading.appendChild(shut);
+
   // The two inputs, as fields. They are stated here and nowhere else on a
   // collapsed row: a row's reasoning names them again where a reader has asked
   // for it, which is behind the disclosure.
@@ -893,10 +948,22 @@ export function renderPanel(panel: Panel): 'opened' {
       const size = document.createElement('small');
       size.textContent = row.tiny;
       top.appendChild(size);
+    } else if (row.file === '') {
+      // A box that says it is waiting. An `<img>` with no `src` drew its alt
+      // text here, which reads as an image that failed rather than as one the
+      // browser has not asked for yet — and a reader who meets that on nine
+      // rows of a lazy page concludes the panel is broken.
+      //
+      // One word, because the box is 44 pixels wide and two break across the
+      // middle of the second. The row's verdict beside it is the longer form:
+      // `not loaded`, and a sentence under that.
+      const waiting = document.createElement('small');
+      waiting.textContent = 'waiting';
+      top.appendChild(waiting);
     } else {
       const thumb = document.createElement('img');
       thumb.alt = row.alt;
-      if (row.file !== '') thumb.src = row.file;
+      thumb.src = row.file;
       top.appendChild(thumb);
     }
 
@@ -1113,8 +1180,148 @@ export function renderPanel(panel: Panel): 'opened' {
    */
   const fill = (): void => {
     list.textContent = '';
-    for (const row of worst ? worstFirst(panel.rows) : panel.rows) {
+    for (const row of worst ? worstFirst(shown.rows) : shown.rows) {
       list.appendChild(itemOf(row));
+    }
+  };
+
+  /**
+   * The panel showing, which starts as the one the worker computed and is
+   * replaced by every answer after it.
+   *
+   * A binding rather than the argument, because a row for an image the browser
+   * had not fetched is a row that cannot be judged yet, and the panel is what
+   * finds out when it can. `again` below is what replaces this.
+   */
+  let shown = panel;
+
+  /**
+   * The reading the panel holds, updated in place as the page loads images.
+   *
+   * A copy of what the worker read, kept because the worker did not keep it:
+   * a service worker sleeps between messages, so the whole reading has to
+   * travel with the question. What changes when an image finally loads is what
+   * is written here — the file, the pixels it decoded to, and the box, which a
+   * decoded image can change.
+   */
+  const page = reading;
+
+  /**
+   * Ask the worker again, with whatever has loaded since.
+   *
+   * Trailing rather than immediate, because one scroll loads several images
+   * and each of them would otherwise be a message, an answer and a list
+   * rewritten under the reader's pointer. A short wait collapses a burst into
+   * one question.
+   *
+   * The mark comes down first, for the reason the re-ordering control takes it
+   * down: a mark is a closure over the row it went up for and over the heading
+   * its word goes on, and the list is about to throw both away.
+   */
+  let queued = 0;
+  const again = (): void => {
+    queued += 1;
+    const mine = queued;
+    setTimeout(() => {
+      // A later load has already asked, or the panel has closed and bumped the
+      // count past this one. Either way this question is stale, and asking it
+      // would rewrite the list a reader is looking at for an answer nobody is
+      // waiting for. A counter rather than a timer handle, because a handle is
+      // a number in a page and something else in Node, and this function is
+      // read in both.
+      if (mine !== queued) return;
+      chrome.runtime
+        .sendMessage<Panel>({ imgwhy: 'again', reading: page })
+        .then((answer) => {
+          if (answer === undefined || answer === null) return;
+          shown = answer;
+          count.textContent = shown.head.counts;
+          unmark();
+          fill();
+          watch();
+        })
+        // A worker that has gone away, a panel whose page is closing: the
+        // honest response is the panel staying as it is, which is what a
+        // reader is already looking at.
+        .catch(() => {});
+    }, 150);
+  };
+
+  /**
+   * Watch every image no row could judge, once each.
+   *
+   * The page's own lazy loading is what fires these: a reader scrolls, or
+   * clicks a row and the panel scrolls to the image. Nothing here asks for a
+   * file — the listener runs after the browser fetched one of its own accord,
+   * which is what keeps the thumbnail's request the one the page already made.
+   *
+   * `once` is what makes a re-render safe. Every listener goes on a page
+   * element rather than on a node in this root, so the closing `remove()` does
+   * not take it — and a listener that fired is a listener the browser has
+   * already dropped.
+   */
+  const watched = new Set<number>();
+  const watching: (() => void)[] = [];
+
+  /**
+   * Take every watch off the page.
+   *
+   * These are the only listeners this panel puts on a page element, and that
+   * makes them the only ones the closing `remove()` cannot take: everything
+   * else hangs off the closed root and goes with it. So the closing event
+   * takes them instead, the way it takes the mark's two window listeners, and
+   * a page whose panel has been shut carries nothing of this extension again.
+   */
+  const release = (): void => {
+    for (const drop of watching.splice(0)) drop();
+    watched.clear();
+    // Past every question in flight, so an answer that arrives after this is
+    // one nothing acts on.
+    queued += 1;
+    window.removeEventListener('__imgwhy_closing__', release);
+    releasing = false;
+  };
+
+  /**
+   * Whether the closing event is being listened for, which it is only while
+   * there is something on the page to take off it.
+   *
+   * The window is touched here for the same reason the mark touches it and
+   * under the same condition: only when this panel has put something on a page
+   * element. A page whose images have all loaded gets a panel that is a
+   * function of `document` alone, which is what `panel.test.ts` builds one in.
+   */
+  let releasing = false;
+
+  const watch = (): void => {
+    const images = [...document.images];
+    for (const image of page.images) {
+      if (image.currentSrc !== '' || watched.has(image.at)) continue;
+      const element = images[image.at];
+      if (element === undefined) continue;
+      watched.add(image.at);
+      const loaded = (): void => {
+        watched.delete(image.at);
+        // The four facts a load changes. The srcset, the sizes and where the
+        // element sits are the page's and did not move; the file, its pixels
+        // and the box a decoded image can grow into are what did.
+        const box = element.getBoundingClientRect();
+        image.currentSrc = element.currentSrc;
+        image.naturalWidth = element.naturalWidth;
+        image.renderedWidth = box.width || element.width || 0;
+        image.renderedHeight = box.height || element.height || 0;
+        again();
+      };
+
+      element.addEventListener('load', loaded, { once: true });
+      watching.push(() => {
+        element.removeEventListener('load', loaded);
+      });
+
+      if (!releasing) {
+        releasing = true;
+        window.addEventListener('__imgwhy_closing__', release);
+      }
     }
   };
 
@@ -1157,6 +1364,7 @@ export function renderPanel(panel: Panel): 'opened' {
   }
 
   fill();
+  watch();
   card.appendChild(list);
 
   /**
