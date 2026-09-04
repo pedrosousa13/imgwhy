@@ -72,13 +72,18 @@ export function collectImages(): RawImage[] {
    * design's non-goal — "`<picture>` type negotiation. Evaluate `media` only.
    * Do not model AVIF against WebP support" — and it is checked rather than
    * left to a reader, in `no-type-negotiation.test.ts`.
+   *
+   * This function is written twice. The other copy is `active` in
+   * `packages/extension/src/read.ts`, and `test/no-drift.test.ts` refuses any
+   * difference between the two — a change here that is not made there is the
+   * two front ends naming different files as the one a browser read.
    */
   const active = (
     img: HTMLImageElement,
   ): { srcset: string; sizes: string | null; sizesSource: 'img' | 'source' } => {
     const picture = img.closest('picture');
     if (picture) {
-      for (const child of Array.from(picture.children)) {
+      for (const child of [...picture.children]) {
         if (child === img) break;
         if (child.tagName.toLowerCase() !== 'source') continue;
         const source = child as HTMLSourceElement;

@@ -153,3 +153,49 @@ export const leaving =
         .map((specifier) => `${name} imports ${specifier}`),
     ];
   };
+
+/**
+ * The text of every function bound to `name`, at any depth in a module.
+ *
+ * A tree rather than a pattern over the text, for the reason `parse` gives and
+ * one more that belongs to this reading in particular. A pattern that stops
+ * matching returns nothing, and nothing equals nothing — so a check comparing
+ * two copies of a function would pass, loudest of all, on the day somebody
+ * reformatted both of them out of its reach. A tree finds the declaration
+ * however it is written, and a caller that refuses anything but one match
+ * turns a missed read into a failure rather than a silent agreement.
+ *
+ * Every depth, because the functions this exists for are declared inside the
+ * one that a browser is handed: `chrome.scripting.executeScript` and
+ * `page.evaluate` both send `String(func)`, so a helper has to live in the
+ * body it travels with.
+ *
+ * `getText` and not `getFullText`, which is what leaves the doc comment out.
+ * The comments above these copies name each package's own tests and each
+ * package's own reasons, and those are differences that should stay.
+ */
+export function functionsNamed(text: string, name: string): string[] {
+  const found: string[] = [];
+
+  const isFunction = (node: ts.Node): boolean =>
+    ts.isArrowFunction(node) || ts.isFunctionExpression(node);
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isFunctionDeclaration(node) && node.name?.text === name) {
+      found.push(node.getText());
+    } else if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === name &&
+      node.initializer &&
+      isFunction(node.initializer)
+    ) {
+      found.push(node.getText());
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(parse(text));
+  return found;
+}
