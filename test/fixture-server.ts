@@ -271,6 +271,15 @@ const PAGES: Record<string, string> = {
 <img class="third" srcset="/img/200.png 1x, /img/300.png 2x"
   src="/img/200.png" alt="badge"></main>`,
   ),
+
+  // The one page here that carries no image, because what it asks a browser
+  // for is not a render: a script clicks an `<a download>` at the response
+  // below. `capture.ts` says why a context has to refuse it.
+  '/attachment.html': shell(
+    'attachment',
+    `<main><a id="report" href="/report.csv" download="report.csv">report</a>
+<script>document.getElementById('report').click()</script></main>`,
+  ),
 };
 
 /** A missing trailing slash, the plainest redirect a real host performs. */
@@ -328,6 +337,18 @@ export async function startFixtureServer(): Promise<FixtureServer> {
     if (page !== undefined) {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(page);
+      return;
+    }
+
+    // What `/attachment.html` clicks at. `Content-Disposition: attachment` is
+    // the instruction to save the response instead of rendering it, so what a
+    // context does when this arrives is what says whether it takes downloads.
+    if (path === '/report.csv') {
+      res.writeHead(200, {
+        'content-type': 'text/csv',
+        'content-disposition': 'attachment; filename="report.csv"',
+      });
+      res.end('date,bytes\n2026-01-01,1\n');
       return;
     }
 

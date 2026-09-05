@@ -1,5 +1,9 @@
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { setTimeout as after } from 'node:timers/promises';
 import type { DeviceProfile } from '@imgwhy/core';
-import { type Browser, chromium } from 'playwright';
+import { type Browser, type Download, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_PROFILES, capturePage } from '../src/index.js';
 import { type FixtureServer, startFixtureServer } from '../../../test/fixture-server.js';
@@ -80,6 +84,85 @@ function recording(order: string[], instead?: () => Promise<void>): () => Promis
  */
 const crashed = (): Promise<void> =>
   Promise.reject(new Error('cdpSession.detach: Target page, context or browser has been closed'));
+
+/**
+ * A browser whose downloads land in a directory of the test's own, listed at
+ * the last moment anything can still be in it.
+ *
+ * Playwright empties a context's downloads when the context closes, so a
+ * listing taken after `capturePage` has returned is empty whatever the context
+ * allowed, and would pass against a browser that saved every byte. The close
+ * the runner performs is the only moment inside a run that a test can reach,
+ * so the listing is taken there.
+ *
+ * What decides the moment within that close is `download.path()`, not the
+ * `download` event. The event fires while an accepted file is still arriving,
+ * and a listing taken there is empty under either setting — the file lands a
+ * few milliseconds later, so the test would be passing on how long the rest of
+ * the run happens to take. `path()` settles when the browser has finished
+ * deciding: it resolves once an accepted download is written, and it rejects
+ * at once when the context refuses downloads. Either settlement is a point
+ * where the listing means something, so the wait is for the settlement rather
+ * than for success.
+ */
+function watchingDownloads(): {
+  launch: () => Promise<Browser>;
+  /** The downloads directory as it stood when the context closed. */
+  files: string[];
+  /** Every download the page announced, saved or refused. */
+  announced: Download[];
+  /** Removes the directory, which is the test's to clean up either way. */
+  discard: () => void;
+} {
+  const directory = mkdtempSync(join(tmpdir(), 'imgwhy-downloads-'));
+  const files: string[] = [];
+  const announced: Download[] = [];
+  let decided = (): void => {};
+  const download = new Promise<void>((resolve) => {
+    decided = resolve;
+  });
+
+  const launch = async (): Promise<Browser> => {
+    const browser = await chromium.launch({ downloadsPath: directory });
+    const openContext = browser.newContext.bind(browser);
+    browser.newContext = async (options) => {
+      const context = await openContext(options);
+      const openPage = context.newPage.bind(context);
+      const closeContext = context.close.bind(context);
+      context.newPage = async () => {
+        const page = await openPage();
+        page.on('download', (each) => {
+          announced.push(each);
+          // A rejection is as good an answer as a path here, and it is the
+          // answer a refusing context gives, so both settle the wait.
+          void each.path().then(decided, decided);
+        });
+        return page;
+      };
+      context.close = async (options) => {
+        // Bounded, because a run where the page announces nothing at all would
+        // otherwise wait here forever: the context would never close, nor
+        // would the browser, and the test would end as a bare timeout with a
+        // Chromium left running. Giving up instead lets the `announced`
+        // assertion say what was missing.
+        //
+        // Two seconds because vitest gives a test five, and a bound at the
+        // same figure is no bound at all — vitest would reach its own timeout
+        // first and report the bare failure this exists to avoid. An accepted
+        // download settles in milliseconds, so the margin costs nothing.
+        await Promise.race([download, after(2_000, undefined, { ref: false })]);
+        files.push(...readdirSync(directory));
+        await closeContext(options);
+      };
+      return context;
+    };
+    return browser;
+  };
+
+  const discard = (): void => rmSync(directory, { recursive: true, force: true });
+
+  return { launch, files, announced, discard };
+}
 
 describe('capturePage', () => {
   it('captures the candidate a 640px viewport at DPR 1.5 downloads', async () => {
@@ -425,6 +508,30 @@ describe('capturePage', () => {
     expect(refused?.currentSrc).toBe('http://127.0.0.1:1/img/640.png');
     expect(refused?.naturalWidth).toBe(0);
     expect(refused?.transferBytes).toBeNull();
+  });
+
+  it('refuses the download a page starts, so no page can write to the disk', async () => {
+    const watched = watchingDownloads();
+
+    try {
+      await capturePage({
+        url: `${server.url}/attachment.html`,
+        profiles: [canonical],
+        launch: watched.launch,
+      });
+
+      // Chromium announced the download either way: the event fires whether
+      // the context keeps the bytes or throws them away, so it says only that
+      // the page really did ask. The directory is what separates the two. A
+      // context on Playwright's defaults holds the file by the time the run
+      // closes it — under a bare uuid of Chromium's own, not under the name
+      // the page suggested — and this one holds nothing, because the browser
+      // was told to refuse.
+      expect(watched.announced.map((each) => each.suggestedFilename())).toEqual(['report.csv']);
+      expect(watched.files).toEqual([]);
+    } finally {
+      watched.discard();
+    }
   });
 
   it('detaches the CDP session of every profile before closing its context', async () => {
