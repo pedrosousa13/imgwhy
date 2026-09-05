@@ -330,7 +330,7 @@ describe('readCapture', () => {
     });
 
     for (const value of refused) {
-      it(`names ${where} where it holds ${JSON.stringify(value)}`, () => {
+      it(`names ${where} where it holds ${JSON.stringify(value)}, so nothing reads past it`, () => {
         expect(refusing(holding(where, value))).toBe(`${file}${said}`);
       });
     }
@@ -462,6 +462,14 @@ describe('the reader as a route to the filesystem', () => {
   });
 
   it('names no module that could build a path, so it cannot assemble one', () => {
-    expect(reaches(source).specifiers).toEqual(['node:fs', '@imgwhy/core', './message.js']);
+    // `say.js` is here because the JSON parser's message carries the file's
+    // own first bytes, and that module holds the escaping. It reads nothing
+    // and opens nothing: it takes a string and returns one.
+    expect(reaches(source).specifiers).toEqual([
+      'node:fs',
+      '@imgwhy/core',
+      './message.js',
+      './say.js',
+    ]);
   });
 });

@@ -1,6 +1,6 @@
 import type { Capture, DeviceProfile } from '@imgwhy/core';
 import { explainSelection } from '@imgwhy/core';
-import { type Line, escape, say } from './say.js';
+import { type Line, bytesArrived, columns, plural, say } from './say.js';
 
 /**
  * What one device made of one image, on one side of the diff.
@@ -10,8 +10,13 @@ import { type Line, escape, say } from './say.js';
  * on what they said, not on how the arithmetic got there. `explainSelection`
  * ran once, over the device profile that render belonged to, and what is left
  * is two values a reader can check against each other.
+ *
+ * The weight keeps the name the Capture recorded it under, and that is what
+ * brings the diff under `no-estimate.test.ts`: the figure a row prints is
+ * `bytesArrived` handed a plain read of `transferBytes`, here as in `trace.ts`,
+ * so a pixel dimension dressed as a measurement fails one check in both.
  */
-type Reading = { picked: string; bytes: number | null };
+type Reading = { picked: string; transferBytes: number | null };
 
 /** One device's line of one image, with the side it saw nothing on as null. */
 export type DeviceChange = {
@@ -86,7 +91,7 @@ function seenIn(capture: Capture): Seen {
       if (byDevice.has(device.id)) continue;
       byDevice.set(device.id, {
         picked: explainSelection(image, device).picked?.raw ?? '—',
-        bytes: image.transferBytes,
+        transferBytes: image.transferBytes,
       });
     }
   }
@@ -116,7 +121,7 @@ const moved = ({ before, after }: DeviceChange): boolean =>
   before === null ||
   after === null ||
   before.picked !== after.picked ||
-  before.bytes !== after.bytes;
+  before.transferBytes !== after.transferBytes;
 
 /**
  * Whether a file weighed more after than before, on one device.
@@ -128,13 +133,13 @@ const moved = ({ before, after }: DeviceChange): boolean =>
  * in flight into a finding.
  */
 const grew = ({ before, after }: DeviceChange): boolean =>
-  before !== null && after !== null && before.bytes !== null && after.bytes !== null
-    ? after.bytes > before.bytes
+  before !== null && after !== null && before.transferBytes !== null && after.transferBytes !== null
+    ? after.transferBytes > before.transferBytes
     : false;
 
 const shrank = ({ before, after }: DeviceChange): boolean =>
-  before !== null && after !== null && before.bytes !== null && after.bytes !== null
-    ? after.bytes < before.bytes
+  before !== null && after !== null && before.transferBytes !== null && after.transferBytes !== null
+    ? after.transferBytes < before.transferBytes
     : false;
 
 /**
@@ -202,11 +207,9 @@ export function compareCaptures(before: Capture, after: Capture): Comparison {
 /** The pick a row shows, or the word for a device that saw nothing to pick. */
 const pickedIn = (reading: Reading | null): string => (reading ? reading.picked : '(not seen)');
 
-/** What arrived, as the trace words it, or the word for a render that never happened. */
-const weight = (reading: Reading | null): string => {
-  if (reading === null) return '(not seen)';
-  return reading.bytes === null ? 'unknown' : String(reading.bytes);
-};
+/** What arrived, in the trace's own words, or the word for a render that never happened. */
+const weight = (reading: Reading | null): string =>
+  reading === null ? '(not seen)' : bytesArrived(reading.transferBytes);
 
 /**
  * The two weights, or the word for a pair that did not move.
@@ -216,20 +219,25 @@ const weight = (reading: Reading | null): string => {
  * labelling a word rather than a figure.
  */
 function weighed({ before, after }: DeviceChange): string {
-  if (before !== null && after !== null && before.bytes === after.bytes) return 'unchanged';
-  const both = before?.bytes != null && after?.bytes != null;
+  if (before !== null && after !== null && before.transferBytes === after.transferBytes) {
+    return 'unchanged';
+  }
+  const both = before?.transferBytes != null && after?.transferBytes != null;
   return `${weight(before)} → ${weight(after)}${both ? ' bytes' : ''}`;
 }
 
 /**
  * One device per line, in three columns padded to the widest cell.
  *
- * Measured after the escape, for the reason `trace.ts` gives about its own
- * table: a control character is one character in the string the page wrote and
- * six in the string a terminal shows, so a column measured before the escape
- * is a column the next row does not line up under. Only the measuring happens
- * here — every cell reaches its line through an interpolation, so `say` is
- * what writes it out, once.
+ * `columns` does the padding and says how it is measured. No heading row, and
+ * that is the one thing this block does differently from the trace's table:
+ * three columns of two words each are read across rather than down, and a
+ * heading over each of them would be three more lines per image on a diff
+ * whose whole point is to be short.
+ *
+ * The indent is written here, the way `trace.ts` indents its own table into an
+ * image block: a finished line is interpolated into another one, which is what
+ * `say` allows a `Line` for.
  */
 function rows(changes: DeviceChange[]): Line[] {
   const cells = changes.map((change) => [
@@ -237,15 +245,7 @@ function rows(changes: DeviceChange[]): Line[] {
     `${pickedIn(change.before)} → ${pickedIn(change.after)}`,
     weighed(change),
   ]);
-  const printed = (cell: string): number => escape(cell).length;
-  const widths = [0, 1].map((column) => Math.max(...cells.map((row) => printed(row[column]))));
-
-  return cells.map(
-    (row) =>
-      say`  ${row.flatMap((cell, i) =>
-        i === row.length - 1 ? [cell] : [cell, ' '.repeat(widths[i] - printed(cell) + 2)],
-      )}`,
-  );
+  return columns(cells).map((line) => say`  ${line}`);
 }
 
 /**
@@ -270,9 +270,6 @@ function head(comparison: Comparison): Line[] {
   }
   return lines;
 }
-
-const plural = (count: number, noun: string): string =>
-  `${count} ${noun}${count === 1 ? '' : 's'}`;
 
 /**
  * The counts, read off the same comparison the blocks above were.
@@ -302,8 +299,13 @@ function summary(comparison: Comparison): Line {
  * a change touches two of them, so a block per image would bury the answer
  * under the images that were fine — which is the same reason `trace.ts` keeps
  * an image with nothing to select to one line. The numbering still counts
- * every image either capture carries, so `image 4 of 10` says where in the
- * page the block sits rather than where in this list.
+ * every image either capture carries, so `image 4 of 10` says which of the ten
+ * this block is and how many the diff had nothing to say about.
+ *
+ * It does not say where on the page the image sits, and no numbering here
+ * could. The order is the earlier capture's, with the ids only the later one
+ * holds after them, because an image that is new has no place in the order the
+ * two files agree on — so an image added at the top of the page numbers last.
  *
  * Every string here reaches its line through `say`, and `say` escapes every
  * interpolation. A Capture is page content — a selector, a device name out of

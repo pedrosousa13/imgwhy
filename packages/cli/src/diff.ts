@@ -13,7 +13,7 @@ type Sides = { ok: true; before: string; after: string } | { ok: false; message:
  *
  * Its own parser rather than a mode of `parseArgs`, which is the decision the
  * issue records and the reason `parseArgs`'s comment gives for hand-parsing in
- * the first place: "the surface is three arguments". That stays true of the
+ * the first place: "the surface is four arguments". That stays true of the
  * command that comment describes only if a second command reads its own line,
  * and a parser answering to two grammars is a parser whose messages have to
  * name which one they are refusing against.
@@ -48,9 +48,11 @@ function sides(argv: string[]): Sides {
  * zero is what a caller reads as "this command could not do its job", and the
  * job here is to report: a Capture that would not parse or a path that would
  * not open is a failure, and a bigger file is a finding. A caller wanting the
- * gate today has it in one line, `imgwhy diff a.json b.json | grep -q
- * regressed`, and it becomes worth building in once the tool can say why
- * something regressed rather than only that it did.
+ * gate today has it in one line — `imgwhy diff a.json b.json | grep -Eq
+ * '[1-9][0-9]* regressed'`, which has to read the figure because the summary
+ * names the count on every run, `0 regressed` included — and it becomes worth
+ * building in once the tool can say why something regressed rather than only
+ * that it did.
  *
  * ## The paths
  *

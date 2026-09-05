@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import type { Candidate, Capture, CapturedImage, DeviceProfile, DeviceRun } from '@imgwhy/core';
 import { messageOf } from './message.js';
+import { escape } from './say.js';
 
 export type LoadedCapture = { ok: true; capture: Capture } | { ok: false; message: string };
 
@@ -133,6 +134,23 @@ function readImage(at: string, value: unknown): Read<CapturedImage> {
   };
 }
 
+/**
+ * One device profile as the Capture describes it.
+ *
+ * The checks are `loadDeviceProfiles`'s, several of the messages word for
+ * word, and they are re-derived here rather than shared with it. What the two
+ * readers differ on is the thing a check mostly is — the sentence it hands a
+ * reader — because they answer to files of different provenance. A config file
+ * is one the project wrote, so `loadDeviceProfiles` quotes it back: `.id
+ * repeats "kiosk"` names the id at fault. A Capture is a file somebody may
+ * have been sent, so this reader quotes nothing, and `readParsed` says why. A
+ * shared check would have to hold both rules at once, and the strict one costs
+ * the config file a message that is better for being able to quote.
+ *
+ * The predicates stay with the checks they belong to. `isObject`, `isName` and
+ * `isSize` are a line each, and two checks that owe their readers different
+ * sentences are not made one check by sharing the three lines under them.
+ */
 function readDevice(at: string, value: unknown): Read<DeviceProfile> {
   const fail = (message: string): Read<DeviceProfile> => ({
     ok: false,
@@ -327,9 +345,11 @@ function readParsed(file: string, parsed: unknown): LoadedCapture {
  * Escaping at this boundary would give the same attribute a second spelling
  * and still leave every later writer to escape its own output.
  *
- * What this boundary owes instead is that nothing it writes carries a page
- * string: `readParsed` says why no message quotes a value. Whatever displays a
- * Capture this returns owes the same care `trace.ts` takes.
+ * What this boundary owes instead is that nothing it writes lets a page act on
+ * a terminal: `readParsed` says why no message quotes a value, and the one
+ * message that does carry bytes off the file — the JSON parser's own — is
+ * spelled out where it is built. Whatever displays a Capture this returns owes
+ * the same care `trace.ts` takes.
  */
 export function readCapture(path: string): LoadedCapture {
   let text: string;
@@ -343,7 +363,20 @@ export function readCapture(path: string): LoadedCapture {
   try {
     parsed = JSON.parse(text);
   } catch (error) {
-    return { ok: false, message: `${path} is not valid JSON: ${messageOf(error)}` };
+    // The one message here that carries bytes off the file, so the one that
+    // is escaped. `JSON.parse` quotes the character it stopped at and the
+    // bytes around it into what it throws, so a file opening with an ESC
+    // hands this message a whole terminal sequence: the quoting `readParsed`
+    // refuses to do, done by the parser instead and reaching stderr all the
+    // same.
+    //
+    // Written out rather than dropped, for the reason `say.ts` gives about
+    // writing a control character rather than discarding it: the position and
+    // the character at fault are what a reader with a large broken file has to
+    // work from, and they are the one thing the parser knows that this module
+    // does not. The path is left as it came, because it is the argument the
+    // person at the keyboard typed rather than anything the file said.
+    return { ok: false, message: `${path} is not valid JSON: ${escape(messageOf(error))}` };
   }
 
   return readParsed(path, parsed);

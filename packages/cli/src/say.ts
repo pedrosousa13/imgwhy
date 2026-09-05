@@ -1,13 +1,14 @@
 /**
- * One line of terminal output, and the only way to build one.
+ * What both terminal outputs are written with: one escaped line, and the
+ * handful of shapes the trace and the diff both put on one.
  *
- * This was `trace.ts`'s, and it is here because `compare.ts` needs the same
- * thing for the same reader. `Line` says why re-deriving the shape was right
- * against `packages/report/src/html.ts`: that file answers to an HTML parser
- * and this one to a terminal, so the two escape different alphabets. A diff of
- * two Captures is the same alphabet for the same reader, and a second copy of
- * this set would be a second place for it to drift — which the set is no good
- * to anyone once it has.
+ * All of it was `trace.ts`'s, and it is here because `compare.ts` writes for
+ * the same reader in the same alphabet. A second copy of the escaping would be
+ * a second place for it to drift, and a guarantee that holds in one of two
+ * outputs is not a guarantee: what a page can do to a terminal, it can do
+ * through whichever output forgot. The wording travels with it for a smaller
+ * reason — a reader who has read `unknown` in a trace should not have to learn
+ * a second word for it in a diff.
  */
 
 /**
@@ -171,7 +172,9 @@ const rendered = (value: Value): string => {
  * - **stderr.** Nothing here writes to it. What goes there is `run.ts`'s and
  *   `diff.ts`'s: one of `run.ts`'s messages carries the page's own URL — #51 —
  *   while `diff.ts` quotes nothing it read out of a Capture, which is the rule
- *   `in.ts` states and holds.
+ *   `in.ts` states and holds. The one message under that rule carrying bytes
+ *   off a file is the JSON parser's own, which `in.ts` puts through `escape`
+ *   before it goes anywhere.
  * - **The Capture.** It is escaped nowhere and must not be. `--json` and
  *   `--out` are machine input, and a reader typing a recorded `sizes` string
  *   into the report's control has to get the string the page wrote.
@@ -182,4 +185,63 @@ export function say(parts: TemplateStringsArray, ...values: Value[]): Line {
     out += rendered(values[i]) + parts[i + 1];
   }
   return new Line(out);
+}
+
+/** A count and the noun it counts, which English spells two ways. */
+export const plural = (count: number, noun: string): string =>
+  `${count} ${noun}${count === 1 ? '' : 's'}`;
+
+/**
+ * The weight of the response that arrived, as the runner recorded it.
+ *
+ * Unknown stays unknown. Nothing here turns a dimension into a weight: a
+ * guess would read exactly like a measurement in this column, which is the
+ * design's non-goal — "where `transferBytes` is null, report it as unknown".
+ * The word is written once for both outputs, because a reader comparing a
+ * trace against a diff of the same page is comparing two figures, and two
+ * words for one missing figure would read as two different findings.
+ */
+export const bytesArrived = (transferBytes: number | null): string =>
+  transferBytes === null ? 'unknown' : String(transferBytes);
+
+/**
+ * Cells laid out in columns, one line per row, each column padded to its
+ * widest cell.
+ *
+ * Every column is left aligned, so a reader can run an eye straight down one
+ * of them and every row breaks in the same place. A heading row is a row like
+ * any other: whatever the caller puts first is measured with the rest, which
+ * is what keeps a heading over the values under it.
+ *
+ * Measured after the escape, because the width a column is padded to has to be
+ * the printed width: a control character is one character in the string the
+ * page wrote and six in the string a terminal shows, so a column measured
+ * before the escape is a column the next row does not line up under — the one
+ * defect here a reader sees rather than obeys.
+ *
+ * Only the measuring happens here. Every cell reaches its line through an
+ * interpolation, so `say` is what escapes the text, once, exactly as it does
+ * for every other line — and a caller's rows are walked as they come, so a
+ * tenth column is measured and written with the nine without a line of this
+ * changing. The last cell of a row takes no padding, which is what a trailing
+ * trim used to do.
+ */
+export function columns(rows: readonly (readonly string[])[]): Line[] {
+  const printed = (cell: string): number => escape(cell).length;
+
+  // Each width starts at 0 rather than at the first cell it meets, so a caller
+  // with nothing to lay out gets no lines rather than a width of -Infinity.
+  const widths: number[] = [];
+  for (const row of rows) {
+    row.forEach((cell, at) => {
+      widths[at] = Math.max(widths[at] ?? 0, printed(cell));
+    });
+  }
+
+  return rows.map(
+    (row) =>
+      say`${row.flatMap((cell, at) =>
+        at === row.length - 1 ? [cell] : [cell, ' '.repeat(widths[at] - printed(cell) + 2)],
+      )}`,
+  );
 }

@@ -67,7 +67,7 @@ image 4 of 10  html > body > … > figure > a > picture > img   loading=lazy
 
 That is a real run. Where nothing was selected — no `srcset`, or one candidate — there is no table to lay out, so the block says why and reports the bytes per device instead. Where every device agrees on a figure it is written once and names no device; where they differ, each value names the devices that measured it.
 
-### Did the change help?
+### Two Captures say what the change did
 
 A Capture is the one thing imgwhy produces that is meant to be kept, and `diff` is what keeping one buys. It reads two of them and reports the file each device picked and what that file cost, on both sides:
 

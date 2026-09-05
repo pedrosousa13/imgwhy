@@ -116,6 +116,29 @@ describe('the diff command', () => {
     expect(runDiff([before, after]).stderr).toContain(`${before} is not valid JSON`);
   });
 
+  it('spells out the bytes the JSON parser quotes, so a broken file drives no terminal', () => {
+    // The parse failure is the one message a Capture reaches stderr through
+    // without passing a field check: `JSON.parse` quotes the character it
+    // stopped at and the bytes around it into what it throws, so a file's own
+    // opening is the message. This one opens with the sequence that retitles a
+    // window and follows it with a line it wants forged.
+    writeFileSync(before, '\u001b]0;imgwhy-pwned\u0007x\r\nFORGED LINE', 'utf8');
+
+    const outcome = runDiff([before, after]);
+
+    expect(outcome.code).toBe(1);
+    expect(outcome.stderr).toContain(`${before} is not valid JSON`);
+    // The parser's own words, spelled out: what it found, and the opening it
+    // quotes back — as far as it quotes it.
+    expect(outcome.stderr).toContain("Unexpected token '\\u001b'");
+    expect(outcome.stderr).toContain('\\u001b]0;imgwhy');
+    // Nothing a terminal acts on and nothing that ends a line, less the one
+    // newline the command writes at the end of its own message.
+    expect(outcome.stderr.slice(0, -1)).not.toMatch(
+      /[\p{Cc}\u2028\u2029\u202a-\u202e\u2066-\u2069]/u,
+    );
+  });
+
   it('quotes nothing it read out of a capture, whatever the page wrote into one', () => {
     const controls = '\u001b]0;imgwhy-pwned\u0007\r\nFORGED LINE\u0000\u202edesrever\u2028';
     const hostile = JSON.parse(JSON.stringify(capture('100vw', 11573)));

@@ -1,6 +1,6 @@
 import type { Candidate, Capture, CapturedImage, DeviceProfile, Selection } from '@imgwhy/core';
 import { explainSelection } from '@imgwhy/core';
-import { type Line, escape, say } from './say.js';
+import { type Line, bytesArrived, columns, plural, say } from './say.js';
 
 /** One image as one device saw it. */
 type Sighting = { device: DeviceProfile; image: CapturedImage };
@@ -34,21 +34,8 @@ const fileOf = (url: string, base: string): string => {
   }
 };
 
-/**
- * The weight of the response that arrived, as the runner recorded it.
- *
- * Unknown stays unknown. Nothing here turns a dimension into a weight: a
- * guess would read exactly like a measurement in this column, which is the
- * design's non-goal — "where `transferBytes` is null, report it as unknown".
- */
-const bytesArrived = (transferBytes: number | null): string =>
-  transferBytes === null ? 'unknown' : String(transferBytes);
-
 /** `label` and value, on the label column every image block shares. */
 const field = (label: string, value: string): Line => say`  ${label.padEnd(10)}  ${value}`;
-
-const plural = (count: number, noun: string): string =>
-  `${count} ${noun}${count === 1 ? '' : 's'}`;
 
 /**
  * The `sizes` string this device resolved against, and the element it came off
@@ -171,33 +158,16 @@ const COLUMNS: (keyof Row)[] = [
 ];
 
 /**
- * One row per line, columns padded to the widest cell.
+ * One row per line, headings first, columns padded to the widest cell.
  *
- * Every column is left aligned, so a reader can run an eye straight down one
- * of them and every row breaks in the same place.
+ * `columns` does the padding and says how it is measured. What is here is the
+ * headings and the order: every line is walked out of `COLUMNS`, so a tenth
+ * column would be written with the nine without a line of this changing, and
+ * the headings go through as the first row so a column is never narrower than
+ * the word above it.
  */
 function table(rows: Row[]): Line[] {
-  // Measured after the escape, because the width a column is padded to has to
-  // be the printed width: a control character is one character in the string
-  // the page wrote and six in the string a terminal shows, so a column
-  // measured before the escape is a column the next row does not line up
-  // under — the one defect here a reader sees rather than obeys.
-  //
-  // Only the measuring happens here. Every cell reaches its line through an
-  // interpolation, so `say` is what escapes the text, once, exactly as it does
-  // for every other line — and the row is walked out of `COLUMNS`, so a tenth
-  // column would be measured and written with the nine without a line of this
-  // changing. The last cell takes no padding, which is what the trailing trim
-  // used to do.
-  const printed = (cell: string): number => escape(cell).length;
-  const widths = COLUMNS.map((column) =>
-    Math.max(printed(column), ...rows.map((row) => printed(row[column]))),
-  );
-  const line = (cells: string[]): Line =>
-    say`${cells.flatMap((cell, i) =>
-      i === cells.length - 1 ? [cell] : [cell, ' '.repeat(widths[i] - printed(cell) + 2)],
-    )}`;
-  return [line(COLUMNS), ...rows.map((row) => line(COLUMNS.map((column) => row[column])))];
+  return columns([COLUMNS, ...rows.map((row) => COLUMNS.map((column) => row[column]))]);
 }
 
 /**
