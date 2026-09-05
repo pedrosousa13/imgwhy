@@ -117,6 +117,7 @@ const OWN_VALUES = new Set([
   'width=device-width, initial-scale=1',
   'viewport',
   'head',
+  'carries',
   'image',
   'device',
   'name',

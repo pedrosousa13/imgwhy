@@ -52,6 +52,33 @@ describe('renderReport', () => {
     expect(report).toContain('3 images on 5 devices');
   });
 
+  it('says beside the page URL that it carries every URL as the page offered it', () => {
+    // Beside the page URL and not in the notes at the end, because the report
+    // travels without the README and the person about to send it on is the one
+    // who has to meet the sentence. A note at the foot of the file is a note
+    // they would have to go looking for.
+    const report = renderReport(gallery());
+
+    // Between the head's own list and whatever follows it, which is the claim
+    // — splitting at the matrix would only prove the sentence is somewhere
+    // above it, and it would pass with the sentence sitting over the heading.
+    const carries = report.indexOf('<p class="carries">');
+    expect(carries).toBeGreaterThan(report.indexOf('</dl>'));
+    expect(carries).toBeLessThan(report.indexOf('<div class="scroll">'));
+
+    expect(report).toContain('query strings included');
+    expect(report).toContain('a signed URL leaves with the file');
+  });
+
+  it('carries the sentence on a report of a page with no image, promising no candidate it has not got', () => {
+    const report = renderReport({ ...gallery(), runs: [] });
+
+    expect(report).toContain('<p class="carries">');
+    // The page URL travels whether or not an image did, so the sentence stays
+    // — but a report with nothing under it must not name candidates below.
+    expect(report).not.toContain('each candidate below');
+  });
+
   it('gives every device profile a column, named with its viewport and ratio', () => {
     const report = renderReport(gallery());
 

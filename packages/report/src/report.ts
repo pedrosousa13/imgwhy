@@ -386,6 +386,17 @@ const panels = (data: PageData): Html =>
 </section>`;
 
 /**
+ * What leaves with this file, said where somebody about to send it will read
+ * it.
+ *
+ * Beside the page URL rather than in `NOTES`, and that placement is the whole
+ * point of the sentence. A report is the artifact people mail each other, the
+ * README says so, and a note at the foot of the file is a note the sender
+ * reads after they have sent it. This one sits under the URL it is about.
+ */
+const CARRIES: Html = html`<p class="carries">Every URL in this report — the page above, and each candidate it found — is written exactly as the page offered it, query strings included. Naming the file the browser fetched is this report's whole claim, and a redacted URL cannot be pasted back into a browser to check it. So a signed URL leaves with the file, and whoever sends this report on is the only one who knows whether that matters.</p>`;
+
+/**
  * How to read the matrix, and the two things it will not do.
  *
  * The framework limit is here because the design asks for it in the report
@@ -441,6 +452,7 @@ ${STYLE}
 <dt>captured</dt><dd>${capture.capturedAt}</dd>
 <dt>found</dt><dd>${plural(images.size, 'image')} on ${plural(capture.devices.length, 'device')}</dd>${backgrounds(capture)}
 </dl>
+${CARRIES}
 ${body}
 ${NOTES}
 </main>

@@ -182,7 +182,18 @@ const absolute = (url: string, base: string): string => {
   }
 };
 
-/** The tail of a URL, which is what tells two candidates apart at a glance. */
+/**
+ * The tail of a URL, which is what tells two candidates apart at a glance.
+ *
+ * A query is cut to 40 characters — 39 of it, since the `?` is the first of
+ * them — and that is a column width and not a redaction. The `file` column has
+ * to stay narrow enough to read down, and one signed URL's query is longer
+ * than the rest of a row put together. A URL that will not parse falls back to
+ * its own last 40 characters, which shortens the same way for the same reason.
+ *
+ * The same URL is written whole in the Capture and whole in the report, which
+ * the README says and the report says on its own page.
+ */
 const fileOf = (url: string, base: string): string => {
   try {
     const parsed = new URL(url, base);

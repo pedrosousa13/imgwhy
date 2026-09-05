@@ -57,7 +57,7 @@
     display: grid;
     grid-template-columns: max-content 1fr;
     gap: 0.2rem 1rem;
-    margin: 0 0 1.75rem;
+    margin: 0 0 0.75rem;
   }
 
   .head dt {
@@ -67,6 +67,14 @@
   .head dd {
     margin: 0;
     overflow-wrap: anywhere;
+  }
+
+  /* Under the page URL, and carrying the head's own gap to what follows it. */
+  .carries {
+    max-width: 60rem;
+    margin: 0 0 1.75rem;
+    color: var(--muted);
+    font-size: 0.85rem;
   }
 
   .scroll {
@@ -302,6 +310,7 @@
 <dt>captured</dt><dd>2026-09-03T00:00:00.000Z</dd>
 <dt>found</dt><dd>3 images on 5 devices</dd>
 </dl>
+<p class="carries">Every URL in this report — the page above, and each candidate it found — is written exactly as the page offered it, query strings included. Naming the file the browser fetched is this report's whole claim, and a redacted URL cannot be pasted back into a browser to check it. So a signed URL leaves with the file, and whoever sends this report on is the only one who knows whether that matters.</p>
 <div class="scroll">
 <table>
 <caption>Which candidate each device selected, and what the response cost on the wire.</caption>
