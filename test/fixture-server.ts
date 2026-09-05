@@ -273,9 +273,8 @@ const PAGES: Record<string, string> = {
   ),
 
   // The one page here that carries no image, because what it asks a browser
-  // for is not a render. A script clicks an `<a download>` at the response
-  // below, and a browser left to save it writes the bytes to the disk of
-  // whoever ran imgwhy — for as long as the context stays open.
+  // for is not a render: a script clicks an `<a download>` at the response
+  // below. `capture.ts` says why a context has to refuse it.
   '/attachment.html': shell(
     'attachment',
     `<main><a id="report" href="/report.csv" download="report.csv">report</a>
