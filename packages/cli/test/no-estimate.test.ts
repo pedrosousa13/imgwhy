@@ -187,9 +187,13 @@ describe('the printed transfer size, checked against estimation', () => {
   const FORMATTER = 'bytesArrived';
 
   it('has the formatter and the column to check, so nothing below passes for want of them', () => {
-    expect(declarationOf(FORMATTER, modules['trace.ts'] ?? '')).not.toBeNull();
+    // The formatter is `say.ts`'s, because the trace and the diff report the
+    // same figure and one word for a missing one. Both of their calls are
+    // checked below, whichever module they are written in.
+    expect(declarationOf(FORMATTER, modules['say.ts'] ?? '')).not.toBeNull();
     // One per row, and one for the image that had nothing to select.
     expect(callsTo(FORMATTER, modules['trace.ts'] ?? '').length).toBeGreaterThanOrEqual(2);
+    expect(callsTo(FORMATTER, modules['compare.ts'] ?? '').length).toBeGreaterThanOrEqual(1);
     expect(fillers(COLUMN, modules['trace.ts'] ?? '')).toHaveLength(1);
   });
 
