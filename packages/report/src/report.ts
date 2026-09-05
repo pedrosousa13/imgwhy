@@ -393,14 +393,8 @@ const panels = (data: PageData): Html =>
  * point of the sentence. A report is the artifact people mail each other, the
  * README says so, and a note at the foot of the file is a note the sender
  * reads after they have sent it. This one sits under the URL it is about.
- *
- * It states a fact rather than offering a setting, because there is no setting
- * to offer. Naming the file the browser fetched is the report's whole claim,
- * and a URL with its query stripped cannot be pasted into a browser to check
- * that claim — two variants of one image can differ in nothing else. Whoever
- * sends a report knows whether the page was sensitive; this package does not.
  */
-const CARRIES: Html = html`<p class="carries">Every URL here — the page above, and each candidate below — is written exactly as the page offered it, query strings included. Naming the file the browser fetched is this report's whole claim, and a redacted URL cannot be pasted back into a browser to check it. So a signed URL leaves with the file, whether it is a CDN transformation token or a presigned bucket link, and whoever sends this report on is the only one who knows whether that matters.</p>`;
+const CARRIES: Html = html`<p class="carries">Every URL in this report — the page above, and each candidate it found — is written exactly as the page offered it, query strings included. Naming the file the browser fetched is this report's whole claim, and a redacted URL cannot be pasted back into a browser to check it. So a signed URL leaves with the file, and whoever sends this report on is the only one who knows whether that matters.</p>`;
 
 /**
  * How to read the matrix, and the two things it will not do.

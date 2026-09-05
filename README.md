@@ -78,7 +78,7 @@ The Capture and the report both write every URL exactly as the page offered it, 
 
 So a signed URL leaves with the file. A CDN that charges by transformation puts a token in the query string, and so does a presigned bucket URL; `--json`, `--out` and `--report` all carry it, and the report is the artifact this README suggests you send to somebody. Stripping queries would be a half-measure in any case, because a filename can be the secret and the page URL travels either way. The decision is left where the knowledge is: whoever sends a report is the only one who can say whether the page it explains was sensitive. The report states this on its own page too, under the page URL, because a report travels without this file.
 
-The trace on stdout is the one output that shortens a URL, and that is not a redaction either. It writes a file name and the first 40 characters of a query, because the `file` column has to stay narrow enough to read down — and 40 characters is enough to carry a short token.
+The trace on stdout is the one output that shortens a URL, and that is not a redaction either. It writes a file name and the first 40 characters of a query — 39 of the query itself, since the `?` is the first of them — because the `file` column has to stay narrow enough to read down. That is still enough to carry a short token.
 
 ## HTML report
 
