@@ -1,5 +1,8 @@
+import { mkdtempSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { DeviceProfile } from '@imgwhy/core';
-import { type Browser, chromium } from 'playwright';
+import { type Browser, type Download, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_PROFILES, capturePage } from '../src/index.js';
 import { type FixtureServer, startFixtureServer } from '../../../test/fixture-server.js';
@@ -80,6 +83,63 @@ function recording(order: string[], instead?: () => Promise<void>): () => Promis
  */
 const crashed = (): Promise<void> =>
   Promise.reject(new Error('cdpSession.detach: Target page, context or browser has been closed'));
+
+/**
+ * A browser whose downloads land in a directory of the test's own, listed at
+ * the last moment anything can still be in it.
+ *
+ * Playwright empties a context's downloads when the context closes, so a
+ * listing taken after `capturePage` has returned is empty whatever the context
+ * allowed, and would pass against a browser that saved every byte. The close
+ * the runner performs is the only moment inside a run that a test can reach,
+ * so the listing is taken there.
+ */
+function watchingDownloads(): {
+  launch: () => Promise<Browser>;
+  /** The downloads directory as it stood when the context closed. */
+  files: string[];
+  /** Every download the page announced, saved or refused. */
+  announced: Download[];
+} {
+  const directory = mkdtempSync(join(tmpdir(), 'imgwhy-downloads-'));
+  const files: string[] = [];
+  const announced: Download[] = [];
+  let arrived = (): void => {};
+  const download = new Promise<void>((resolve) => {
+    arrived = resolve;
+  });
+
+  const launch = async (): Promise<Browser> => {
+    const browser = await chromium.launch({ downloadsPath: directory });
+    const openContext = browser.newContext.bind(browser);
+    browser.newContext = async (options) => {
+      const context = await openContext(options);
+      const openPage = context.newPage.bind(context);
+      const closeContext = context.close.bind(context);
+      context.newPage = async () => {
+        const page = await openPage();
+        page.on('download', (each) => {
+          announced.push(each);
+          arrived();
+        });
+        return page;
+      };
+      context.close = async (options) => {
+        // Chromium announces a download after the load event, so the run is
+        // already past `goto` by the time one arrives. Waiting for it is what
+        // makes the listing evidence: a directory read before the browser had
+        // decided anything would be empty either way.
+        await download;
+        files.push(...readdirSync(directory));
+        await closeContext(options);
+      };
+      return context;
+    };
+    return browser;
+  };
+
+  return { launch, files, announced };
+}
 
 describe('capturePage', () => {
   it('captures the candidate a 640px viewport at DPR 1.5 downloads', async () => {
@@ -425,6 +485,25 @@ describe('capturePage', () => {
     expect(refused?.currentSrc).toBe('http://127.0.0.1:1/img/640.png');
     expect(refused?.naturalWidth).toBe(0);
     expect(refused?.transferBytes).toBeNull();
+  });
+
+  it('refuses the download a page starts, so no page can write to the disk', async () => {
+    const watched = watchingDownloads();
+
+    await capturePage({
+      url: `${server.url}/attachment.html`,
+      profiles: [canonical],
+      launch: watched.launch,
+    });
+
+    // Chromium announced the download either way: the event fires whether the
+    // context keeps the bytes or throws them away, so it says only that the
+    // page really did ask. The directory is what separates the two. A context
+    // on Playwright's defaults holds the file by the time the run closes it —
+    // whole, or part-written under a `.crdownload` name — and this one holds
+    // nothing, because the browser was told to refuse.
+    expect(watched.announced.map((each) => each.suggestedFilename())).toEqual(['report.csv']);
+    expect(watched.files).toEqual([]);
   });
 
   it('detaches the CDP session of every profile before closing its context', async () => {

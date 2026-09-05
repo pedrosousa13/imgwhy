@@ -38,6 +38,14 @@ export async function capturePage({
       const context = await browser.newContext({
         viewport: profile.viewport,
         deviceScaleFactor: profile.dpr,
+        // Playwright accepts downloads unless it is told not to, and a page
+        // under measurement is not a page anyone here trusts. A
+        // `Content-Disposition: attachment` response, or a script that clicks
+        // an `<a download>`, then writes bytes to the disk of whoever ran
+        // imgwhy for as long as the context is open — once per profile, since
+        // each one renders the page again. imgwhy reads images out of a render
+        // and downloads nothing, so the capability is off.
+        acceptDownloads: false,
       });
       try {
         const page = await context.newPage();
