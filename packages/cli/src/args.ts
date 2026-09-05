@@ -1,5 +1,10 @@
+/**
+ * Both forms, because either parser prints this and a reader refused by one of
+ * them has no way to know the other exists.
+ */
 export const USAGE =
-  'usage: imgwhy [--json] [--device <ids>] [--out <file>] [--report <file>] <url>';
+  'usage: imgwhy [--json] [--device <ids>] [--out <file>] [--report <file>] <url>\n' +
+  '       imgwhy diff <before.json> <after.json>';
 
 export type ParsedArgs =
   | {

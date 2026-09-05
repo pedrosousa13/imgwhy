@@ -492,3 +492,51 @@ describe('the imgwhy command, given a page written to break the trace', () => {
     );
   }, 120_000);
 });
+
+/**
+ * The subcommand, run against Captures a real browser produced.
+ *
+ * What is here and nowhere else is the dispatch: `bin.ts` reads the first
+ * argument, and a line beginning with `diff` never reaches `parseArgs`. The
+ * comparison itself is `compare.test.ts`'s, which builds its Captures by hand
+ * and can therefore make two of them differ in one field at a time.
+ */
+describe('the imgwhy command, asked to diff two captures', () => {
+  it('reads two captures of one page back and names the devices only one rendered', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'imgwhy-bin-diff-'));
+    const before = join(dir, 'before.json');
+    const after = join(dir, 'after.json');
+    const url = `${server.url}/gallery.html`;
+
+    // The same page twice, rendered as two device sets that share one device.
+    await imgwhy(dir, '--device', 'iphone-se,desktop', '--out', before, url);
+    await imgwhy(dir, '--device', 'iphone-se,ipad', '--out', after, url);
+
+    const ran = await imgwhy(dir, 'diff', before, after);
+
+    expect(ran.stderr).toBe('');
+    expect(ran.code).toBe(0);
+    expect(lines(ran.stdout)[0]).toBe('devices  Desktop only in before, iPad only in after');
+    // The counts and not the figures. What the shared device weighed is a
+    // measurement of a real response either way, and two renders of one page
+    // are entitled to disagree about it by a byte.
+    expect(lines(ran.stdout).filter((line) => line !== '').pop()).toMatch(
+      /^\d+ images? changed, \d+ got smaller, \d+ regressed$/,
+    );
+
+    // One capture against itself, which is the case with no measurement in
+    // it: the same file read twice has nothing anywhere for a diff to find.
+    const same = await imgwhy(dir, 'diff', before, before);
+
+    expect(same.code).toBe(0);
+    expect(same.stdout).toBe('0 images changed, 0 got smaller, 0 regressed\n');
+  }, 120_000);
+
+  it('prints both forms of the usage, because either parser can refuse a line', async () => {
+    const ran = await imgwhy(plain, 'diff', 'only-one.json');
+
+    expect(ran.code).toBe(1);
+    expect(ran.stdout).toBe('');
+    expect(ran.stderr).toBe(`${USAGE}\n`);
+  });
+});

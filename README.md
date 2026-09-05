@@ -39,6 +39,9 @@ node packages/cli/dist/bin.js https://example.com --out capture.json
 # render some of the devices rather than all of them
 node packages/cli/dist/bin.js https://example.com --device desktop
 node packages/cli/dist/bin.js https://example.com --device iphone-se,ipad
+
+# read two Captures back and say what changed between them
+node packages/cli/dist/bin.js diff before.json after.json
 ```
 
 The five default devices are iPhone SE (375×667, DPR 2), iPhone 15 Pro (393×852, DPR 3), Pixel 8 (412×915, DPR 2.625), iPad (820×1180, DPR 2) and Desktop (1440×900, DPR 1). Each renders in its own browser context with the cache disabled, so one device's download never explains another's. Drop an `imgwhy.config.json` beside the page you are working on to name a different set. `--device` selects from whichever set is in force, by id, and renders them in the set's own order.
@@ -63,6 +66,37 @@ image 4 of 10  html > body > … > figure > a > picture > img   loading=lazy
 ```
 
 That is a real run. Where nothing was selected — no `srcset`, or one candidate — there is no table to lay out, so the block says why and reports the bytes per device instead. Where every device agrees on a figure it is written once and names no device; where they differ, each value names the devices that measured it.
+
+### Did the change help?
+
+A Capture is the one thing imgwhy produces that is meant to be kept, and `diff` is what keeping one buys. It reads two of them and reports the file each device picked and what that file cost, on both sides:
+
+```
+devices  Desktop only in before
+
+image 1 of 3  html > body > main > img
+  iPhone SE  1280w → 640w   6669 → 1958 bytes
+  iPad       1280w → 1280w  unchanged
+
+image 2 of 3  html > body > footer > img  gone
+
+image 3 of 3  html > body > main > aside > img  added
+
+1 image changed, 1 got smaller, 0 regressed, 1 added, 1 gone
+```
+
+Two images are the same image when they carry the same id — the DOM path, falling back to the candidate URL family — and nothing else pairs them. An id in one Capture and not the other is reported as **added** or **gone**, never guessed at, so a rebuilt page produces a legible wall of those rather than confident rows about two unrelated images. Devices are matched the same way, on the profile id, and a device only one side rendered is named and left out of the arithmetic.
+
+**Regressed** means one thing: a bigger file for the same device. Every other difference — a device that vanished from the set, an image that stopped loading, a weight nothing recorded — is reported as a named change and not called a regression, so the word keeps meaning something.
+
+The status is 0 whenever both files read. A regression is a finding, and non-zero is reserved for a run that could not do its job: a file that would not open, or a Capture with a field this tool will not read past. A caller who wants a gate today has one in a line:
+
+```bash
+# The summary names the count either way, so the pattern has to read the figure.
+node packages/cli/dist/bin.js diff before.json after.json | grep -Eq '[1-9][0-9]* regressed' && exit 1
+```
+
+A Capture handed to `diff` is a file somebody may have been sent, so every field of it is checked for its type and its range before anything reads it, and a file that fails a check is a message naming the field rather than a wrong answer. No message quotes what it read: every string in a Capture came off somebody's page.
 
 ### The URL is trusted input
 
