@@ -64,6 +64,14 @@ image 4 of 10  html > body > … > figure > a > picture > img   loading=lazy
 
 That is a real run. Where nothing was selected — no `srcset`, or one candidate — there is no table to lay out, so the block says why and reports the bytes per device instead. Where every device agrees on a figure it is written once and names no device; where they differ, each value names the devices that measured it.
 
+### The URL is trusted input
+
+The URL argument is on the same footing as any other shell argument: it decides what a real browser fetches, and imgwhy renders whatever the machine it runs on can reach. That includes loopback, link-local and private addresses, and it has to — `imgwhy http://localhost:3000` on a page under development is the ordinary case, and this repository's own fixtures render off a loopback server. Nothing stops the same command reaching an internal dashboard or a cloud metadata endpoint, and what such a page rendered comes back out through stdout, `--out` and `--report`.
+
+Only the scheme is checked. `file:`, `data:` and `javascript:` are refused because they would read the disk or run script under the browser's own privileges; no rule anywhere looks at the host. The check runs once, on the URL as typed, before the page is opened, so a same-scheme redirect is followed wherever it leads and a public page that redirects to `http://127.0.0.1:…` renders that instead — the `url` line of the trace names where the page ended, not what you asked for. A cross-scheme redirect to `file:` is refused, but by Chromium rather than by this tool, which fails the run with `net::ERR_UNSAFE_REDIRECT`. The scheme restriction holds; it just does not hold for the reason the check in front of it suggests.
+
+So a caller passing imgwhy URLs it did not choose — from a queue, a webhook, a form field — has to filter them before the call, because nothing here will. A hostname is the wrong thing to filter on, too: a name under someone else's control resolves into a private range as easily as a literal address does, and can resolve differently the second time it is looked up.
+
 ## HTML report
 
 `--report` writes one file that opens from disk, loads no remote resource and tells no third party you opened it. It holds a matrix of every image against every device, and under each image the arithmetic in full.
