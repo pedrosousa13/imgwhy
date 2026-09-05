@@ -52,6 +52,18 @@ describe('renderReport', () => {
     expect(report).toContain('3 images on 5 devices');
   });
 
+  it('says beside the page URL that it carries every URL as the page offered it', () => {
+    // Beside the page URL and not in the notes at the end, because the report
+    // travels without the README and the person about to send it on is the one
+    // who has to meet the sentence. A note at the foot of the file is a note
+    // they would have to go looking for.
+    const report = renderReport(gallery());
+    const [head] = report.split('<div class="scroll">');
+
+    expect(head).toContain('query strings included');
+    expect(head).toContain('a signed URL leaves with the file');
+  });
+
   it('gives every device profile a column, named with its viewport and ratio', () => {
     const report = renderReport(gallery());
 

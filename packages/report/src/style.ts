@@ -67,7 +67,7 @@ export const STYLE: Html = html`<style>
     display: grid;
     grid-template-columns: max-content 1fr;
     gap: 0.2rem 1rem;
-    margin: 0 0 1.75rem;
+    margin: 0 0 0.75rem;
   }
 
   .head dt {
@@ -77,6 +77,14 @@ export const STYLE: Html = html`<style>
   .head dd {
     margin: 0;
     overflow-wrap: anywhere;
+  }
+
+  /* Under the page URL, and carrying the head's own gap to what follows it. */
+  .carries {
+    max-width: 60rem;
+    margin: 0 0 1.75rem;
+    color: var(--muted);
+    font-size: 0.85rem;
   }
 
   .scroll {
