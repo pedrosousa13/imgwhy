@@ -24,29 +24,73 @@ function splitTop(s: string): string[] {
   return out.map((x) => x.trim()).filter(Boolean);
 }
 
-/** Evaluate a media condition. Only `min-width`, `max-width` and `and`. */
+/**
+ * Evaluate a media condition. Only `min-width`, `max-width` and `and`.
+ *
+ * Collapse the whitespace, then cut on a literal, rather than splitting on
+ * `\s+and\s+` — which at every position inside a run of spaces swallowed the
+ * rest of the run, found no `and` behind it, and gave the run back a space at a
+ * time.
+ *
+ * Collapsing is also what holds the verdict, where trimming each part would
+ * not. `\s+and\s+` ate the whitespace on both sides of the word, so a second
+ * `and` written straight after the first stayed glued to the part behind it and
+ * the unanchored read below still found the condition there. ` and ` cuts in
+ * the same places for the same reason: it eats the space the second `and` would
+ * otherwise be cut on. Cutting on the word alone hands `every` a part with no
+ * condition in it, and reads a condition a browser calls true as false.
+ * `sizes.test.ts` pins both the verdict and the timing.
+ */
 function evalCond(cond: string, vw: number): boolean {
-  return cond.split(/\s+and\s+/i).every((p) => {
-    const m = p.match(/\(\s*(min|max)-width\s*:\s*([\d.]+)(px|em|rem)?\s*\)/i);
-    if (!m) return false;
-    const v = toPx(parseFloat(m[2]), (m[3] || 'px').toLowerCase(), vw);
-    return m[1].toLowerCase() === 'max' ? vw <= v : vw >= v;
-  });
+  return cond
+    .replace(/\s+/g, ' ')
+    .split(/ and /i)
+    .every((p) => {
+      const m = p.match(/\(\s*(min|max)-width\s*:\s*([\d.]+)(px|em|rem)?\s*\)/i);
+      if (!m) return false;
+      const v = toPx(parseFloat(m[2]), (m[3] || 'px').toLowerCase(), vw);
+      return m[1].toLowerCase() === 'max' ? vw <= v : vw >= v;
+    });
 }
 
+/**
+ * Read a length: a sign, a number, a unit, summed across a `calc()`.
+ *
+ * The unit is optional here, where `[+-]?\s*[\d.]+(?:vw|px|em|rem)` asked for
+ * the whole token and failed without one. Same grammar, and the failure is the
+ * difference: `[\d.]+` read a run of digits to its end before the unit could
+ * fail, and `/g` then began again one character along and read the same run
+ * over, so n digits cost n².
+ *
+ * The claim to make about `\s*` is narrower than that it cannot backtrack,
+ * because `[\d.]+` is behind it and on `-   x` it does give the spaces back one
+ * at a time. What bounds it is which positions pay: only one holding a sign,
+ * once each, in proportion to the run behind that sign — and a run of
+ * whitespace follows at most one sign. So the cost is the string's length
+ * rather than its square.
+ *
+ * `sizes.test.ts` says why that length is the page's to pick, and pins it.
+ */
 function evalLen(str: string, vw: number): Length | null {
   const s = str.trim();
   if (/^auto$/i.test(s)) return { auto: true };
   const calc = s.match(/^calc\(([\s\S]*)\)$/i);
-  const toks = (calc ? calc[1] : s).match(/[+-]?\s*[\d.]+(?:vw|px|em|rem)/gi);
-  if (!toks) return null;
   let t = 0;
-  for (const tok of toks) {
-    const m = tok.replace(/\s+/g, '').match(/^([+-]?)([\d.]+)(vw|px|em|rem)$/i);
-    if (!m) return null;
-    t += (m[1] === '-' ? -1 : 1) * toPx(parseFloat(m[2]), m[3].toLowerCase(), vw);
+  let read = false;
+  for (const { groups } of (calc ? calc[1] : s).matchAll(
+    /(?:(?<sign>[+-])\s*)?(?<num>[\d.]+)(?<unit>vw|px|em|rem)?/gi,
+  )) {
+    // A number no unit completed is not a length, and skipping it here is the
+    // clause the earlier shape wrote as a failed match. It is also what makes
+    // the read below safe: an optional group that took no part is `undefined`
+    // at run time, whatever a match's index type says, so the two have to stay
+    // together.
+    if (!groups?.unit) continue;
+    const px = toPx(parseFloat(groups.num), groups.unit.toLowerCase(), vw);
+    t += groups.sign === '-' ? -px : px;
+    read = true;
   }
-  return { px: t };
+  return read ? { px: t } : null;
 }
 
 const asResolution = (len: Length, clause: string, cond: string | null): Resolution =>

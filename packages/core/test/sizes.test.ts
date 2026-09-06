@@ -152,6 +152,24 @@ describe('resolveSizes', () => {
       });
     });
 
+    it('reads a second and that combines nothing, rather than failing on it', () => {
+      // `and and` is what the splitting of a condition on that word has to
+      // survive. Whatever splits it leaves the second `and` at the head of the
+      // part behind it, and the check that reads each part is unanchored, so it
+      // finds the condition there and the verdict is the one a browser gives.
+      // A split that instead cut at both words would hand the check a part
+      // holding nothing but whitespace, which matches no condition and fails
+      // the `every` — a true condition read as false, and the wrong clause
+      // chosen with no sign that anything went wrong.
+      const sizes = '(min-width:1px)  and  and  (min-width:1px) 50vw';
+      expect(resolveSizes(sizes, 1000, false)).toEqual({
+        kind: 'length',
+        px: 500,
+        clause: sizes,
+        cond: '(min-width:1px)  and  and  (min-width:1px)',
+      });
+    });
+
     it('takes the first matching clause and never consults a later one', () => {
       const sizes = '(min-width: 400px) 25vw, (min-width: 800px) 50vw';
       expect(resolveSizes(sizes, 900, false)).toEqual({
@@ -265,6 +283,78 @@ describe('resolveSizes', () => {
 
     it.each(cases)('is %s → %s', (_shape, sizes, loading, expected) => {
       expect(allowsAutoSizes(sizes, loading)).toBe(expected);
+    });
+  });
+
+  /**
+   * A clause at a length no author writes, which the page chooses anyway.
+   *
+   * `sizes` is an author attribute, so its length is the page's to pick, and a
+   * scan over it costing more than linear is a hang a page can ask for: in the
+   * extension it stops the one service worker a toolbar click runs in, and on
+   * the command line it stops the run. This is the one place that reason is
+   * written down; `sizes.ts` points here rather than repeating it.
+   *
+   * Four runs the page can lengthen without bound, across two scans. The digits
+   * of a number and the whitespace a sign may sit ahead of belong to the length
+   * scan, and are read twice over — once where nothing completes a token, and
+   * once where a unit does, which is a different path through the same scan.
+   * The whitespace either side of an `and` belongs to the condition scan
+   * instead. Each is pinned on its own, because a rewrite of one scan leaves
+   * the other standing and a rewrite of one path leaves the other.
+   *
+   * ## The ceiling is loose on purpose
+   *
+   * These separate linear from quadratic, not one implementation from another.
+   * Reading any of these strings once is a few milliseconds; the backtracking
+   * scans they replaced took 18.7, 6.0 and 20.7 seconds. A ceiling of 250ms is
+   * well above the work and well below the failure, so a loaded machine stays
+   * green and a scan that restarts along the string cannot.
+   */
+  describe('a clause long enough to hang a backtracking scan', () => {
+    const CEILING_MS = 250;
+
+    const msToResolve = (sizes: string): number => {
+      const started = performance.now();
+      resolveSizes(sizes, 640, false);
+      return performance.now() - started;
+    };
+
+    it('reads 200 000 digits with no unit behind them in milliseconds', () => {
+      expect(msToResolve('1'.repeat(200_000))).toBeLessThan(CEILING_MS);
+    });
+
+    it('reads a sign with 100 000 spaces behind it in milliseconds', () => {
+      expect(msToResolve(`-${' '.repeat(100_000)}x`)).toBeLessThan(CEILING_MS);
+    });
+
+    it('reads a media condition holding 200 000 spaces in milliseconds', () => {
+      expect(msToResolve(`(min-width:${' '.repeat(200_000)}1px) 50vw`)).toBeLessThan(CEILING_MS);
+    });
+
+    it('reads 200 000 digits a unit does complete, in milliseconds and correctly', () => {
+      // The other side of the first test. There the scan runs out looking for a
+      // unit that never arrives; here it finds one, and a rewrite could make
+      // either path superlinear without touching the other. The value is
+      // asserted beside the time because a scan that was quick by reading less
+      // of the number than it should would pass a timing check on its own — so
+      // the digits are written to carry a value a `double` can hold exactly.
+      const sizes = `${'0'.repeat(199_996)}1234px`;
+      const started = performance.now();
+
+      expect(resolveSizes(sizes, 640, false)).toEqual({
+        kind: 'length',
+        px: 1234,
+        clause: sizes,
+        cond: null,
+      });
+      expect(performance.now() - started).toBeLessThan(CEILING_MS);
+    });
+
+    it('still reports the long clause as one it cannot read', () => {
+      const sizes = '1'.repeat(200_000);
+
+      expect(resolveSizes(sizes, 640, false)).toEqual({ kind: 'error', clause: sizes });
     });
   });
 
