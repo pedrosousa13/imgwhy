@@ -199,6 +199,7 @@ const CALLED = new Set([
   'find',
   'map',
   'match',
+  'matchAll',
   'parse',
   'push',
   'querySelector',

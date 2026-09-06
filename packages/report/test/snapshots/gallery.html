@@ -456,7 +456,10 @@ const splitTop = function splitTop(s) {
     return out.map((x) => x.trim()).filter(Boolean);
 };
 const evalCond = function evalCond(cond, vw) {
-    return cond.split(/\s+and\s+/i).every((p) => {
+    return cond
+        .replace(/\s+/g, ' ')
+        .split(/ and /i)
+        .every((p) => {
         const m = p.match(/\(\s*(min|max)-width\s*:\s*([\d.]+)(px|em|rem)?\s*\)/i);
         if (!m)
             return false;
@@ -469,17 +472,21 @@ const evalLen = function evalLen(str, vw) {
     if (/^auto$/i.test(s))
         return { auto: true };
     const calc = s.match(/^calc\(([\s\S]*)\)$/i);
-    const toks = (calc ? calc[1] : s).match(/[+-]?\s*[\d.]+(?:vw|px|em|rem)/gi);
-    if (!toks)
-        return null;
     let t = 0;
-    for (const tok of toks) {
-        const m = tok.replace(/\s+/g, '').match(/^([+-]?)([\d.]+)(vw|px|em|rem)$/i);
-        if (!m)
-            return null;
-        t += (m[1] === '-' ? -1 : 1) * toPx(parseFloat(m[2]), m[3].toLowerCase(), vw);
+    let read = false;
+    for (const { groups } of (calc ? calc[1] : s).matchAll(/(?:(?<sign>[+-])\s*)?(?<num>[\d.]+)(?<unit>vw|px|em|rem)?/gi)) {
+        // A number no unit completed is not a length, and skipping it here is the
+        // clause the earlier shape wrote as a failed match. It is also what makes
+        // the read below safe: an optional group that took no part is `undefined`
+        // at run time, whatever a match's index type says, so the two have to stay
+        // together.
+        if (!groups?.unit)
+            continue;
+        const px = toPx(parseFloat(groups.num), groups.unit.toLowerCase(), vw);
+        t += groups.sign === '-' ? -px : px;
+        read = true;
     }
-    return { px: t };
+    return read ? { px: t } : null;
 };
 const asResolution = (len, clause, cond) => 'auto' in len ? { kind: 'auto', clause, cond } : { kind: 'length', px: len.px, clause, cond };
 const allowsAutoSizes = (sizes, loading) => loading === 'lazy' && sizes !== null && /^\s*auto\s*(,|$)/i.test(sizes);
