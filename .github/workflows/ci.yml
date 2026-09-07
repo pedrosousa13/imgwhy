@@ -1,0 +1,117 @@
+# The suite in this repository is the security control. Seven manifest keys and
+# no more, four `chrome.*` paths and no more, nothing that stores or sends —
+# each of those is held by an allowlist test and by nothing else, and before
+# this file those allowlists could only ever fail on somebody's laptop.
+#
+# What this file does is produce a verdict, on every pull request and on every
+# push to `main`. What it does not do is make that verdict binding: a red run
+# stops a merge only once the check is required, and required checks are a
+# repository setting that no workflow can declare about itself. The gate is two
+# halves, and this is the half that lives in the repository.
+name: CI
+
+# Both halves of "nothing runs between a push and a merge". The pull request is
+# where the verdict is wanted; the push is what catches a commit that reached
+# `main` without one.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# The suite reads the checkout and produces a verdict. It needs no token beyond
+# that, and a job that holds no write is a job a compromised dependency cannot
+# use to push, tag or comment.
+permissions:
+  contents: read
+
+# The only verdict anybody acts on is the head commit's, so a second push
+# supersedes the first rather than queueing behind it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # The work is a minute or two, most of it a cold browser download. Anything
+    # past this is a browser that never exited rather than a slow one, and the
+    # default would let it hold a runner for six hours before saying so.
+    timeout-minutes: 15
+    steps:
+      # Pinned to a commit rather than to `@v7`. A tag is a pointer its owner
+      # can move, so a tag means the code this workflow runs can change with no
+      # commit in this repository — and the whole point of the workflow is to
+      # be the thing a change cannot get past quietly. An action able to rewrite
+      # a step's exit status is precisely that bypass, and here it would be
+      # rewriting the extension's privacy tests to green. The cost is that these
+      # lines go stale on purpose: moving one is a diff somebody reads.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # 20 rather than a newer Node. `engines.node` promises `>=20`, so 20 is
+      # the only version this repository makes a claim about, and an unchecked
+      # claim is what the rest of this file exists to stop. A matrix would
+      # double every run to cover versions nothing here promises. When the floor
+      # in `engines` rises, this line rises with it.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # The build is here because the typecheck runs ahead of the suite, and the
+      # typecheck needs `dist`: each package's `tsc` resolves `@imgwhy/core` to
+      # `dist/index.d.ts`, so on a fresh checkout it fails TS2307 on every
+      # cross-package import. Running the suite first would build it — `pretest`
+      # does — but then a type error costs a full browser run before anybody
+      # sees it. This step is what buys the order below.
+      - run: npm run build
+
+      - run: npm run typecheck
+
+      # Read out of the installed package rather than written here. A version
+      # typed into this file is a string that goes stale the first time the
+      # lockfile moves, and a stale key is worse than none: it restores the
+      # browsers belonging to a different Playwright, and the install below then
+      # downloads the right ones again on every single run while the cache
+      # reports a hit.
+      - id: playwright
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # `ImageOS` and not `runner.os`, which is `Linux` for every image GitHub
+      # has ever shipped. These are downloaded binaries linked against the
+      # image's glibc, so the key has to move when the image generation does —
+      # otherwise the roll to the next `ubuntu-latest` is a cache hit that
+      # restores binaries the new image cannot run, and `--with-deps` repairs
+      # the apt packages beneath them without touching the binaries themselves.
+      # `ImageVersion` would be exact and would also evict the cache on every
+      # weekly image patch, for a libc that did not move.
+      #
+      # No `restore-keys`, for the same reason: a near-miss restore is the stale
+      # hit this key is shaped to avoid, and paying for one download on a real
+      # bump is the cheaper mistake.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ env.ImageOS }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+
+      # `--with-deps`, not a plain install, and unconditional. The cache spares
+      # the download; Chromium's shared libraries are apt packages living
+      # outside `~/.cache`, so they have to be asked for whether the cache hit
+      # or missed, and a runner short one of them fails at launch rather than at
+      # install — where the error is a missing `.so` and not a missing browser.
+      # Chromium alone, because `runner/src/capture.ts` opens no other.
+      - run: npx playwright install --with-deps chromium
+
+      # Part of the suite needs a real Chromium, and what that part holds is
+      # everything a browser is the only witness to: the bytes that actually
+      # arrived, read through the DevTools Protocol with the cache off, and what
+      # an emitted report actually does once a browser opens it. A measured
+      # weight is the one figure this project will not estimate and the one
+      # every prediction elsewhere is checked against, so a run with no browser
+      # would prove the arithmetic and nothing about whether the arithmetic is
+      # right. Some of those tests open a browser themselves and some reach one
+      # through the built command, which is why there is no part of this run
+      # Chromium is optional for.
+      - run: npm test
