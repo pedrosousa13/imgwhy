@@ -10,8 +10,29 @@
  * an admission about the reading, and it is wrong about exactly the images
  * that carry a page's weight.
  *
- * Two halves. The scroll pass makes the browser want the files; the wait makes
- * the run hold still until it has them.
+ * This is the argument every other comment about the scroll pass points at.
+ *
+ * Two halves. `scrollThroughPage` makes the browser want the files;
+ * `waitForQuietNetwork` holds the run still until it has seen them arrive, or
+ * says which ones it never did.
+ *
+ * ## What this cannot do
+ *
+ * **Read a page that holds a connection open.** A server-sent-events stream, a
+ * hanging poll and a streaming video request all stay outstanding for as long
+ * as the page lives: nothing ever reports them finished or failed, so the wait
+ * below reaches its bound and the whole capture fails, one profile at a time.
+ * That is a page this tool used to capture — badly, reporting every lazy image
+ * as absent, but it produced a Capture — and now does not capture at all.
+ * Telling those apart needs a request's type, which is a different reading
+ * from the one this file takes; failing loudly is the interim answer.
+ *
+ * **Reach anything above where the page started.** The pass descends and
+ * returns, so a page that loads at a non-zero position — a fragment target, or
+ * one that scrolls itself — keeps whatever is above that position out of view
+ * throughout, and its lazy images stay untriggered. The brief asks for exactly
+ * this shape, and the position it starts from is the one a reader would be at,
+ * so the images it misses are the ones already behind that reader.
  */
 
 /**
@@ -22,8 +43,14 @@
  * here, so there is a window in which the page is fetching and this end knows
  * nothing about it — and a run that read the page inside that window would
  * miss the very load the scroll was for. Waiting out a quiet stretch is what
- * closes it: an empty list that stays empty is the observation, one empty
- * reading is not.
+ * narrows it: a list that reads empty every time for a quarter of a second is
+ * a better account than one that read empty once.
+ *
+ * Narrows rather than closes. What the wait sees is samples, not the interval
+ * between them, so a request that starts and finishes inside one gap is never
+ * seen as pending at all — and if it starts another, that one can slip out the
+ * same way. Every one of them is still recorded and still counted; what can
+ * escape is the waiting, not the measurement.
  */
 const QUIET_WINDOW = 250;
 
@@ -51,10 +78,28 @@ const LOOK_EVERY = 25;
  * Coming back matters because the position is part of what the page is. A
  * reader may be looking at it, and a Capture taken of a page is not a licence
  * to leave it somewhere else.
+ *
+ * The module docblock says what the pass cannot reach.
  */
 export async function scrollThroughPage(): Promise<void> {
   const startX = window.scrollX;
   const startY = window.scrollY;
+
+  /**
+   * Put the page here, now, whatever the page would rather do about it.
+   *
+   * The two-argument `scrollTo(x, y)` resolves its behaviour against the
+   * scrolling box's computed `scroll-behavior`, so on a page carrying
+   * `html { scroll-behavior: smooth }` — which is a common line to write —
+   * every one of these animates. Both halves of the pass break there: a step
+   * re-aims from a position still in motion, so it advances a fraction of a
+   * screen and a tall page runs out of steps before it runs out of page, and
+   * the restore at the end leaves the page mid-animation somewhere it was
+   * never asked to be. `instant` is the option form saying so explicitly.
+   */
+  const jumpTo = (top: number): void => {
+    window.scrollTo({ left: startX, top, behavior: 'instant' });
+  };
 
   // A painted frame, then a moment for what the frame started. The frame is
   // what makes the browser notice the new position; the delay after it is for
@@ -70,28 +115,35 @@ export async function scrollThroughPage(): Promise<void> {
   // advancing, and a run with no cap would scroll it until someone killed the
   // process. This is a bound, not a budget: at a screen a step it is far more
   // page than anything worth measuring, so a real page ends the loop by
-  // reaching its own bottom long before this does.
+  // reaching its own bottom long before this does. What the bound costs where
+  // it is reached is written out on `CaptureOptions.settleTimeout`, which does
+  // not cover it.
   const MOST_STEPS = 200;
 
   let previous = -1;
   for (let taken = 0; taken < MOST_STEPS && window.scrollY !== previous; taken += 1) {
     previous = window.scrollY;
-    window.scrollTo(startX, window.scrollY + window.innerHeight);
+    jumpTo(window.scrollY + window.innerHeight);
     await step();
   }
 
-  window.scrollTo(startX, startY);
+  jumpTo(startY);
   await step();
 }
 
 /**
- * Wait until nothing is in flight, and say what was if it never happens.
+ * Wait until nothing has been in flight for a while, or say what still is.
  *
- * Giving up is a failure and not a shrug. The images this waits for are the
- * ones the run exists to measure, so a run that fell through here would report
- * them as images that chose no file and cost nothing — a wrong answer wearing
- * the same clothes as a right one. Throwing names the URLs instead, and
- * `packages/cli/src/message.ts` puts that sentence on the command's stderr.
+ * Giving up is a failure and not a shrug, for the reason the module docblock
+ * gives: falling through would put those images in the Capture as images that
+ * chose no file. Throwing names them instead, and `packages/cli/src/message.ts`
+ * puts that sentence on the command's stderr.
+ *
+ * `timeout` bounds confirming that the page settled, which is not the same as
+ * bounding the page. Reaching it with nothing outstanding is its own failure
+ * and reads as one: the network did go quiet, too late for anything here to
+ * watch it stay quiet, and a reading taken there is the reading this whole
+ * file exists to refuse.
  */
 export async function waitForQuietNetwork(
   pending: () => string[],
@@ -110,13 +162,12 @@ export async function waitForQuietNetwork(
     }
 
     if (Date.now() >= giveUpAt) {
-      // Quiet, and out of time to confirm it. Only a bound shorter than the
-      // quiet window arrives here, and there is nothing outstanding to name,
-      // so a failure would be a sentence about no URLs at all.
-      if (outstanding.length === 0) return;
       throw new Error(
-        `The page was still loading after ${timeout}ms, so nothing here can say what it ` +
-          `weighs. Still waiting on: ${outstanding.join(', ')}`,
+        outstanding.length === 0
+          ? `The page stopped loading too late in its ${timeout}ms to be read: nothing here ` +
+            `saw it stay quiet for the ${QUIET_WINDOW}ms that says it is done.`
+          : `The page was still loading after ${timeout}ms, so nothing here can say what it ` +
+            `weighs. Still waiting on: ${outstanding.join(', ')}`,
       );
     }
 

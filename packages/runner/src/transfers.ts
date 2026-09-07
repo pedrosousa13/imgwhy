@@ -49,7 +49,7 @@ type Started = {
  * ## How a response finds its image
  *
  * By URL. An image's `currentSrc` is the URL it actually fetched, and one URL
- * is one resource, so the URL is the join. Three events carry what that needs:
+ * is one resource, so the URL is the join. Four events carry what that needs:
  *
  * - `Network.requestWillBeSent` names the URL. The first one for a request id
  *   is the URL the page asked for; a redirect reuses the id, and the hops

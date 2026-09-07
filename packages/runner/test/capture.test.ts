@@ -82,16 +82,21 @@ function recording(order: string[], instead?: Detaching): () => Promise<Browser>
 }
 
 /**
- * A browser whose pages refuse to be blanked, which is the one way discarding
- * the document fails without the target being gone as well.
+ * A browser whose pages run `first` before they let themselves be blanked.
  *
- * Built on `recording` rather than beside it, so the order it reports is the
- * same order the other teardown tests read. What this adds is the failure: a
- * discard that rejects must not carry the detach away with it, and the run has
- * to report the discard rather than fall silent about it.
+ * The blanking call is the seam two tests below want, and for the same reason:
+ * `capturePage` discards the document on its way out, so that call is the
+ * run's own last act on the page that was measured. One test wants to read the
+ * page there and one wants the discard to fail there, and the ladder down to
+ * `page.goto` — context, page, the method itself — is the same for both.
+ *
+ * `first` throwing is how the second of them says no: the rejection comes out
+ * of `page.goto` exactly as a real one would, before the navigation.
  */
-function refusingToBlank(order: string[]): () => Promise<Browser> {
-  const launch = recording(order);
+function whenBlanking(
+  launch: () => Promise<Browser>,
+  first: (page: Page) => Promise<void>,
+): () => Promise<Browser> {
   return async () => {
     const browser = await launch();
     const openContext = browser.newContext.bind(browser);
@@ -102,7 +107,7 @@ function refusingToBlank(order: string[]): () => Promise<Browser> {
         const page = await openPage();
         const goto = page.goto.bind(page);
         page.goto = async (target, gotoOptions) => {
-          if (target === 'about:blank') throw new Error('page.goto: blanking refused');
+          if (target === 'about:blank') await first(page);
           return goto(target, gotoOptions);
         };
         return page;
@@ -114,41 +119,40 @@ function refusingToBlank(order: string[]): () => Promise<Browser> {
 }
 
 /**
+ * A browser whose pages refuse to be blanked, which is the one way discarding
+ * the document fails without the target being gone as well.
+ *
+ * Built on `recording` rather than beside it, so the order it reports is the
+ * same order the other teardown tests read. What this adds is the failure: a
+ * discard that rejects must not carry the detach away with it, and the run has
+ * to report the discard rather than fall silent about it.
+ */
+const refusingToBlank = (order: string[]): (() => Promise<Browser>) =>
+  whenBlanking(recording(order), () => {
+    throw new Error('page.goto: blanking refused');
+  });
+
+/**
  * A browser that reads the scroll position of the measured document at the
  * last moment there is one.
  *
- * `capturePage` blanks the page on its way out, so by the time it returns
- * there is nothing left to ask where it was — a test that opened its own
- * browser afterwards would be reading a document that never ran. The discard
- * is the run's own last act on the page, so the call that performs it is the
- * seam: reading `window.scrollY` before delegating reads the render that was
- * measured, one instruction before it is taken away.
+ * By the time `capturePage` returns there is nothing left to ask where it was
+ * — a test that opened its own browser afterwards would be reading a document
+ * that never ran. Reading `window.scrollY` one instruction before the discard
+ * reads the render that was measured.
  *
- * The other half of making this mean anything is the page. `/scrolled-start`
- * puts itself somewhere other than the top, because a run that never scrolled
- * at all would leave a page at zero and pass a test that expected zero.
+ * The other half of making this mean anything is the page. Every page a test
+ * points this at puts itself somewhere other than the top, because a run that
+ * never scrolled at all would leave a page at zero and pass a test that
+ * expected zero.
  */
-function watchingScroll(seen: number[]): () => Promise<Browser> {
-  return async () => {
-    const browser = await chromium.launch();
-    const openContext = browser.newContext.bind(browser);
-    browser.newContext = async (options) => {
-      const context = await openContext(options);
-      const openPage = context.newPage.bind(context);
-      context.newPage = async () => {
-        const page = await openPage();
-        const goto = page.goto.bind(page);
-        page.goto = async (target, gotoOptions) => {
-          if (target === 'about:blank') seen.push(await page.evaluate(() => window.scrollY));
-          return goto(target, gotoOptions);
-        };
-        return page;
-      };
-      return context;
-    };
-    return browser;
-  };
-}
+const watchingScroll = (seen: number[]): (() => Promise<Browser>) =>
+  whenBlanking(
+    () => chromium.launch(),
+    async (page) => {
+      seen.push(await page.evaluate(() => window.scrollY));
+    },
+  );
 
 /**
  * Detach, then have the page ask for one more file before anything closes it.
@@ -839,12 +843,8 @@ describe('capturePage', () => {
 
 /**
  * The page a reader actually gets, which is not the one `page.goto` returns.
- *
- * Most of a page's weight sits below the fold, and a browser does not fetch
- * any of it until someone scrolls. A run that read the document at `load`
- * would report every one of those images as having chosen no file and cost
- * nothing — which is not "unknown", it is wrong, and it is wrong about exactly
- * the images a reader opened the tool to see.
+ * `packages/runner/src/settle.ts` says why that is, and why reading the
+ * earlier one is wrong rather than merely incomplete.
  */
 describe('capturePage, on a page whose images sit below the fold', () => {
   it('loads every lazy image the page shows only once it is scrolled', async () => {
@@ -915,11 +915,30 @@ describe('capturePage, on a page whose images sit below the fold', () => {
 
     const hero = capture.runs[0]?.images[0];
     expect(hero?.currentSrc).toBe(`${server.url}/slow/1920.png`);
-    // The request went out while the page was being scrolled and the response
-    // arrived a few hundred milliseconds after the scrolling stopped. A run
-    // that read the page the moment the scroll returned would report this as
-    // unknown, and a reader would take that for an image that cost nothing.
+    // The request went out during the scroll and the response arrived a good
+    // half-second after the scrolling stopped, which is what the fixture's
+    // whole-second delay is sized for. Only the wait covers that gap: with it
+    // taken out this line fails, and the run reports an image that cost
+    // nothing rather than one it did not wait for.
     expect(hero?.transferBytes).toBeGreaterThan(0);
+  }, 60_000);
+
+  it('scrolls a page that asked for smooth scrolling as though it had not', async () => {
+    const seen: number[] = [];
+
+    const capture = await capturing({
+      url: `${server.url}/smooth-scrolling.html`,
+      profiles: [desktop],
+      launch: watchingScroll(seen),
+    });
+
+    // Both halves of what an animated scroll costs. The page is back exactly
+    // where it started, rather than wherever the restore's animation had
+    // reached when the pass stopped waiting on it; and the image five thousand
+    // pixels down was reached at all, rather than crept towards a fraction of
+    // a screen at a time by steps that each re-aimed from a moving position.
+    expect(seen).toEqual([1000]);
+    expect(capture.runs[0]?.images[0]?.transferBytes).toBeGreaterThan(0);
   }, 60_000);
 
   it('fails, naming the file it never got, when the page will not settle', async () => {

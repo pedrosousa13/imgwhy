@@ -7,7 +7,7 @@ import { scrollThroughPage, waitForQuietNetwork } from './settle.js';
 import { type TransferLog, recordTransfers } from './transfers.js';
 
 /**
- * How long one profile may spend waiting for its page to stop loading.
+ * How long one profile may spend waiting for its page to go quiet.
  *
  * Whole seconds, because it is a bound on a person's patience rather than a
  * measurement of anything. Ten of them is far longer than a page that is going
@@ -45,7 +45,8 @@ export type CaptureOptions = {
    */
   launch?: () => Promise<Browser>;
   /**
-   * How long one profile waits for its page to finish loading, in milliseconds.
+   * How long one profile waits for its page's network to go quiet, in
+   * milliseconds.
    *
    * An option rather than a constant for two reasons that pull the same way. A
    * page that never settles must not hold a run open indefinitely, and what
@@ -54,6 +55,13 @@ export type CaptureOptions = {
    * fixture needs a fraction of it. The tests are the second reason: a run
    * that is meant to give up should cost the suite a couple of seconds rather
    * than the full default.
+   *
+   * It bounds the wait and not the scroll pass that comes before it, and the
+   * two are worth adding up. The scroll pass carries its own bound —
+   * `MOST_STEPS` steps of about 66ms in `settle.ts`, so around thirteen
+   * seconds, and only ever that on a page that keeps growing as it is read —
+   * which is spent before this one starts counting. A page that settles takes
+   * a step per screenful and none of the rest.
    */
   settleTimeout?: number;
 };
@@ -102,13 +110,12 @@ export async function capturePage({
           await disableCache(session);
           const transfers = recordTransfers(session);
           await page.goto(url, { waitUntil: 'load' });
-          // `load` is not the end of a page's loading. Everything below the
-          // fold is still unasked for, so the page is scrolled through and
-          // then given time to answer before it is read — and a page that
-          // never answers throws out of this block rather than being read as
-          // one whose images chose nothing. The listeners that make the wait
-          // possible went on above, before the navigation, which is what makes
-          // a request that starts during the scroll visible at all.
+          // `load` is not the end of a page's loading; `settle.ts` says what
+          // reading it there would report. A page that never goes quiet throws
+          // out of this block, and the existing catch below takes the document
+          // away and detaches the session on the way past. The listeners that
+          // make the wait possible went on above, before the navigation, which
+          // is what makes a request that starts during the scroll visible.
           await page.evaluate(scrollThroughPage);
           await waitForQuietNetwork(transfers.pending, settleTimeout);
           const raw = await page.evaluate(collectImages);
