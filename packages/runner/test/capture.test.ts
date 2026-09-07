@@ -114,6 +114,43 @@ function refusingToBlank(order: string[]): () => Promise<Browser> {
 }
 
 /**
+ * A browser that reads the scroll position of the measured document at the
+ * last moment there is one.
+ *
+ * `capturePage` blanks the page on its way out, so by the time it returns
+ * there is nothing left to ask where it was — a test that opened its own
+ * browser afterwards would be reading a document that never ran. The discard
+ * is the run's own last act on the page, so the call that performs it is the
+ * seam: reading `window.scrollY` before delegating reads the render that was
+ * measured, one instruction before it is taken away.
+ *
+ * The other half of making this mean anything is the page. `/scrolled-start`
+ * puts itself somewhere other than the top, because a run that never scrolled
+ * at all would leave a page at zero and pass a test that expected zero.
+ */
+function watchingScroll(seen: number[]): () => Promise<Browser> {
+  return async () => {
+    const browser = await chromium.launch();
+    const openContext = browser.newContext.bind(browser);
+    browser.newContext = async (options) => {
+      const context = await openContext(options);
+      const openPage = context.newPage.bind(context);
+      context.newPage = async () => {
+        const page = await openPage();
+        const goto = page.goto.bind(page);
+        page.goto = async (target, gotoOptions) => {
+          if (target === 'about:blank') seen.push(await page.evaluate(() => window.scrollY));
+          return goto(target, gotoOptions);
+        };
+        return page;
+      };
+      return context;
+    };
+    return browser;
+  };
+}
+
+/**
  * Detach, then have the page ask for one more file before anything closes it.
  *
  * The window between the detach and the context's close is a few milliseconds
@@ -798,4 +835,105 @@ describe('capturePage', () => {
       capturing({ url: `${server.url}/w-descriptors.html`, profiles: [canonical], launch }),
     ).rejects.toThrow(/npx playwright install chromium/);
   });
+});
+
+/**
+ * The page a reader actually gets, which is not the one `page.goto` returns.
+ *
+ * Most of a page's weight sits below the fold, and a browser does not fetch
+ * any of it until someone scrolls. A run that read the document at `load`
+ * would report every one of those images as having chosen no file and cost
+ * nothing — which is not "unknown", it is wrong, and it is wrong about exactly
+ * the images a reader opened the tool to see.
+ */
+describe('capturePage, on a page whose images sit below the fold', () => {
+  it('loads every lazy image the page shows only once it is scrolled', async () => {
+    const capture = await capturing({
+      url: `${server.url}/below-the-fold.html`,
+      profiles: [desktop],
+    });
+
+    const images = capture.runs[0]?.images ?? [];
+    expect(images.map((image) => image.loading)).toEqual(['lazy', 'lazy', 'lazy']);
+    // The specific files, because the arithmetic is what decides them: 1440
+    // CSS px at DPR 1, so 100vw asks for 1440 and the 1920w candidate is the
+    // narrowest that covers it; `auto` resolves to the 720px box `.half`
+    // gives, so 800w does; and 120px asks for 120, so 160w does.
+    expect(images.map((image) => image.currentSrc)).toEqual([
+      `${server.url}/img/1920.png`,
+      `${server.url}/img/800.png`,
+      `${server.url}/img/160.png`,
+    ]);
+    for (const image of images) expect(image.transferBytes).toBeGreaterThan(0);
+  }, 60_000);
+
+  it('measures a sizes=auto image at the width its layout gave it', async () => {
+    const capture = await capturing({
+      url: `${server.url}/below-the-fold.html`,
+      profiles: [desktop],
+    });
+
+    const auto = capture.runs[0]?.images[1];
+    expect(auto?.sizes).toBe('auto');
+    // Half of a 1440 viewport, and not the zero an element reports while it is
+    // still empty. The file that arrived is 800 wide, so the box is the page's
+    // layout rather than the file's own opinion — and the page declares no
+    // width for anything to read one off instead.
+    expect(auto?.currentSrc).toBe(`${server.url}/img/800.png`);
+    expect(auto?.renderedWidth).toBe(720);
+    expect(auto?.declaresWidth).toBe(false);
+    // 720 again, and for a different reason: `naturalWidth` is the intrinsic
+    // width in CSS pixels, so the browser has already divided the 800 pixel
+    // file by the 800/720 density that choosing it against an `auto` of 720
+    // implies. An element under auto-sizes always reports its own box here.
+    expect(auto?.naturalWidth).toBe(720);
+  }, 60_000);
+
+  it('gives the page back at the scroll position it found it at', async () => {
+    const seen: number[] = [];
+
+    const capture = await capturing({
+      url: `${server.url}/scrolled-start.html`,
+      profiles: [desktop],
+      launch: watchingScroll(seen),
+    });
+
+    // The page put itself at 1000 before anything read it, and that is where
+    // the run left it. Zero would have proved nothing here: a run that never
+    // scrolled leaves a page at zero too.
+    expect(seen).toEqual([1000]);
+    // And it did scroll. The image sits five thousand pixels down, further
+    // than any lazy-load threshold reaches, and it loaded anyway.
+    expect(capture.runs[0]?.images[0]?.transferBytes).toBeGreaterThan(0);
+  }, 60_000);
+
+  it('records a response that starts during the scroll and lands after it', async () => {
+    const capture = await capturing({
+      url: `${server.url}/delayed.html`,
+      profiles: [desktop],
+    });
+
+    const hero = capture.runs[0]?.images[0];
+    expect(hero?.currentSrc).toBe(`${server.url}/slow/1920.png`);
+    // The request went out while the page was being scrolled and the response
+    // arrived a few hundred milliseconds after the scrolling stopped. A run
+    // that read the page the moment the scroll returned would report this as
+    // unknown, and a reader would take that for an image that cost nothing.
+    expect(hero?.transferBytes).toBeGreaterThan(0);
+  }, 60_000);
+
+  it('fails, naming the file it never got, when the page will not settle', async () => {
+    const failing = capturing({
+      url: `${server.url}/never-settles.html`,
+      profiles: [desktop],
+      // Short, because the bound is the thing under test and a run that
+      // reaches it should not cost the suite ten seconds to say so.
+      settleTimeout: 2_000,
+    });
+
+    // Named rather than merely thrown. Falling through would have reported
+    // the image as one that chose no file, which reads as a page with a
+    // missing image rather than as a measurement nobody managed to take.
+    await expect(failing).rejects.toThrow(/held-open\.png/);
+  }, 60_000);
 });

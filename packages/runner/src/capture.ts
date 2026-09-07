@@ -3,7 +3,18 @@ import { CAPTURE_SCHEMA, parseSrcset } from '@imgwhy/core';
 import { type Browser, type CDPSession, type Page, chromium } from 'playwright';
 import { alignImageIds } from './align.js';
 import { type RawImage, collectImages, countBackgroundImages } from './collect.js';
+import { scrollThroughPage, waitForQuietNetwork } from './settle.js';
 import { type TransferLog, recordTransfers } from './transfers.js';
+
+/**
+ * How long one profile may spend waiting for its page to stop loading.
+ *
+ * Whole seconds, because it is a bound on a person's patience rather than a
+ * measurement of anything. Ten of them is far longer than a page that is going
+ * to settle takes, and short enough that a page which never will says so while
+ * whoever ran the command is still watching.
+ */
+const SETTLE_TIMEOUT = 10_000;
 
 export type CaptureOptions = {
   url: string;
@@ -33,6 +44,18 @@ export type CaptureOptions = {
    * in between, which nothing outside the run can otherwise observe.
    */
   launch?: () => Promise<Browser>;
+  /**
+   * How long one profile waits for its page to finish loading, in milliseconds.
+   *
+   * An option rather than a constant for two reasons that pull the same way. A
+   * page that never settles must not hold a run open indefinitely, and what
+   * counts as too long is a property of the page and the network rather than
+   * of this code — a slow origin needs more than the default and a local
+   * fixture needs a fraction of it. The tests are the second reason: a run
+   * that is meant to give up should cost the suite a couple of seconds rather
+   * than the full default.
+   */
+  settleTimeout?: number;
 };
 
 /**
@@ -46,6 +69,7 @@ export async function capturePage({
   profiles,
   producedBy,
   launch = () => chromium.launch(),
+  settleTimeout = SETTLE_TIMEOUT,
 }: CaptureOptions): Promise<Capture> {
   const browser = await startBrowser(launch);
   try {
@@ -78,6 +102,15 @@ export async function capturePage({
           await disableCache(session);
           const transfers = recordTransfers(session);
           await page.goto(url, { waitUntil: 'load' });
+          // `load` is not the end of a page's loading. Everything below the
+          // fold is still unasked for, so the page is scrolled through and
+          // then given time to answer before it is read — and a page that
+          // never answers throws out of this block rather than being read as
+          // one whose images chose nothing. The listeners that make the wait
+          // possible went on above, before the navigation, which is what makes
+          // a request that starts during the scroll visible at all.
+          await page.evaluate(scrollThroughPage);
+          await waitForQuietNetwork(transfers.pending, settleTimeout);
           const raw = await page.evaluate(collectImages);
           // A second call rather than one that answers both, so each function
           // sent into the page stays one that references nothing outside
