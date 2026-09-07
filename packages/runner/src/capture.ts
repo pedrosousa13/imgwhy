@@ -56,13 +56,22 @@ export type CaptureOptions = {
    * meant to give up should cost the suite a couple of seconds rather than the
    * full default.
    *
-   * There is a floor, and `settle.ts` refuses anything under it rather than
-   * running: the bound has to be longer than the quiet window a page is
-   * measured against, because a bound no longer than that window leaves no
-   * time in which the window could ever complete. It is a floor against a
-   * caller asking for a run that cannot succeed, not a performance figure —
-   * anything in the seconds is well clear of it, and the suite's shortest is
-   * two of them.
+   * There is a floor, and it is 250ms: the bound has to be longer than the
+   * quiet window a page is measured against, because a bound no longer than
+   * that window leaves no time in which the window could ever complete. That
+   * window is `QUIET_WINDOW` in `settle.ts`, which is where the number is
+   * decided and where the refusal lives, so the two cannot come apart; it is
+   * repeated here because a caller reading this line should not have to open
+   * that file to learn what they may not pass.
+   *
+   * A bound at or under it fails the run rather than being clamped up to
+   * something workable, and it fails partway through: the wait is what refuses
+   * it, and the wait comes after the navigation and the scroll pass, so a bound
+   * this small still costs a page load per profile before anything says so.
+   * That is the only figure treated this way — nothing else here is checked,
+   * because nothing else here has an answer that is wrong for every page. The
+   * floor is not a performance figure either: anything in the seconds is well
+   * clear of it, and the suite's shortest is two of them.
    *
    * It bounds the wait and not the scroll pass that comes before it, and the
    * two are worth adding up. The scroll pass carries its own bound —

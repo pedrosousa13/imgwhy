@@ -19,24 +19,29 @@
  * ## What this cannot do
  *
  * **Read a page whose network never goes quiet.** Two shapes reach that, and
- * both fail the whole capture, one profile at a time.
+ * they do not end the same way.
  *
  * A page can hold one request open forever: a server-sent-events stream, a
  * hanging poll and a streaming video request all stay outstanding for as long
- * as the page lives, because nothing ever reports them finished or failed.
- *
- * Or it can keep starting new ones. A page fetching media segments, polling on
- * a short timer, or firing a beacon loop never leaves a gap as wide as
- * `QUIET_WINDOW` between one request and the next, so the wait never gets the
- * stretch it needs however long it is given — and where it gives up mid-gap,
- * with nothing outstanding at that instant, it has still observed nothing that
- * says the page finished.
- *
- * Both are pages this tool used to capture — badly, reporting every lazy image
- * as absent, but they produced a Capture — and now does not capture at all.
- * Telling a stream apart from a page still loading needs a request's type,
+ * as the page lives, because nothing ever reports them finished or failed. The
+ * wait always reaches its bound there, so the whole capture fails, one profile
+ * at a time. That is a page this tool used to capture — badly, reporting every
+ * lazy image as absent, but it produced a Capture — and now does not capture at
+ * all. Telling a stream apart from a page still loading needs a request's type,
  * which is a different reading from the one this file takes; failing loudly is
  * the interim answer.
+ *
+ * Or it can keep starting new ones — media segments, a poll on a short timer, a
+ * beacon loop — and what happens then depends on how long each request lasts
+ * rather than on how often they start. `QUIET_WINDOW` below says why: the wait
+ * reads samples, not the intervals between them. Requests long enough that most
+ * polls land inside one leave no run of empty readings, so the wait never gets
+ * its stretch and gives up at the bound, whatever the bound is. Requests short
+ * enough to fall between polls are mostly not seen at all, so a whole window of
+ * empty readings accumulates over a page that is still fetching, and the wait
+ * returns a stretch of quiet that was never real. That second outcome is the
+ * one to be uneasy about: it is not a loud failure, it is the early reading
+ * this file exists to refuse, taken silently.
  *
  * **Reach anything above where the page started.** The pass descends and
  * returns, so a page that loads at a non-zero position — a fragment target, or
