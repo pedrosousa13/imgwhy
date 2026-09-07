@@ -85,6 +85,45 @@ describe('the diff command', () => {
     });
   });
 
+  it('runs across two releases of imgwhy, and says the boundary was crossed', () => {
+    written(capture('100vw', 11573, '0.4.1'), capture('50vw', 6104, '0.5.0'));
+
+    const outcome = runDiff([before, after]);
+
+    // Comparing a Capture kept from before an upgrade against one taken after
+    // it is the ordinary case, so the status is 0 and the output is the whole
+    // diff. What the boundary adds is one sentence: a difference reported
+    // across it may be imgwhy's own.
+    expect(outcome.code).toBe(0);
+    expect(outcome.stderr).toBe('');
+    expect(outcome.stdout).toBe(
+      [
+        'image 1 of 1  html > body > main > img',
+        '  iPhone SE  1280w → 640w  11573 → 6104 bytes',
+        '',
+        'before was written by imgwhy 0.4.1 and after by 0.5.0, ' +
+          "so a difference between them can be this tool's rather than the page's",
+        '1 image changed, 1 got smaller, 0 regressed',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('refuses a capture written before there was a version, naming the file', () => {
+    written(capture('100vw', 11573), capture('100vw', 11573));
+    const old = JSON.parse(JSON.stringify(capture('100vw', 11573)));
+    delete old.version;
+    writeFileSync(after, JSON.stringify(old), 'utf8');
+
+    const outcome = runDiff([before, after]);
+
+    expect(outcome.code).toBe(1);
+    expect(outcome.stdout).toBe('');
+    expect(outcome.stderr).toBe(
+      `${after} carries no version, so this tool cannot tell what shape it is\n`,
+    );
+  });
+
   it('names the field a malformed capture went wrong at, and fails on it', () => {
     written(capture('100vw', 11573), capture('100vw', 11573));
     const broken = JSON.parse(JSON.stringify(capture('100vw', 11573)));

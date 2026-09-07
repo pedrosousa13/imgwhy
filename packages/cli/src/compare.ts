@@ -48,6 +48,22 @@ export type ImageChange = {
  * place instead of a disagreement between two.
  */
 export type Comparison = {
+  /**
+   * The two releases of imgwhy that wrote the captures, where they are not one
+   * release, and null where they are.
+   *
+   * Computed here rather than in the formatter for the reason the counts are:
+   * a line that disagreed with the two files would be a bug in one place. What
+   * the formatter does with it is print one sentence, and what it does not do
+   * is refuse — comparing a Capture kept from before an upgrade against one
+   * taken after it is the ordinary case, and a diff that stopped there would
+   * be useless the first time anyone upgraded.
+   *
+   * `null` and not a pair of equal strings, so the question a reader of this
+   * type asks — was a boundary crossed — is the same one check the formatter
+   * makes.
+   */
+  crossed: { before: string; after: string } | null;
   /** The devices both captures carry, by the name the later one gives them. */
   shared: string[];
   onlyBefore: string[];
@@ -188,7 +204,13 @@ export function compareCaptures(before: Capture, after: Capture): Comparison {
   );
 
   const count = (of: (image: ImageChange) => boolean): number => images.filter(of).length;
+  const wrote = { before: before.version.producedBy, after: after.version.producedBy };
   return {
+    // Compared as written. A release is a string the writer recorded, and
+    // nothing here reads an order into one: `0.5.0` and `0.10.0` sort against
+    // each other in more than one way, and which is the later release is not a
+    // question this answers or needs to.
+    crossed: wrote.before === wrote.after ? null : wrote,
     shared: shared.map((device) => device.name),
     onlyBefore: named(before.devices, after),
     onlyAfter: named(after.devices, before),
@@ -280,6 +302,30 @@ function head(comparison: Comparison): Line[] {
  * on every unremarkable diff would bury the three counts that are always worth
  * reading.
  */
+/**
+ * The sentence a crossed release boundary owes the reader, or nothing where
+ * both captures name one release.
+ *
+ * Above the counts and in their section, because it is what the counts have to
+ * be read against: a file that grew between two releases of imgwhy is a
+ * weaker finding than one that grew between two runs of the same release, and
+ * a reader who has already looked away has read the figure without it.
+ *
+ * It says the two releases and stops. Which of them changed, and whether
+ * anything about the selection changed at all, is not something either file
+ * records — so the claim is that a difference below may be this tool's, and
+ * not that any particular one is.
+ */
+function boundary(comparison: Comparison): Line[] {
+  const crossed = comparison.crossed;
+  if (crossed === null) return [];
+  // Written in two halves and joined by an interpolation, which is what `say`
+  // allows a finished `Line` for. Either half reaches its line through an
+  // interpolation, and every interpolation escapes.
+  const wrote = say`before was written by imgwhy ${crossed.before} and after by ${crossed.after}`;
+  return [say`${wrote}, so a difference between them can be this tool's rather than the page's`];
+}
+
 function summary(comparison: Comparison): Line {
   const counted = [
     `${plural(comparison.changed, 'image')} changed`,
@@ -323,7 +369,7 @@ export function formatComparison(comparison: Comparison): string {
     return [[say`image ${at} of ${total}  ${image.id}  ${image.kind}`]];
   });
 
-  const sections = [head(comparison), ...blocks, [summary(comparison)]];
+  const sections = [head(comparison), ...blocks, [...boundary(comparison), summary(comparison)]];
   return sections
     .filter((section) => section.length > 0)
     .map((section) => section.join('\n'))

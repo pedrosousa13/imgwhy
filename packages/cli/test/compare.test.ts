@@ -283,6 +283,59 @@ describe('what a diff calls a regression', () => {
 });
 
 /**
+ * The line a crossed release boundary adds, written out once so that the
+ * checks below read the sentence a reader gets rather than a pattern of it.
+ */
+const CROSSED =
+  'before was written by imgwhy 0.4.1 and after by 0.5.0, ' +
+  "so a difference between them can be this tool's rather than the page's";
+
+describe('a diff of two captures written by different releases', () => {
+  /** One page, unchanged, recorded by the release named. */
+  const by = (producedBy: string): Capture =>
+    capture({ 'iphone-se': [hero(RENDERED)] }, [DEVICES[0]], producedBy);
+
+  it('carries both releases where they differ, and nothing where they agree', () => {
+    expect(compareCaptures(by('0.4.1'), by('0.5.0')).crossed).toEqual({
+      before: '0.4.1',
+      after: '0.5.0',
+    });
+    expect(compareCaptures(by('0.4.1'), by('0.4.1')).crossed).toBeNull();
+  });
+
+  it('says a difference can be the tool\'s, and still reports the whole diff', () => {
+    const before = capture({ 'iphone-se': [hero({ sizes: '100vw', bytes: 11573 })] }, [DEVICES[0]], '0.4.1');
+    const after = capture({ 'iphone-se': [hero({ sizes: '50vw', bytes: 6104 })] }, [DEVICES[0]], '0.5.0');
+
+    // Nothing is withheld and nothing is hedged: the blocks and the counts are
+    // what they would be within one release, and the line is one more sentence
+    // under them. Refusing here would make a diff useless the first time
+    // anyone upgraded.
+    expect(diff(before, after).split('\n')).toEqual([
+      `image 1 of 1  ${HERO}`,
+      '  iPhone SE  1280w → 640w  11573 → 6104 bytes',
+      '',
+      CROSSED,
+      '1 image changed, 1 got smaller, 0 regressed',
+    ]);
+  });
+
+  it('writes nothing at all where both captures name one release', () => {
+    // Byte for byte what a diff wrote before a Capture carried a version. The
+    // line is an addition to the crossed case and to no other.
+    expect(diff(by('0.4.1'), by('0.4.1'))).toBe('0 images changed, 0 got smaller, 0 regressed');
+  });
+
+  it('names both releases and neither as the one that changed', () => {
+    // A crossed boundary makes a finding weaker; it does not say which side
+    // moved. Nothing here can know that, so the line claims neither.
+    expect(CROSSED).not.toMatch(/regress|caused|because of/);
+    expect(diff(by('0.4.1'), by('0.5.0'))).toContain('0.4.1');
+    expect(diff(by('0.4.1'), by('0.5.0'))).toContain('0.5.0');
+  });
+});
+
+/**
  * The characters a page put in an attribute to be acted on.
  *
  * The same set `escaping.test.ts` writes into a trace, and it arrives here the
@@ -354,17 +407,23 @@ describe('a diff of a capture that came off a hostile page', () => {
     ],
   });
 
+  /**
+   * Two releases as a page would write them, so the version line is in this
+   * output too: `producedBy` is a string off a file somebody may have been
+   * sent, and the line that names it is one more line to escape.
+   */
   const output = (): string =>
-    diff(hostile(11573, 20000, carrying(RELEASE)), hostile(6104, 20000, carrying(RELEASE)));
+    diff(hostile(11573, 20000, carrying('0.4.1')), hostile(6104, 20000, carrying('0.5.0')));
 
   it('writes every control character out, so a page cannot make a terminal act', () => {
     expect(output().split('\n').filter((line) => ACTED_ON.test(line))).toEqual([]);
   });
 
   it('forges no row with a newline, because the rows are this code counting', () => {
-    // One header, two device rows, the blank line and the summary. A CR or an
-    // LF that survived would put the page's own row among them.
-    expect(output().split('\n')).toHaveLength(5);
+    // One header, two device rows, the blank line, the version line and the
+    // counts. A CR or an LF that survived any of them would put the page's own
+    // row among them.
+    expect(output().split('\n')).toHaveLength(6);
     expect(output().split('\n').filter((line) => line.trimStart().startsWith('Forged'))).toEqual(
       [],
     );
