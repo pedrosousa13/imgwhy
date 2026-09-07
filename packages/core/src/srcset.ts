@@ -60,13 +60,16 @@ export function parseSrcset(raw: string): Candidate[] {
  * every core module declares — a function declaration, a `const` holding an
  * arrow or anything else, a `let`, a `var`, a class, a name out of a
  * destructuring, in a block or not — and refuses any that the shipped source
- * does not declare. `PARTS` itself is the one name it passes over, because the
- * list is not part of what ships.
+ * does not declare. Two names are passed over: `PARTS` itself, because the
+ * list is not part of what ships, and `CAPTURE_SCHEMA`, which is the shape
+ * number of a file on disk and no business of a page.
  *
  * So the rule it enforces is stronger than "add your function here": a core
- * module's top level may hold nothing but functions and its own `PARTS`. A
- * constant declared up there cannot go in a list of functions, and the check
- * fails until it is inlined or made one.
+ * module's top level may hold functions, its own `PARTS`, and a constant no
+ * shipped function reads. A constant cannot go in a list of functions, which
+ * is what makes the last of those safe — and what checks it is a second
+ * reading in the same file, of the shipped string for both exempted names and
+ * of every core module's imports for either under any alias.
  *
  * What it cannot see is a name no core module declares — a global the shipped
  * copy reached for and a page does not have. The `CASES` table in

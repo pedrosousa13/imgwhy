@@ -33,9 +33,9 @@ Neither is typed in twice.
 
 ## What this cost core's shipped-source check
 
-`packages/core/test/source.test.ts` compares every name a core module binds at its top level against the names the shipped copy declares, and the rule it enforced is that a core module may declare nothing up there but functions and its own `PARTS`. `CAPTURE_SCHEMA` is the second name exempted from that comparison, and an exemption by name is a hole in it: a shipped function reaching for the constant would resolve to nothing in a page.
+`packages/core/test/source.test.ts` compares every name a core module binds at its top level against the names the shipped copy declares, and the rule it enforced is that a core module may declare nothing up there but functions and its own `PARTS`. `CAPTURE_SCHEMA` is the second name exempted from that comparison, and an exemption by name is a hole in it: a shipped function reaching for the constant would resolve to nothing in a page. What the rule now says is that a core module's top level may hold functions, its own `PARTS`, and a constant no shipped function reads.
 
-So the same file now also reads the shipped string for both exempted names and fails on a mention of either. That is a narrower check than the one it stands in for, and it is the one that answers the failure the exemption opened.
+So the same file now also reads the shipped string for both exempted names, and every core module's imports for either under any alias. Two readings rather than one because neither sees the other's failure: the string catches a use inside the module that declares the constant, which no import would show, and the imports catch `import { CAPTURE_SCHEMA as SHAPE }` — which puts `SHAPE` and not the exempted name into the shipped text, and which the comparison is blind to because an import binds a name without declaring one. Both are narrower checks than the one they stand in for, and together they are what answers the failure the exemption opened.
 
 ## The argument against
 
