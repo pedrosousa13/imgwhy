@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as after } from 'node:timers/promises';
 import type { DeviceProfile } from '@imgwhy/core';
-import { type Browser, type Download, chromium } from 'playwright';
+import { type Browser, type Download, type Frame, type Page, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_PROFILES, capturePage } from '../src/index.js';
 import { type FixtureServer, startFixtureServer } from '../../../test/fixture-server.js';
@@ -46,8 +46,14 @@ afterAll(async () => {
  * `instead` stands in for what detaching does, so a test can have it fail the
  * way a crashed target's does. Detaching is still recorded when it fails: it
  * was attempted, which is what the order is there to show.
+ *
+ * It is handed the detach it replaced and the target the session belongs to,
+ * so a test can also do the detach and then act on the page while the run is
+ * still inside the window between the two entries this records.
  */
-function recording(order: string[], instead?: () => Promise<void>): () => Promise<Browser> {
+type Detaching = (detach: () => Promise<void>, target: Page | Frame) => Promise<void>;
+
+function recording(order: string[], instead?: Detaching): () => Promise<Browser> {
   return async () => {
     const browser = await chromium.launch();
     const openContext = browser.newContext.bind(browser);
@@ -60,7 +66,7 @@ function recording(order: string[], instead?: () => Promise<void>): () => Promis
         const detach = session.detach.bind(session);
         session.detach = async () => {
           order.push('detach');
-          await (instead ? instead() : detach());
+          await (instead ? instead(detach, target) : detach());
         };
         return session;
       };
@@ -71,6 +77,80 @@ function recording(order: string[], instead?: () => Promise<void>): () => Promis
       return context;
     };
     return browser;
+  };
+}
+
+/**
+ * A browser whose pages refuse to be blanked, which is the one way discarding
+ * the document fails without the target being gone as well.
+ *
+ * Built on `recording` rather than beside it, so the order it reports is the
+ * same order the other teardown tests read. What this adds is the failure: a
+ * discard that rejects must not carry the detach away with it, and the run has
+ * to report the discard rather than fall silent about it.
+ */
+function refusingToBlank(order: string[]): () => Promise<Browser> {
+  const launch = recording(order);
+  return async () => {
+    const browser = await launch();
+    const openContext = browser.newContext.bind(browser);
+    browser.newContext = async (options) => {
+      const context = await openContext(options);
+      const openPage = context.newPage.bind(context);
+      context.newPage = async () => {
+        const page = await openPage();
+        const goto = page.goto.bind(page);
+        page.goto = async (target, gotoOptions) => {
+          if (target === 'about:blank') throw new Error('page.goto: blanking refused');
+          return goto(target, gotoOptions);
+        };
+        return page;
+      };
+      return context;
+    };
+    return browser;
+  };
+}
+
+/**
+ * Detach, then have the page ask for one more file before anything closes it.
+ *
+ * The window between the detach and the context's close is a few milliseconds
+ * wide, and whether the page happens to want anything inside it is chance — a
+ * test that renders and counts what the server saw passes most of the time
+ * against a run that has the defect, which makes it a coin rather than a
+ * guard. This asks for the file itself, at the one moment the window is open.
+ *
+ * The URL is relative because that is what decides the outcome. It resolves
+ * only against the document that was measured, so a run that took that
+ * document away before detaching cannot fetch it at all, and a run that left
+ * it there fetches it under whatever instruction the page has left — which,
+ * once the session carrying it has gone, is none.
+ *
+ * What happened goes into `outcomes` rather than being asserted here, so the
+ * test names it. Neither settlement waits on a duration: the request that goes
+ * out is awaited to its response and the URL that resolves against nothing
+ * errors at once. The timer is only there so that a third outcome nobody
+ * predicted arrives as a named result instead of as a test that sat still
+ * until vitest gave up on it.
+ */
+function fetchingAfterDetach(path: string, outcomes: string[]): Detaching {
+  return async (detach, target) => {
+    await detach();
+    outcomes.push(
+      await target.evaluate(
+        (url: string) =>
+          new Promise<string>((resolve) => {
+            const image = new Image();
+            image.addEventListener('load', () => resolve('loaded'));
+            image.addEventListener('error', () => resolve('could not resolve the URL'));
+            setTimeout(() => resolve('neither loaded nor failed'), 1_000);
+            image.src = url;
+            document.body.append(image);
+          }),
+        path,
+      ),
+    );
   };
 }
 
@@ -261,6 +341,30 @@ describe('capturePage', () => {
     expect(server.requests.filter((r) => r.cacheControl !== 'no-cache')).toEqual([]);
     expect(server.requests.filter((r) => r.path === '/densities.html')).toHaveLength(5);
   }, 60_000);
+
+  it('leaves the page nothing to ask with once its session has detached', async () => {
+    server.requests.length = 0;
+    const order: string[] = [];
+    const outcomes: string[] = [];
+
+    await capturePage({
+      url: `${server.url}/densities.html`,
+      profiles: [canonical],
+      launch: recording(order, fetchingAfterDetach('/img/9.png', outcomes)),
+    });
+
+    // The fetch was attempted between these two, which is the window the whole
+    // test is about. Asserted rather than assumed, because a fetch outside it
+    // proves nothing either way.
+    expect(order).toEqual(['detach', 'close']);
+    // The document that could have resolved a relative URL is gone by the time
+    // the session is, so the page had nothing to ask with.
+    expect(outcomes).toEqual(['could not resolve the URL']);
+    // Named rather than counted: a request that went out cacheable has to say
+    // which one it was and what it carried instead.
+    expect(server.requests.filter((r) => r.cacheControl !== 'no-cache')).toEqual([]);
+    expect(server.requests.map((r) => r.path)).toEqual(['/densities.html', '/img/200.png']);
+  });
 
   it('keeps an image id stable when a render reparents the image', async () => {
     const capture = await capturePage({
@@ -578,6 +682,25 @@ describe('capturePage', () => {
     await expect(failing).rejects.toThrow(/net::ERR_UNSAFE_PORT/);
     await expect(failing).rejects.not.toThrow(/cdpSession\.detach/);
     // Detaching was still attempted, and the context still closed after it.
+    expect(order).toEqual(['detach', 'close']);
+  });
+
+  it('still detaches when the page cannot be taken away, and reports why', async () => {
+    const order: string[] = [];
+
+    // The discard runs before the detach on the success path, so a discard
+    // that throws where it stands would skip the detach and leave the session
+    // attached until the context closed it — the exit the ordering is built to
+    // prevent. Both have to happen, and the discard's failure is the one that
+    // reaches the caller.
+    await expect(
+      capturePage({
+        url: `${server.url}/densities.html`,
+        profiles: [canonical],
+        launch: refusingToBlank(order),
+      }),
+    ).rejects.toThrow(/blanking refused/);
+
     expect(order).toEqual(['detach', 'close']);
   });
 

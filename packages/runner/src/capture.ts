@@ -1,6 +1,6 @@
 import type { Capture, CapturedImage, DeviceProfile, DeviceRun } from '@imgwhy/core';
 import { parseSrcset } from '@imgwhy/core';
-import { type Browser, type CDPSession, chromium } from 'playwright';
+import { type Browser, type CDPSession, type Page, chromium } from 'playwright';
 import { alignImageIds } from './align.js';
 import { type RawImage, collectImages, countBackgroundImages } from './collect.js';
 import { type TransferLog, recordTransfers } from './transfers.js';
@@ -11,7 +11,9 @@ export type CaptureOptions = {
   profiles: DeviceProfile[];
   /**
    * Test seam: how the browser starts. A test hands back a browser it holds,
-   * so it can prove the browser closes on every exit path.
+   * so it can prove the browser closes on every exit path — and one that hands
+   * back an instrumented browser can watch what a context and its session do
+   * in between, which nothing outside the run can otherwise observe.
    */
   launch?: () => Promise<Browser>;
 };
@@ -71,6 +73,11 @@ export async function capturePage({
             backgroundImageCount,
           });
         } catch (failure) {
+          // Discarding is attempted here too, for the same reason as below: a
+          // run that failed after the page loaded still leaves a page that can
+          // fetch. Its failure is dropped, like the detach's, because it can
+          // reject on its own — a crashed target cannot be navigated either.
+          await discardDocument(page).catch(() => {});
           // Detaching is attempted here too — a page that never loaded reaches
           // this with the session still attached — but its own failure is
           // dropped, because `detach()` can reject by itself. A crashed target
@@ -81,10 +88,27 @@ export async function capturePage({
           await session.detach().catch(() => {});
           throw failure;
         }
-        // Nothing went wrong, so a detach that fails is the only failure there
-        // is, and it is reported. Outside a `finally` on purpose, which is why
-        // the block above has to stay straight-line: an early exit from it
-        // would leave the session attached until the context closed it.
+        // Held rather than thrown, because the detach has to run whatever the
+        // discard did. Throwing here would skip it and leave the session
+        // attached until the context closed it, which is the exit this block
+        // is shaped to avoid. Boxed rather than compared against a sentinel,
+        // so a rejection carrying `undefined` still reads as one.
+        const discard = await discardDocument(page).then(
+          () => undefined,
+          (failure: unknown) => ({ failure }),
+        );
+        if (discard) {
+          // Both halves can fail here, and the discard failed first. The rule
+          // is the one the block above follows: the failure that came first is
+          // the one reported, so the detach is still attempted and its own
+          // rejection is dropped rather than allowed to replace this one.
+          await session.detach().catch(() => {});
+          throw discard.failure;
+        }
+        // The discard succeeded, so a detach that fails is the only failure
+        // there is, and it is reported. Outside a `finally` on purpose, which
+        // is why the block above has to stay straight-line: an early exit from
+        // it would leave the session attached until the context closed it.
         await session.detach();
       } finally {
         await context.close();
@@ -127,6 +151,46 @@ const toCapturedImage = (image: RawImage, transfers: TransferLog): CapturedImage
 });
 
 /**
+ * Replace the page that was measured with a blank one, so nothing of it is
+ * left to make a request.
+ *
+ * Everything the session carries is the session's: the instruction that
+ * disables the cache and the listeners that record what each response cost
+ * both end when it detaches. The page does not — it lives until its context
+ * closes — so between the detach and the close there is a document that can
+ * still fetch, and a fetch started there arrives at the server with no
+ * `Cache-Control` header and reaches no listener. Both halves of what the
+ * session was for are gone, and the request is neither refused a cached copy
+ * nor counted.
+ *
+ * Discarding the document ends that window rather than narrowing it. A
+ * navigation to `about:blank` destroys the old document and its pending loads,
+ * and resolves once the blank one has loaded, so by the time this returns the
+ * page that was measured cannot ask for anything.
+ *
+ * `about:blank` rather than `page.close()`, because closing the page destroys
+ * the target the session is attached to. Measured against Playwright 1.62,
+ * detaching after the page closes rejects with "Target page, context or
+ * browser has been closed", which would make the detach fail on every run, and
+ * a failure that always happens reports nothing. That is what was observed
+ * rather than something the suite pins, so a version that changed it would go
+ * unnoticed here.
+ *
+ * What it covers is the document. A service worker the page registered belongs
+ * to the context instead, so this does not stop one, and a fetch it makes
+ * before the context closes still goes out under no instruction and reaches no
+ * listener. Closing the context is what bounds that.
+ */
+async function discardDocument(page: Page): Promise<void> {
+  // `about:blank` asks the network for nothing, so the only thing this waits
+  // on is the renderer answering. Playwright's default would spend thirty
+  // seconds per profile on one that is not answering — turning a capture that
+  // already succeeded into a throw, long after the measurement was taken — and
+  // a renderer that is answering needs none of them.
+  await page.goto('about:blank', { timeout: 5_000 });
+}
+
+/**
  * Take the HTTP cache out of the picture for one page.
  *
  * A held copy is the reason `currentSrc` stops being evidence: a browser that
@@ -138,7 +202,17 @@ const toCapturedImage = (image: RawImage, transfers: TransferLog): CapturedImage
  *
  * Playwright exposes no switch for it, so the DevTools Protocol does it — the
  * same instruction the DevTools "Disable cache" checkbox sends, which is also
- * why every request goes out carrying `Cache-Control: no-cache`.
+ * why every request the page's document makes goes out carrying
+ * `Cache-Control: no-cache`.
+ *
+ * Every one of them, and not only the ones made while the page is being read.
+ * The instruction belongs to the session, so it is withdrawn the moment the
+ * session detaches; `discardDocument` takes the document away first, which is
+ * what makes the claim hold for the whole of the document's life rather than
+ * up to the detach.
+ *
+ * The document is the bound. A service worker the page registered outlives it,
+ * and `discardDocument` says why nothing here covers that.
  *
  * It does not reach Blink's per-render memory cache. `recordTransfers` says
  * what that leaves, under "What the mapping cannot do".
