@@ -294,15 +294,6 @@ function head(comparison: Comparison): Line[] {
 }
 
 /**
- * The counts, read off the same comparison the blocks above were.
- *
- * Added and gone are named only where there are some. Every image either of
- * them counts has a block of its own, so the figure is there to be checked
- * against a wall a reader cannot miss — and a line that read `0 added, 0 gone`
- * on every unremarkable diff would bury the three counts that are always worth
- * reading.
- */
-/**
  * The sentence a crossed release boundary owes the reader, or nothing where
  * both captures name one release.
  *
@@ -326,6 +317,15 @@ function boundary(comparison: Comparison): Line[] {
   return [say`${wrote}, so a difference between them can be this tool's rather than the page's`];
 }
 
+/**
+ * The counts, read off the same comparison the blocks above were.
+ *
+ * Added and gone are named only where there are some. Every image either of
+ * them counts has a block of its own, so the figure is there to be checked
+ * against a wall a reader cannot miss — and a line that read `0 added, 0 gone`
+ * on every unremarkable diff would bury the three counts that are always worth
+ * reading.
+ */
 function summary(comparison: Comparison): Line {
   const counted = [
     `${plural(comparison.changed, 'image')} changed`,

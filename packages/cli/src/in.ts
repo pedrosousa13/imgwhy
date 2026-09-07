@@ -278,8 +278,8 @@ function readParsed(file: string, parsed: unknown): LoadedCapture {
   if (!isSchema(version['schema'])) return fail(': version.schema must be a whole number above 0');
   if (version['schema'] !== CAPTURE_SCHEMA) {
     return fail(
-      `: version.schema is ${version['schema']}, and this build of imgwhy reads ` +
-        `${CAPTURE_SCHEMA}`,
+      `: version.schema is ${version['schema']}, ` +
+        `and this build of imgwhy reads ${CAPTURE_SCHEMA}`,
     );
   }
   if (!isName(version['producedBy'])) {
