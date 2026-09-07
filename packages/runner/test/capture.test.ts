@@ -932,12 +932,20 @@ describe('capturePage, on a page whose images sit below the fold', () => {
       launch: watchingScroll(seen),
     });
 
-    // Both halves of what an animated scroll costs. The page is back exactly
-    // where it started, rather than wherever the restore's animation had
-    // reached when the pass stopped waiting on it; and the image five thousand
-    // pixels down was reached at all, rather than crept towards a fraction of
-    // a screen at a time by steps that each re-aimed from a moving position.
+    // The position is what this pins. The page is back exactly where it
+    // started, rather than wherever the restore's animation had reached when
+    // the pass stopped waiting on it — measured against the two-argument
+    // `scrollTo`, that is 2003.
     expect(seen).toEqual([1000]);
+    // The bytes are a sanity check and not a second detector, which is worth
+    // being plain about. An animated descent does creep, a fraction of a
+    // screen per step because each step re-aims from a position still in
+    // motion, but over five thousand pixels it still reaches the bottom inside
+    // the step cap and the image still loads. A page tall enough to exhaust
+    // the cap would catch it — and how tall that is depends on the speed of
+    // Chromium's easing rather than on anything here, so the number would stop
+    // being true the day that changed, quietly, which is the kind of claim
+    // this suite is trying not to make.
     expect(capture.runs[0]?.images[0]?.transferBytes).toBeGreaterThan(0);
   }, 60_000);
 

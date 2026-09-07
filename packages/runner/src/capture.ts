@@ -52,9 +52,17 @@ export type CaptureOptions = {
    * page that never settles must not hold a run open indefinitely, and what
    * counts as too long is a property of the page and the network rather than
    * of this code — a slow origin needs more than the default and a local
-   * fixture needs a fraction of it. The tests are the second reason: a run
-   * that is meant to give up should cost the suite a couple of seconds rather
-   * than the full default.
+   * fixture needs far less. The tests are the second reason: a run that is
+   * meant to give up should cost the suite a couple of seconds rather than the
+   * full default.
+   *
+   * There is a floor, and `settle.ts` refuses anything under it rather than
+   * running: the bound has to be longer than the quiet window a page is
+   * measured against, because a bound no longer than that window leaves no
+   * time in which the window could ever complete. It is a floor against a
+   * caller asking for a run that cannot succeed, not a performance figure —
+   * anything in the seconds is well clear of it, and the suite's shortest is
+   * two of them.
    *
    * It bounds the wait and not the scroll pass that comes before it, and the
    * two are worth adding up. The scroll pass carries its own bound —

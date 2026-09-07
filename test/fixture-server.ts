@@ -50,9 +50,9 @@ const shell = (title: string, body: string): string =>
    * the images load without being scrolled to, and every test on these pages
    * would pass whether or not the run scrolls at all.
    *
-   * Emulation is what this does not cover: the thresholds go to 4000px on 3G
-   * and 8000px on 2G and offline, and a test that emulated one of those would
-   * need a taller spacer than this to mean anything.
+   * Emulation is what this does not cover: the thresholds go to 4000px on 3G,
+   * 6000px on 2G and 8000px on slow-2G and offline, and a test that emulated
+   * one of those would need a taller spacer than this to mean anything.
    */
   .spacer { height: 5000px }
   /* Two elements a browser paints a file onto with no way to choose it. */
@@ -360,9 +360,15 @@ const PAGES: Record<string, string> = {
   // `scroll-behavior: smooth` is an ordinary line to write, and it is what the
   // two-argument `window.scrollTo(x, y)` obeys — so a run that scrolls that
   // way steps a fraction of a screen at a time and leaves the page wherever
-  // the last animation had reached. Both are visible here: the image is far
-  // enough down that a crippled step never brings it into view, and the
-  // starting position is one a run has to land back on exactly.
+  // the last animation had reached.
+  //
+  // The second of those is what this page is shaped to catch, and the starting
+  // position is how: a run has to land back on it exactly, and an animated
+  // restore is still in flight when the pass stops waiting on it. The image is
+  // here so that the page is one a run genuinely scrolled through rather than
+  // a bare scroll position, and not as a second detector — over five thousand
+  // pixels an animated descent still reaches the bottom inside the step cap,
+  // slowly. `capture.test.ts` says why no height fixes that honestly.
   //
   // The property is set from script rather than written in the stylesheet, and
   // set after the initial jump rather than before it, so that the one scroll

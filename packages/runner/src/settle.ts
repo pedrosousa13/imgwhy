@@ -18,14 +18,25 @@
  *
  * ## What this cannot do
  *
- * **Read a page that holds a connection open.** A server-sent-events stream, a
+ * **Read a page whose network never goes quiet.** Two shapes reach that, and
+ * both fail the whole capture, one profile at a time.
+ *
+ * A page can hold one request open forever: a server-sent-events stream, a
  * hanging poll and a streaming video request all stay outstanding for as long
- * as the page lives: nothing ever reports them finished or failed, so the wait
- * below reaches its bound and the whole capture fails, one profile at a time.
- * That is a page this tool used to capture — badly, reporting every lazy image
- * as absent, but it produced a Capture — and now does not capture at all.
- * Telling those apart needs a request's type, which is a different reading
- * from the one this file takes; failing loudly is the interim answer.
+ * as the page lives, because nothing ever reports them finished or failed.
+ *
+ * Or it can keep starting new ones. A page fetching media segments, polling on
+ * a short timer, or firing a beacon loop never leaves a gap as wide as
+ * `QUIET_WINDOW` between one request and the next, so the wait never gets the
+ * stretch it needs however long it is given — and where it gives up mid-gap,
+ * with nothing outstanding at that instant, it has still observed nothing that
+ * says the page finished.
+ *
+ * Both are pages this tool used to capture — badly, reporting every lazy image
+ * as absent, but they produced a Capture — and now does not capture at all.
+ * Telling a stream apart from a page still loading needs a request's type,
+ * which is a different reading from the one this file takes; failing loudly is
+ * the interim answer.
  *
  * **Reach anything above where the page started.** The pass descends and
  * returns, so a page that loads at a non-zero position — a fragment target, or
@@ -141,14 +152,31 @@ export async function scrollThroughPage(): Promise<void> {
  *
  * `timeout` bounds confirming that the page settled, which is not the same as
  * bounding the page. Reaching it with nothing outstanding is its own failure
- * and reads as one: the network did go quiet, too late for anything here to
- * watch it stay quiet, and a reading taken there is the reading this whole
- * file exists to refuse.
+ * and reads as one — but the message stops at what was observed. What this end
+ * knows there is that the list read empty every time it looked since the last
+ * request it saw, and that the run of empty readings was short of a whole
+ * window. It does not know the page finished: a page starting a new short
+ * request every hundred milliseconds is empty between any two of them, and a
+ * bound that expires in one of those gaps has watched a gap, not an ending.
+ *
+ * Which is why a `timeout` at or below `QUIET_WINDOW` is refused outright
+ * rather than run. No page can satisfy one — the loop cannot accumulate a
+ * window of quiet inside a bound no longer than the window — so every run
+ * under it would fail, and the sentence it failed with would be about the page
+ * when the fault was in the bound. The refusal is here, where `QUIET_WINDOW`
+ * is, so there is one statement of the rule rather than two that can drift.
  */
 export async function waitForQuietNetwork(
   pending: () => string[],
   timeout: number,
 ): Promise<void> {
+  if (timeout <= QUIET_WINDOW) {
+    throw new Error(
+      `A settle bound of ${timeout}ms is no longer than the ${QUIET_WINDOW}ms of quiet that ` +
+        `says a page has finished loading, so no page could ever satisfy it.`,
+    );
+  }
+
   const giveUpAt = Date.now() + timeout;
   let quietSince: number | null = null;
 
@@ -164,8 +192,9 @@ export async function waitForQuietNetwork(
     if (Date.now() >= giveUpAt) {
       throw new Error(
         outstanding.length === 0
-          ? `The page stopped loading too late in its ${timeout}ms to be read: nothing here ` +
-            `saw it stay quiet for the ${QUIET_WINDOW}ms that says it is done.`
+          ? `Nothing was outstanding when the ${timeout}ms bound expired, but the page had ` +
+            `not been quiet for the ${QUIET_WINDOW}ms that says it has finished — so this ` +
+            `is as likely a gap between two of its requests as an ending.`
           : `The page was still loading after ${timeout}ms, so nothing here can say what it ` +
             `weighs. Still waiting on: ${outstanding.join(', ')}`,
       );

@@ -38,6 +38,20 @@ describe('waitForQuietNetwork', () => {
     );
   });
 
+  it('refuses a bound no page could satisfy, rather than running one out', async () => {
+    // A bound no longer than the quiet window leaves no time in which the
+    // window could complete, so every page fails it. Blaming the page for that
+    // would be blaming the wrong end, and it would say so once per profile.
+    const log = (): string[] => {
+      throw new Error('a bound this short should be refused before anything is asked');
+    };
+
+    await expect(waitForQuietNetwork(log, 250)).rejects.toThrow(/no page could ever satisfy/);
+    await expect(waitForQuietNetwork(log, 100)).rejects.toThrow(/no page could ever satisfy/);
+    // And it is a floor, not a range: a bound above the window is run.
+    await expect(waitForQuietNetwork(() => [], 300)).resolves.toBeUndefined();
+  });
+
   it('refuses a quiet stretch it ran out of time to finish watching', async () => {
     // The last request clears with less than a quiet window left, so nothing
     // here ever watched the network stay quiet. Returning at the bound would
@@ -45,9 +59,13 @@ describe('waitForQuietNetwork', () => {
     // out — and it would do it silently, on any bound, not only a short one.
     const failing = waitForQuietNetwork(clearing([A], 200), 300);
 
-    await expect(failing).rejects.toThrow(/stay quiet/);
-    // And it says which failure it was: there is nothing outstanding to name,
-    // so a message naming URLs would be naming none.
+    // And it claims only what it saw. An empty list at the bound is as much a
+    // gap between two of a page's requests as it is an ending — this log is
+    // one that did end, and nothing here can tell the difference, so the
+    // message does not pretend to.
+    await expect(failing).rejects.toThrow(/as likely a gap between two of its requests/);
+    // There is nothing outstanding to name, so a message naming URLs would be
+    // naming none.
     await expect(failing).rejects.not.toThrow(/Still waiting on/);
   });
 });
