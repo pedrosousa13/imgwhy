@@ -57,7 +57,7 @@ const isLoading = (value: unknown): value is CapturedImage['loading'] =>
 /**
  * How the reading was taken, which is one method today and is spelled one way.
  *
- * Written as a comparison against the names rather than a check that the value
+ * Written as a comparison against the name rather than a check that the value
  * is a string, so a Capture naming a method this build does not know is
  * refused rather than carried. `Capture.readAs` in core says why the field is
  * a name and not a flag, and what a second name would be.
@@ -299,9 +299,7 @@ function readParsed(file: string, parsed: unknown): LoadedCapture {
   // After the version, because the version is what says the field should be
   // here at all: a Capture written before `readAs` existed carries the earlier
   // schema number and is refused above, so anything reaching this line claims
-  // a shape that names the field. The message quotes the one method rather
-  // than the value it found, which is `readParsed`'s rule about what a message
-  // may carry — and the method is this module's own word, not the file's.
+  // a shape that names the field.
   if (!isReadAs(parsed['readAs'])) return fail(': readAs must be "scrolled"');
 
   const devices = parsed['devices'];

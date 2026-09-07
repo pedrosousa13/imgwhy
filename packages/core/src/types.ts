@@ -160,6 +160,12 @@ export type Capture = {
    * depends on how each page implements laziness and cannot reach the
    * browser's own.
    *
+   * Whoever adds that second name has to add it to `isReadAs` in
+   * `packages/cli/src/in.ts` by hand. Widening this union leaves that predicate
+   * compiling — a declared type wider than what the comparison accepts is not
+   * an error — and the reader would refuse every Capture written under the new
+   * method.
+   *
    * A Capture written before this field carries no `readAs`, and nothing here
    * tells such a file apart from one whose field went missing. `CAPTURE_SCHEMA`
    * above is what does: a required field is a shape change, so the number went

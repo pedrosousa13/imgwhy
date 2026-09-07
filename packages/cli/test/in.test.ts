@@ -109,9 +109,8 @@ const carrying = (text: string): string => `${text}${CONTROLS}`;
 const HOSTILE: Capture = {
   url: carrying('https://example.com/../../etc/passwd'),
   capturedAt: carrying('2026-01-01T00:00:00.000Z'),
-  // Spelled the one way it may be, for the reason the schema below is: a
-  // reader keys on it, so a file carrying anything else is refused before
-  // anything else in it is examined. Neither is a string off a page.
+  // Spelled the one way it may be, like the schema below: a reader keys on
+  // both, and neither is a string off a page for a hostile file to choose.
   readAs: 'scrolled',
   // The schema is the one number in a Capture a reader keys on, so a hostile
   // file has to carry the one this build reads or it is refused before
@@ -378,8 +377,13 @@ describe('readCapture', () => {
     // refused as surely as one over it. With the schema at 2 there is a whole
     // number below it for the first time, so the lower direction now reaches
     // the same message the upper one does rather than being answered by the
-    // range check. A Capture carrying 1 is one written before `readAs`, and
-    // this is the refusal that stops a reader answering out of it.
+    // range check.
+    //
+    // The fixture is this build's own Capture with the number moved down, and
+    // not the file that number really names: a Capture written before `readAs`
+    // would carry no such field either. Both produce this message, because the
+    // schema is read before the fields it describes — and the number is the
+    // whole of what this test is about.
     expect(refusing(holding('version.schema', CAPTURE_SCHEMA - 1))).toBe(
       `${file}: version.schema is ${CAPTURE_SCHEMA - 1}, and this build of imgwhy reads ` +
         `${CAPTURE_SCHEMA}`,

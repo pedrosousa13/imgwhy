@@ -28,6 +28,9 @@ const run: DeviceRun = { deviceId: 'desktop', images: [hero], backgroundImageCou
 const capture: Capture = {
   url: 'https://example.com',
   capturedAt: '2026-09-03T00:00:00.000Z',
+  // `capturedAt` is when, `readAs` is how. The one method there is names
+  // itself rather than reading as a flag, so a later reading taken some other
+  // way is a second name here and not a second boolean.
   readAs: 'scrolled',
   version: { schema: CAPTURE_SCHEMA, producedBy: '0.0.0' },
   devices: [desktop],
@@ -56,13 +59,6 @@ describe('the Capture seam', () => {
     expect(capture.version.schema).toBe(CAPTURE_SCHEMA);
     expect(CAPTURE_SCHEMA).toBe(2);
     expect(typeof capture.version.producedBy).toBe('string');
-  });
-
-  it('says how the reading was taken, beside when it was taken', () => {
-    // `capturedAt` is when, `readAs` is how. The one method there is names
-    // itself rather than reading as a flag, so a later reading that is taken
-    // some other way is a second name here and not a second boolean.
-    expect(capture.readAs).toBe('scrolled');
   });
 
   it('allows a missing transfer size and a missing loading attribute', () => {
