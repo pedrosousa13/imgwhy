@@ -3,14 +3,17 @@ import { readFileSync } from 'node:fs';
 /**
  * Which release of imgwhy is running, read off the manifest npm installed.
  *
- * One module for it because two things need the same string and a second copy
- * is a second thing to forget: a Capture records it as `version.producedBy`,
- * so a diff can say it crossed a release boundary, and it is what `--version`
- * will print.
+ * What reads it today is `run.ts`, which hands it to the runner: a Capture
+ * records the string as `version.producedBy`, so a diff can say it crossed a
+ * release boundary. A module rather than a literal in `run.ts` because #73's
+ * `--version` needs the same string, and a second copy of it is a second thing
+ * to forget.
  *
- * `imgwhy`'s own `package.json` and not the workspace root's. This package is
- * the thing a user installs, so its `version` field is the number they have,
- * and the root manifest is private and stays at `0.0.0`.
+ * `imgwhy`'s own `package.json` and not the workspace root's. `imgwhy` is the
+ * package that gets published, so its `version` field is the number a release
+ * would bump; the root manifest is private and is never published. No release
+ * has been cut yet, so what a Capture records today is `0.0.0` — and a diff
+ * can only say two Captures crossed a boundary once that number moves.
  *
  * The URL resolves against this module rather than against the working
  * directory, so it names the package root from `src/` and from the emitted
