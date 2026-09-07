@@ -5,8 +5,19 @@ import { messageOf } from './message.js';
 import { serializeCapture, writeCapture, writeReport } from './out.js';
 import { formatCapture } from './trace.js';
 import { parsePageUrl } from './url.js';
+import { VERSION } from './version.js';
 
-export type CaptureFn = (options: { url: string; profiles: DeviceProfile[] }) => Promise<Capture>;
+export type CaptureFn = (options: {
+  url: string;
+  profiles: DeviceProfile[];
+  /**
+   * The release the Capture records as its own. `version.ts` reads it and this
+   * is the handover; the runner requires it of a caller rather than deriving
+   * it, and `CaptureOptions.producedBy` in `packages/runner/src/capture.ts`
+   * says why.
+   */
+  producedBy: string;
+}) => Promise<Capture>;
 
 /** What the command writes and the status it leaves behind. */
 export type Outcome = { code: number; stdout: string; stderr: string };
@@ -86,7 +97,11 @@ export async function run(
 
   let captured: Capture;
   try {
-    captured = await capture({ url: target.url, profiles: rendering.profiles });
+    captured = await capture({
+      url: target.url,
+      profiles: rendering.profiles,
+      producedBy: VERSION,
+    });
   } catch (error) {
     return fail(messageOf(error));
   }

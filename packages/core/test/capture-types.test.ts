@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Capture, CapturedImage, DeviceProfile, DeviceRun } from '../src/index.js';
-import { parseSrcset, resolveSizes, selectCandidate } from '../src/index.js';
+import { CAPTURE_SCHEMA, parseSrcset, resolveSizes, selectCandidate } from '../src/index.js';
 
 const desktop: DeviceProfile = {
   id: 'desktop',
@@ -28,6 +28,7 @@ const run: DeviceRun = { deviceId: 'desktop', images: [hero], backgroundImageCou
 const capture: Capture = {
   url: 'https://example.com',
   capturedAt: '2026-09-03T00:00:00.000Z',
+  version: { schema: CAPTURE_SCHEMA, producedBy: '0.0.0' },
   devices: [desktop],
   runs: [run],
 };
@@ -44,6 +45,16 @@ describe('the Capture seam', () => {
 
     expect(resolution.kind).toBe('length');
     expect(selectCandidate(image.candidates, 1440, device.dpr)?.raw).toBe('1080w');
+  });
+
+  it('says what shape it is and which release wrote it, on two separate numbers', () => {
+    // The schema is the shape, so it is the constant these types describe. The
+    // release is a string a writer supplies, because core cannot know it: a
+    // change to the arithmetic here alters the numbers a Capture carries
+    // without altering one field of it.
+    expect(capture.version.schema).toBe(CAPTURE_SCHEMA);
+    expect(CAPTURE_SCHEMA).toBe(1);
+    expect(typeof capture.version.producedBy).toBe('string');
   });
 
   it('allows a missing transfer size and a missing loading attribute', () => {

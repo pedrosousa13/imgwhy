@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Capture } from '@imgwhy/core';
+import { CAPTURE_SCHEMA } from '@imgwhy/core';
 import ts from 'typescript';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { parse, read, reaches } from '../../../test/source.js';
@@ -20,6 +21,7 @@ import { writeCapture } from '../src/out.js';
 const CAPTURE: Capture = {
   url: 'https://example.com/',
   capturedAt: '2026-01-01T00:00:00.000Z',
+  version: { schema: CAPTURE_SCHEMA, producedBy: '0.4.1' },
   devices: [
     { id: 'iphone-se', name: 'iPhone SE', viewport: { width: 375, height: 667 }, dpr: 2 },
     { id: 'desktop', name: 'Desktop', viewport: { width: 1440, height: 900 }, dpr: 1 },
@@ -106,6 +108,11 @@ const carrying = (text: string): string => `${text}${CONTROLS}`;
 const HOSTILE: Capture = {
   url: carrying('https://example.com/../../etc/passwd'),
   capturedAt: carrying('2026-01-01T00:00:00.000Z'),
+  // The schema is the one number in a Capture a reader keys on, so a hostile
+  // file has to carry the one this build reads or it is refused before
+  // anything else in it is examined. `producedBy` is a string like every
+  // other, and this is the one a diff prints.
+  version: { schema: CAPTURE_SCHEMA, producedBy: carrying('0.4.1') },
   devices: [
     {
       id: carrying('../../../etc'),
@@ -197,6 +204,17 @@ const missing = (where: string): unknown =>
 const FIELDS: [where: string, refused: unknown[], said: string][] = [
   ['url', [42, '', null], ': url must be a non-empty string'],
   ['capturedAt', [42, ''], ': capturedAt must be a non-empty string'],
+  [
+    'version',
+    [42, '1', null, []],
+    ' carries no version, so this tool cannot tell what shape it is',
+  ],
+  [
+    'version.schema',
+    [0, -1, 1.5, '1', null],
+    ': version.schema must be a whole number above 0',
+  ],
+  ['version.producedBy', [42, '', null], ': version.producedBy must be a non-empty string'],
   ['devices', [{}, [], 'iphone-se'], ' must carry a "devices" array holding at least one profile'],
   ['runs', [{}, 'iphone-se'], ' must carry a "runs" array'],
   ['devices.0', [5, 'iphone-se', []], ': devices[0] must be an object describing one device'],
@@ -336,6 +354,36 @@ describe('readCapture', () => {
     }
   }
 
+  it('refuses a shape it does not read yet, and names both numbers', () => {
+    // A Capture written by a later imgwhy. Nothing here can know what moved,
+    // so the message says which number the file carries and which this build
+    // reads, and leaves the reader to install the one that wrote it.
+    expect(refusing(holding('version.schema', CAPTURE_SCHEMA + 1))).toBe(
+      `${file}: version.schema is ${CAPTURE_SCHEMA + 1}, and this build of imgwhy reads ` +
+        `${CAPTURE_SCHEMA}`,
+    );
+  });
+
+  it('refuses a shape below the one it reads, which is the same check downward', () => {
+    // The comparison is an inequality, so a number under this build's is
+    // refused as surely as one over it. With the schema at 1 the only numbers
+    // below it are 0 and the negatives, which the range check answers first —
+    // so this is the message the lower direction produces today, and the one
+    // above is what a 1 will produce once the schema is 2.
+    expect(refusing(holding('version.schema', CAPTURE_SCHEMA - 1))).toBe(
+      `${file}: version.schema must be a whole number above 0`,
+    );
+  });
+
+  it('refuses a Capture written before there was a version, rather than reading it', () => {
+    // Every Capture written before this field existed is this file. It parses,
+    // every other field of it checks out, and nothing in it says what shape it
+    // is — so the reader stops rather than answer from a shape it guessed.
+    expect(refusing(missing('version'))).toBe(
+      `${file} carries no version, so this tool cannot tell what shape it is`,
+    );
+  });
+
   it('refuses a run naming a device the Capture does not describe', () => {
     expect(refusing(holding('runs.0.deviceId', 'kiosk'))).toBe(
       `${file}: runs[0].deviceId names a device the capture does not describe`,
@@ -465,7 +513,12 @@ describe('the reader as a route to the filesystem', () => {
     // `say.js` is here because the JSON parser's message carries the file's
     // own first bytes, and that module holds the escaping. It reads nothing
     // and opens nothing: it takes a string and returns one.
-    expect(reaches(source).specifiers).toEqual([
+    //
+    // Deduplicated, the way `compare.test.ts` reads the same property: core is
+    // named twice, once for the types and once for the schema number, and what
+    // is being checked is which modules are reachable rather than how many
+    // statements reach them.
+    expect([...new Set(reaches(source).specifiers)]).toEqual([
       'node:fs',
       '@imgwhy/core',
       './message.js',

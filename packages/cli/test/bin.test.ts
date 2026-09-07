@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import type { Capture } from '@imgwhy/core';
+import { CAPTURE_SCHEMA } from '@imgwhy/core';
 import { DEFAULT_PROFILES } from '@imgwhy/runner';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { refuseStaleBuild } from '../../../test/built.js';
@@ -381,6 +382,18 @@ describe('the imgwhy command, asked for the capture itself', () => {
     expect(capture.devices.map((device) => device.id)).toEqual(DEFAULT_PROFILES.map((d) => d.id));
     expect(capture.runs.map((deviceRun) => deviceRun.images.length)).toEqual([3, 3, 3, 3, 3]);
     expect(new Date(capture.capturedAt).toISOString()).toBe(capture.capturedAt);
+    // What took it, off the command as a user runs it: the shape core names,
+    // and the release out of the manifest npm installs. This is the whole
+    // route the version travels — `version.ts` reads it, `run.ts` hands it to
+    // the runner, and the runner writes it — so a break anywhere along it
+    // shows here.
+    const manifest = JSON.parse(
+      readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
+    ) as { version: string };
+    expect(capture.version).toEqual({
+      schema: CAPTURE_SCHEMA,
+      producedBy: manifest.version,
+    });
     // The load event waits for an eager image, so every render finished with
     // the hero and the badge in hand and carries the real size of each
     // response — two images across five devices. The logo is `loading=lazy`

@@ -39,15 +39,22 @@ const PARTS: readonly Part[] = [...SRCSET, ...SELECT, ...SIZES, ...EXPLAIN];
  *
  * A helper added to a module and left out of its list is the failure to watch
  * for, and it would show as a `ReferenceError` in someone's browser rather
- * than here. Two checks in `source.test.ts` stand between it and a reader,
- * and neither covers the other's ground:
+ * than here. Three checks in `source.test.ts` stand between it and a reader,
+ * and none covers another's ground:
  *
  * - It reads every top-level binding every core module declares — whatever
  *   keyword or shape it was written with — and refuses any name the string
- *   below does not declare. That is the whole of the module's own top level,
- *   so the rule it enforces is that a core module may declare nothing up there
- *   but functions and its own `PARTS`: a constant cannot be in a list of
- *   functions, and the check fails until it is inlined or made one.
+ *   below does not declare. Two names are left out of that comparison:
+ *   `PARTS`, which is how the shipping happens rather than a thing shipped,
+ *   and `CAPTURE_SCHEMA`, the shape number of a file on disk. So the rule it
+ *   enforces is that a core module's top level may hold functions, its own
+ *   `PARTS`, and a constant no shipped function reads.
+ * - It reads the string below for both exempted names, and every core module's
+ *   imports for either under any alias. That is what holds the last clause of
+ *   the rule to its word: a constant is allowed up there because nothing ships
+ *   it, and these fail if anything shipped names it — directly, or aliased,
+ *   which an import binds without declaring and the comparison above cannot
+ *   see.
  * - It runs the whole of this in a context with no globals and compares every
  *   branch against the imported functions. That is the only instrument for a
  *   name no core module declares at all — something reached through a global

@@ -118,13 +118,27 @@ const CASES: [string, CapturedImage, DeviceProfile][] = [
 ];
 
 /**
- * The one name a core module declares that does not ship: the list itself.
+ * The two names a core module declares that do not ship.
  *
- * `source.ts` reads every module's `PARTS` to build the string, so the list is
- * how the shipping happens rather than a thing that is shipped. A page handed
- * one would hold an array naming modules it does not have.
+ * `PARTS` is the list itself: `source.ts` reads every module's to build the
+ * string, so the list is how the shipping happens rather than a thing that is
+ * shipped. A page handed one would hold an array naming modules it does not
+ * have.
+ *
+ * `CAPTURE_SCHEMA` is the shape number of a file on disk. What ships is the
+ * selection algorithm, and a report ships it to re-run the arithmetic over a
+ * Capture some reader has already accepted — so nothing shipped has a version
+ * to check, and `packages/cli/src/in.ts` is where the number is read.
+ *
+ * Both are exempted by name, which is a hole in the completeness check above
+ * and the reason for the two checks that stand beside it: a shipped function
+ * reaching for either would be a `ReferenceError` in a page, so the shipped
+ * string is read for both names rather than only for what it declares, and
+ * every core module's imports are read for either arriving under an alias —
+ * which the string would carry as the alias and the comparison cannot see at
+ * all, because an import binds a name without declaring one.
  */
-const NOT_SHIPPED = 'PARTS';
+const NOT_SHIPPED = new Set(['PARTS', 'CAPTURE_SCHEMA']);
 
 /**
  * Every value one core module binds at its top level, by name.
@@ -137,11 +151,12 @@ const NOT_SHIPPED = 'PARTS';
  * page would not have.
  *
  * So the question asked is "what does this module's top level bind", and the
- * answer is checked against what ships. A non-function up there cannot go into
- * a `readonly Part[]`, so the check fails and stays failed until the value is
- * inlined or made a function. That is the intended outcome: `PARTS` ships
- * functions, and a core module that needs a top-level constant needs a
- * different shape.
+ * answer is checked against what ships — save for the two names `NOT_SHIPPED`
+ * holds, which are filtered out here. A constant up there is allowed on one
+ * condition, then: it cannot go into a `readonly Part[]`, so nothing ships it,
+ * so no shipped function may read it. That condition is what the two checks
+ * beside the comparison enforce — the shipped string is read for both exempted
+ * names, and every core module's imports are read for either under any alias.
  *
  * The walk descends through blocks and control flow, because `var` and a
  * function declaration inside one are still module scope, and stops at every
@@ -175,11 +190,11 @@ function declaredIn(text: string): string[] {
   };
 
   walk(parse(text));
-  return names.filter((name) => name !== NOT_SHIPPED);
+  return names.filter((name) => !NOT_SHIPPED.has(name));
 }
 
 /**
- * Every name core binds at the top level of a module, by name.
+ * Every core module the two readings below are run over.
  *
  * `sources` recurses, so a helper written into `src/<subdir>/` is read too. A
  * flat listing was what this had before, and it would have let a whole
@@ -188,12 +203,67 @@ function declaredIn(text: string): string[] {
  * `source.ts` is left out, and it is the only file that is: it assembles the
  * shipped copy rather than being part of one. A page has nothing to do with a
  * function that hands out source, and shipping it would put a `PARTS` list in
- * a page with no modules for it to name.
+ * a page with no modules for it to name. The import reading needs the same
+ * exemption for the same reason — `source.ts` imports every module's `PARTS`,
+ * aliased, because collecting them is what it is for.
  */
+const coreModules = (): string[] =>
+  sources(src).filter((file) => basename(file) !== 'source.ts');
+
+/** Every name core binds at the top level of a module, by name. */
 const declaredInCore = (): string[] =>
-  sources(src)
-    .filter((file) => basename(file) !== 'source.ts')
-    .flatMap((file) => declaredIn(read(file)));
+  coreModules().flatMap((file) => declaredIn(read(file)));
+
+/**
+ * Every import of a name that does not ship, one line per specifier.
+ *
+ * The imported name and the local one are both read, because either resolving
+ * to nothing in a page is the same failure: `import { CAPTURE_SCHEMA as SHAPE }`
+ * puts `SHAPE` into a shipped function, and `import { schema as PARTS }` would
+ * put a name the shipped string does declare over one it means something else
+ * by.
+ *
+ * No exception for `import type`. Such an import erases rather than throwing,
+ * so it is the one shape of this that a page would survive — but neither
+ * exempted name is a type, and a core module naming either in an import is a
+ * mistake whichever keyword it was written with.
+ */
+function importsNotShipped(text: string): string[] {
+  const found: string[] = [];
+
+  const check = (imported: string, local: string): void => {
+    if (!NOT_SHIPPED.has(imported) && !NOT_SHIPPED.has(local)) return;
+    found.push(imported === local ? imported : `${imported} as ${local}`);
+  };
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) && node.importClause) {
+      const clause = node.importClause;
+      // `import CAPTURE_SCHEMA from …`, which binds a default under a name.
+      if (clause.name) check(clause.name.text, clause.name.text);
+      if (clause.namedBindings) {
+        if (ts.isNamespaceImport(clause.namedBindings)) {
+          // `import * as PARTS from …`, one binding and no imported name.
+          check(clause.namedBindings.name.text, clause.namedBindings.name.text);
+        } else {
+          for (const element of clause.namedBindings.elements) {
+            check((element.propertyName ?? element.name).text, element.name.text);
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(parse(text));
+  return found;
+}
+
+/** Every such import core holds, named by the module that wrote it. */
+const importsNotShippedInCore = (): string[] =>
+  coreModules().flatMap((file) =>
+    importsNotShipped(read(file)).map((line) => `${basename(file)} imports ${line}`),
+  );
 
 /** Every name the shipped source declares. */
 const declaredBy = (source: string): string[] =>
@@ -206,6 +276,25 @@ describe('core, shipped as source', () => {
     // A helper reached only through one branch would otherwise go missing, and
     // the branch that needed it would throw in the page rather than here.
     expect(declaredBy(source).sort()).toEqual(declaredInCore().sort());
+  });
+
+  it('names neither unshipped binding, so no shipped function reaches for one', () => {
+    // The check above compares what the string declares against what core
+    // binds, and both of these are filtered out of that comparison. A mention
+    // is the failure it cannot see: the name would resolve to nothing in a
+    // page, and the function holding it would throw where a reader opened the
+    // report.
+    for (const name of NOT_SHIPPED) expect(source).not.toContain(name);
+  });
+
+  it('imports neither unshipped binding, under its own name or any alias', () => {
+    // The check above reads the shipped string for both names, which catches a
+    // use inside the module that declares one — no import would show that. What
+    // it cannot catch is an alias: `import { CAPTURE_SCHEMA as SHAPE }` puts
+    // `SHAPE` in the shipped text and leaves the exempted name out of it, and
+    // the completeness check sees no import binding at all. So the imports are
+    // read too, and either name arriving under any local name is a finding.
+    expect(importsNotShippedInCore()).toEqual([]);
   });
 
   it('runs in a context with no globals at all, the way it runs in a page', () => {
@@ -260,6 +349,41 @@ describe('the shipped source, given a helper left out of it', () => {
 });
 
 /**
+ * The import reading, given a module that reaches an exempted name under
+ * another one.
+ *
+ * Held here for the reason the control above is: the failure an alias should
+ * cause is a passing test rather than a note in a commit message.
+ *
+ * An alias is the one shape neither other check can see. `declaredIn` reads
+ * bindings a module declares and an import binds without declaring, and the
+ * shipped string carries the local name rather than the imported one — so
+ * `expect(source).not.toContain('CAPTURE_SCHEMA')` passes while a shipped
+ * function reaches for `SHAPE`, which a page does not have either.
+ */
+describe('a core module, given an exempted name imported under another', () => {
+  it('reports an alias, which neither other check can see', () => {
+    expect(importsNotShipped("import { CAPTURE_SCHEMA as SHAPE } from './types.js';")).toEqual([
+      'CAPTURE_SCHEMA as SHAPE',
+    ]);
+  });
+
+  it('reports one imported under its own name', () => {
+    expect(importsNotShipped("import { PARTS } from './srcset.js';")).toEqual(['PARTS']);
+  });
+
+  it('reports a type-only import too, because neither name belongs in one', () => {
+    expect(importsNotShipped("import type { CAPTURE_SCHEMA } from './types.js';")).toEqual([
+      'CAPTURE_SCHEMA',
+    ]);
+  });
+
+  it('passes over an import no exemption names', () => {
+    expect(importsNotShipped("import { selectCandidate } from './select.js';")).toEqual([]);
+  });
+});
+
+/**
  * The reading of a module's top level, against the shapes a helper arrives in.
  *
  * Every source below binds a name a shipped function could reach for, and the
@@ -268,10 +392,11 @@ describe('the shipped source, given a helper left out of it', () => {
  * call, a value that is not callable, and a `var` inside a block all passed
  * the completeness check and would have thrown in a reader's browser.
  *
- * The last two are the boundary on the other side: what a helper *inside* a
+ * The rest are the boundary on the other side: what a helper *inside* a
  * function is, which is part of that function's own text and no business of a
- * list, and `PARTS`, which is how the shipping happens rather than a thing
- * that ships.
+ * list, and the two exempted names — `PARTS`, which is how the shipping
+ * happens rather than a thing that ships, and `CAPTURE_SCHEMA`, which no
+ * shipped function reads.
  */
 describe('what a core module binds at its top level', () => {
   const cases: [string, string, string[]][] = [
@@ -295,6 +420,11 @@ describe('what a core module binds at its top level', () => {
     [
       'PARTS, which is the list rather than a part',
       'const f = () => 1;\nexport const PARTS = [f];',
+      ['f'],
+    ],
+    [
+      'CAPTURE_SCHEMA, the other name no page is handed',
+      'const f = () => 1;\nexport const CAPTURE_SCHEMA = 1;',
       ['f'],
     ],
     ['a type, which binds no value', 'type Length = { px: number };', []],

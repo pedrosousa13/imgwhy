@@ -89,6 +89,8 @@ Two images are the same image when they carry the same id — the DOM path, fall
 
 **Regressed** means one thing: a bigger file for the same device. Every other difference — a device that vanished from the set, an image that stopped loading, a weight nothing recorded — is reported as a named change and not called a regression, so the word keeps meaning something.
 
+A Capture also records what wrote it: the shape the bytes are in, and the release of imgwhy they came from. Where two Captures name two releases the summary says so, above the counts, because a change to imgwhy's own arithmetic moves the figures without moving a field — so a difference across that boundary can be the tool's rather than the page's. `diff` still runs and still reports everything; a version boundary makes a finding weaker, and neither file says which side of it moved. `docs/adr/0002-capture-version-two-fields.md` records why the shape and the release are two fields.
+
 The status is 0 whenever both files read. A regression is a finding, and non-zero is reserved for a run that could not do its job: a file that would not open, or a Capture with a field this tool will not read past. A caller who wants a gate today has one in a line:
 
 ```bash
@@ -96,7 +98,7 @@ The status is 0 whenever both files read. A regression is a finding, and non-zer
 node packages/cli/dist/bin.js diff before.json after.json | grep -Eq '[1-9][0-9]* regressed' && exit 1
 ```
 
-A Capture handed to `diff` is a file somebody may have been sent, so every field of it is checked for its type and its range before anything reads it, and a file that fails a check is a message naming the field rather than a wrong answer. No message quotes what it read: every string in a Capture came off somebody's page.
+A Capture handed to `diff` is a file somebody may have been sent, so every field of it is checked for its type and its range before anything reads it, and a file that fails a check is a message naming the field rather than a wrong answer. No refusal quotes a string it read: every string in a Capture came off somebody's page. A shape this build does not read is refused in either direction, and so is a Capture carrying no version at all — every file written before there was one. Neither is migrated.
 
 ### The URL is trusted input
 
@@ -196,7 +198,7 @@ Each of these is a deliberate exclusion, not an oversight.
 | `@imgwhy/report` | Turn a Capture into one self-contained HTML file. | core |
 | `@imgwhy/extension` | Manifest V3 extension. Explain the page you are looking at. | core |
 
-A Capture is the seam: `runner` writes one, `report` reads one, and neither knows about the other.
+A Capture is the seam: `runner` writes one, `report` reads one, and neither knows about the other. Every one carries the shape number `core` declares beside the type, so a reader can tell what shape it is, and the release of `imgwhy` that wrote it.
 
 `imgwhy.js`, `bg.js`, `manifest.json` and `icons/` at the repo root are the original single-file implementation, kept as the reference the typed packages were ported from. They carry no test suite and are **not** what ships — the extension lives in `packages/extension`.
 

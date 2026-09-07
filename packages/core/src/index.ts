@@ -6,6 +6,7 @@ export type {
   DeviceRun,
   Resolution,
 } from './types.js';
+export { CAPTURE_SCHEMA } from './types.js';
 export type { Selection } from './explain.js';
 export { parseSrcset } from './srcset.js';
 export { allowsAutoSizes, resolveSizes } from './sizes.js';
