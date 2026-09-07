@@ -21,10 +21,10 @@ import type { Reading } from './read.js';
  * to one and not read by the other fails to compile.
  *
  * The other consequence is that this module has no top level worth speaking
- * of: one function declaration, no runtime imports, no constants.
- * `dormant.test.ts` asks for that of every module here, because the worker
- * imports this one and an effect at its top level would run when the worker
- * wakes.
+ * of: one function declaration, the ambient declaration below it, no runtime
+ * imports, no constants. `dormant.test.ts` asks for that of every module here,
+ * because the worker imports this one and an effect at its top level would run
+ * when the worker wakes.
  *
  * Nothing here decides anything either. Every figure the panel shows arrives
  * in `panel`, already worded by `explain.ts`, which asked core. A renderer
@@ -33,6 +33,45 @@ import type { Reading } from './read.js';
  * this function does decide are where a node goes and whether a listener
  * fires, which is the whole of what a renderer is for.
  */
+
+/**
+ * The slot an open panel leaves its teardown in, on the global of the world it
+ * runs in.
+ *
+ * This is the channel the closing click reaches the panel over, and it is a
+ * property rather than an event because an event on the window is not the
+ * extension's to keep. A DOM event is dispatched at a node, and the node is the
+ * page's — every world listening on that window is delivered it, whichever one
+ * fired it. So `__imgwhy_closing__`, which is what this was, was a plain
+ * `Event` with a fixed name that any page could fire: a main-world
+ * `setInterval` on it took the mark down as fast as a pointer could put it up,
+ * pulled the `load` watch off every image a row was waiting on, and put the
+ * queue counter past every answer in flight — leaving a panel on screen, saying
+ * `not loaded` about images the reader could watch arrive behind it. Renaming
+ * the event would only have made it harder to guess. It needed to be
+ * unforgeable, and a name is not.
+ *
+ * A property on the global is the half of an isolated world that a page cannot
+ * reach. The DOM is shared between worlds and that is what an event travels
+ * over; the global object is not shared, so a main-world script reads and
+ * writes its own `window` and can neither see this slot nor plant one.
+ * `background.ts` injects both halves with no `world` named, which is the
+ * extension's own isolated world for that tab — so both arrive in one world,
+ * holding one global, and the authenticity is the world boundary rather than a
+ * secret.
+ *
+ * Declared once, here, and the declaration costs the injected halves nothing: a
+ * type is erased before `tsc` emits anything, so `dist/panel.js` is still one
+ * function and `read.ts` needs no import to have this. The *name* is a
+ * different matter and is written out at every site in both files, for the
+ * reason both files write out `HOST_ID`: an injected function arrives with
+ * nothing of its module around it.
+ */
+declare global {
+  interface Window {
+    __imgwhy_teardown__?: () => void;
+  }
+}
 
 /**
  * Put the panel in the page, with the arithmetic already worked out.
@@ -65,7 +104,7 @@ export function renderPanel(panel: Panel, reading: Reading): 'opened' {
   // with it, and no page element carries one. The exception is the two
   // listeners on the window that keep a mark on its image while the viewport
   // moves: those are not on a node at all, so they are added when a mark goes
-  // up, removed when it comes down, and removed again on `CLOSING` for the
+  // up, removed when it comes down, and removed by `teardown` below for the
   // case where the panel is closed with a mark still showing.
   const root = host.attachShadow({ mode: 'closed' });
 
@@ -785,11 +824,11 @@ export function renderPanel(panel: Panel, reading: Reading): 'opened' {
   };
 
   /**
-   * Take the box away, which is what leaving a row means — and take down every
-   * listener the box needed.
+   * Take the box away, which is what leaving a row means — and take down both
+   * listeners the box needed.
    *
-   * The same function answers the closing click, because the panel being taken
-   * away and the pointer leaving a row want exactly the same thing done.
+   * `teardown` calls it as well, because the panel being taken away and the
+   * pointer leaving a row want exactly the same thing done.
    */
   const unmark = (): void => {
     held = null;
@@ -798,7 +837,6 @@ export function renderPanel(panel: Panel, reading: Reading): 'opened' {
     lost = null;
     window.removeEventListener('scroll', follow);
     window.removeEventListener('resize', follow);
-    window.removeEventListener('__imgwhy_closing__', unmark);
   };
 
   /**
@@ -816,24 +854,20 @@ export function renderPanel(panel: Panel, reading: Reading): 'opened' {
    * browser, so moving from row to row costs nothing and there is nothing to
    * count.
    *
-   * The third is the closing click, which is the one listener here that is not
-   * about geometry: removing the host takes every listener on a node with it
-   * and takes nothing off the window, so `read.ts` fires `__imgwhy_closing__`
-   * before it removes the host and this is what hears it. The name is written
-   * out at both registrations rather than held in a constant, because
-   * `dormant.test.ts` reads the event a listener is registered for and refuses
-   * one it cannot see — a listener for a name computed at run time is a
-   * listener no check can hold to the list of events that fire without a
-   * click. `read.ts` spells the same string, for the reason both files spell
-   * `HOST_ID`: an injected function arrives with nothing of its module around
-   * it.
+   * The third line is neither a listener nor about geometry. Removing the host
+   * takes every listener on a node with it and takes nothing off the window, so
+   * a panel closed with the pointer still on a row would leave those two
+   * holding a shadow tree that is in no document — and `teardown` below is what
+   * the closing click calls to take them off. This is where a mark leaves it,
+   * and the window is touched on this line only because the two above it
+   * already do.
    */
   const mark = (row: Row, named: Element): void => {
     const draw = (): void => place(row, named);
     held = draw;
     window.addEventListener('scroll', follow);
     window.addEventListener('resize', follow);
-    window.addEventListener('__imgwhy_closing__', unmark);
+    window.__imgwhy_teardown__ = teardown;
     draw();
   };
 
@@ -901,14 +935,14 @@ export function renderPanel(panel: Panel, reading: Reading): 'opened' {
    * The way out, which the toolbar button was the only one of.
    *
    * A reader who has read the panel should not have to remember which icon
-   * opened it. The click does what the icon's second click does and in the
-   * same order: the closing event first, so a mark comes down off the page
-   * while its two window listeners are still there to be removed, and then the
-   * host, which takes the panel and every listener inside this root with it.
+   * opened it. The click does what the icon's second click does and in the same
+   * order: `teardown`, then the host. Two steps rather than one because
+   * `teardown` reaches the two window listeners a mark keeps and the watches on
+   * the page's own images, and removing the host reaches neither of those.
    *
-   * `read.ts` fires the same event for the same reason, and the constant is
-   * written out here rather than shared because neither copy can see the other:
-   * both functions arrive in the page as text.
+   * Called rather than read back off the slot, because this half is the panel
+   * and the function is already in scope. `read.ts` is the half that has to go
+   * through the slot.
    */
   const shut = document.createElement('button');
   shut.textContent = 'Close';
@@ -918,7 +952,7 @@ export function renderPanel(panel: Panel, reading: Reading): 'opened' {
     // button's own act is the whole of what the click does.
     event.preventDefault();
     event.stopPropagation();
-    window.dispatchEvent(new Event('__imgwhy_closing__'));
+    teardown();
     host.remove();
   });
   heading.appendChild(shut);
@@ -1311,9 +1345,9 @@ export function renderPanel(panel: Panel, reading: Reading): 'opened' {
    *
    * These are the only listeners this panel puts on a page element, and that
    * makes them the only ones the closing `remove()` cannot take: everything
-   * else hangs off the closed root and goes with it. So the closing event
-   * takes them instead, the way it takes the mark's two window listeners, and
-   * a page whose panel has been shut carries nothing of this extension again.
+   * else hangs off the closed root and goes with it. So `teardown` takes them
+   * instead, the way it takes the mark's two window listeners, and a page whose
+   * panel has been shut carries nothing of this extension again.
    */
   const release = (): void => {
     for (const drop of watching.splice(0)) drop();
@@ -1321,20 +1355,32 @@ export function renderPanel(panel: Panel, reading: Reading): 'opened' {
     // Past every question in flight, so an answer that arrives after this is
     // one nothing acts on.
     queued += 1;
-    window.removeEventListener('__imgwhy_closing__', release);
-    releasing = false;
   };
 
   /**
-   * Whether the closing event is being listened for, which it is only while
-   * there is something on the page to take off it.
+   * Take this panel off the page, which is the whole of what the closing click
+   * asks for.
    *
-   * The window is touched here for the same reason the mark touches it and
-   * under the same condition: only when this panel has put something on a page
-   * element. A page whose images have all loaded gets a panel that is a
-   * function of `document` alone, which is what `panel.test.ts` builds one in.
+   * Both halves at once, because a panel goes as a whole: the box comes down
+   * with the two window listeners that were keeping it on its image, every
+   * watch comes off the images the rows were waiting on, and the slot goes with
+   * them so the world holds no teardown for a panel that is no longer there.
+   *
+   * `mark` and `watch` are what leave it there, and neither does so until this
+   * panel has something on the page to take off. A page whose images have all
+   * loaded and whose rows nobody has pointed at gets a panel that never touches
+   * the window at all, which is what `panel.test.ts` builds one in. Nothing
+   * counts what is out there and nothing needs to: both sites write the same
+   * function, so writing it twice is writing it once.
+   *
+   * A declaration rather than a `const`, because `mark` is written above this
+   * and arms the slot with it.
    */
-  let releasing = false;
+  function teardown(): void {
+    unmark();
+    release();
+    window.__imgwhy_teardown__ = undefined;
+  }
 
   const watch = (): void => {
     const images = [...document.images];
@@ -1361,10 +1407,9 @@ export function renderPanel(panel: Panel, reading: Reading): 'opened' {
         element.removeEventListener('load', loaded);
       });
 
-      if (!releasing) {
-        releasing = true;
-        window.addEventListener('__imgwhy_closing__', release);
-      }
+      // Something of this panel is on a page element now, so the closing click
+      // has a teardown to find.
+      window.__imgwhy_teardown__ = teardown;
     }
   };
 

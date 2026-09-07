@@ -249,7 +249,7 @@ export type Reading = {
  *
  * Null is the closing click. The worker asks core nothing and injects nothing
  * further when it gets one, so a second click costs the page one function
- * call, one event nothing but the panel listens for, and a node removal.
+ * call, the panel's own teardown, and a node removal.
  */
 export function readPage(): Reading | null {
   // Underscored and prefixed, because it lands in the page's id namespace and
@@ -260,24 +260,35 @@ export function readPage(): Reading | null {
   const HOST_ID = '__imgwhy_host__';
 
   /**
-   * What the panel is told before it goes.
+   * The panel, taken down before it is taken away.
    *
-   * The panel keeps a mark on the image a row is about, and a box in viewport
-   * coordinates has to be redrawn when the viewport moves — so while a mark is
-   * up the panel holds a `scroll` and a `resize` listener on the window, and
-   * the window is the one thing in the arrangement that removing the host does
-   * not take with it. A page closed with the pointer still on a row would
-   * otherwise leave a handler holding a shadow tree that is in no document.
+   * Removing the host takes every node the panel made and every listener on
+   * one of them, and there are two things it does not take at all. While a
+   * mark is up the panel holds a `scroll` and a `resize` listener on the
+   * window, because a box in viewport coordinates has to be redrawn when the
+   * viewport moves; and it holds a `load` listener on every page image its rows
+   * found no file for. A panel closed with the pointer still on a row would
+   * otherwise leave a handler holding a shadow tree that is in no document, and
+   * the page would carry a watch for an image nobody is waiting on.
    *
-   * So the closing click says so out loud, and the panel's own handler takes
-   * the listeners down. Declared twice, here and in `panel.ts`, for the same
-   * reason `HOST_ID` is: neither copy can see the other.
+   * So an open panel leaves the function that takes all of that down where this
+   * one can find it, and this calls it first and removes the host second —
+   * the same two steps in the same order as the panel's own `Close` button, so
+   * a panel comes down one way rather than two. `panel.ts` owns the slot and
+   * says why the panel is reached through a property of the world rather than
+   * through an event on the page's own window. The name is written out here as
+   * well as there for the reason both files write out `HOST_ID`: neither copy
+   * can see the other.
+   *
+   * There is nothing in the slot where the panel had nothing on the page, and
+   * nothing where the element carrying this id is the page's own — a page that
+   * plants the host id itself is the price of reading the state off the page,
+   * and `panel.test.ts` lists it among the limits. Both are the same call and
+   * the same nothing, and the host goes either way.
    */
-  const CLOSING = '__imgwhy_closing__';
-
   const open = document.getElementById(HOST_ID);
   if (open !== null) {
-    window.dispatchEvent(new Event(CLOSING));
+    window.__imgwhy_teardown__?.();
     open.remove();
     return null;
   }

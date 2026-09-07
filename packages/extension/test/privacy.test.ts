@@ -18,7 +18,7 @@ const src = fileURLToPath(new URL('../src', import.meta.url));
  * refuses everything not named, so a way out cannot arrive by being
  * forgotten. Adding a name is the deliberate act.
  *
- * Sixteen names is the whole of the outside world this package sees, and they
+ * Seventeen names is the whole of the outside world this package sees, and they
  * group into five things.
  *
  * `chrome` is the two extension calls `dormant.test.ts` allowlists. `document`
@@ -27,18 +27,20 @@ const src = fileURLToPath(new URL('../src', import.meta.url));
  * below refuses those by path rather than trusting `location`'s absence to
  * cover them.
  *
- * `window` and `Event` are the newest two, and they are the panel's mark. A box
- * drawn over an image is written in viewport coordinates, so the panel needs
- * the viewport: `window.scrollTo` to bring an image into view, `window.scrollY`
- * to say where the page already is, and `window.addEventListener` to hear that
- * either has moved. `Event` is an object with a name in it, which is what the
- * closing click's `dispatchEvent` takes so the panel can take those listeners
- * down. Neither can name a destination — a scroll offset is a number and the
- * event name is a string this package wrote — but `window` is the one entry on
- * this list that is a path to every global there is, and that is why the call
- * lists below carry more weight for it than for `document`: `window.fetch(…)`
- * is a call to `fetch` however it is spelled, and `LEAKS` refuses it by name
- * wherever the allowlist has been widened.
+ * `window` is the panel's mark, and the panel's own teardown. A box drawn over
+ * an image is written in viewport coordinates, so the panel needs the viewport:
+ * `window.scrollTo` to bring an image into view, `window.scrollY` to say where
+ * the page already is, and `window.addEventListener` to hear that either has
+ * moved. It is also the global of the isolated world both injected halves land
+ * in, which is where an open panel leaves the one function the closing click
+ * calls — `panel.ts` says why that is a property of the world rather than an
+ * event on the page's window, and `Event` left this list with the event. None
+ * of it can name a destination: a scroll offset is a number and the teardown is
+ * a function this package wrote. But `window` is the one entry on this list
+ * that is a path to every global there is, and that is why the call lists below
+ * carry more weight for it than for `document`: `window.fetch(…)` is a call to
+ * `fetch` however it is spelled, and `LEAKS` refuses it by name wherever the
+ * allowlist has been widened.
  *
  * `innerWidth`, `innerHeight`, `devicePixelRatio`, `matchMedia` and
  * `getComputedStyle` are the browser the page is being looked at in, and they
@@ -63,7 +65,6 @@ const src = fileURLToPath(new URL('../src', import.meta.url));
  */
 const GLOBALS = new Set([
   'Element',
-  'Event',
   'HTMLImageElement',
   'HTMLSourceElement',
   'Math',
@@ -90,7 +91,7 @@ const GLOBALS = new Set([
  * as innocent as it gets — and `caches.open` or `chrome.storage.local.set`
  * would name none either if their objects were ever allowed.
  *
- * Thirty names, and the list is longer than it was because the panel says
+ * Forty names, and the list is longer than it was because the panel says
  * more than it did. It still groups into four things and nothing else.
  *
  * The extension's own work: register, inject, and swallow the one rejection an
@@ -123,17 +124,24 @@ const GLOBALS = new Set([
  * `toUpperCase` capitalises the first letter of a sentence that otherwise
  * follows a dash.
  *
- * `addEventListener`, `removeEventListener`, `scrollTo` and `dispatchEvent`
- * are the pointing half, and they are the four entries that read like a reach
- * into the page. Not one of them is.
+ * `addEventListener`, `removeEventListener`, `scrollTo` and
+ * `__imgwhy_teardown__` are the pointing half, and they are the four entries
+ * that read like a reach into the page. Not one of them is.
  *
  * `addEventListener` is called on nodes the panel made inside its own closed
  * root — `pointing.test.ts` walks the page and finds none — and on the window,
  * where a mark keeps two listeners while it is up so the box can be redrawn
  * where the image now is. `removeEventListener` is what takes those two down:
- * when the mark comes down, and on the closing click, which is the one thing
- * `dispatchEvent` is for. `dormant.test.ts` refuses the event names that would
- * fire without a click.
+ * when the mark comes down, and on the closing click.
+ * `dormant.test.ts` refuses the event names that would fire without a click.
+ *
+ * `__imgwhy_teardown__` is that closing click, and it is the extension calling
+ * itself. `read.ts` reads it off the global of the world both injected halves
+ * run in and calls whatever an open panel left there — a function this package
+ * wrote, in a world a page cannot write to, which is the whole reason it is a
+ * property and not the event it used to be. `panel.ts` owns that argument. The
+ * name appears in `WRITTEN` below as well, because the panel is the half that
+ * puts it there.
  *
  * `scrollTo` is where `scrollIntoView` used to be, and the swap is this
  * slice's whole first fix rather than a detail. `scrollIntoView` reaches a
@@ -147,6 +155,7 @@ const GLOBALS = new Set([
  * a sanctioned change rather than a tolerated one.
  */
 const CALLED = new Set([
+  '__imgwhy_teardown__',
   'add',
   'addEventListener',
   'addListener',
@@ -157,7 +166,6 @@ const CALLED = new Set([
   'closest',
   'createElement',
   'delete',
-  'dispatchEvent',
   'executeScript',
   'filter',
   'getAttribute',
@@ -198,9 +206,10 @@ const CALLED = new Set([
  * assignment, with no name any list of dangerous APIs would hold.
  *
  * It was two names for two slices — the host's id and the words it says — and
- * it is seven now, because the panel draws a thumbnail, holds disclosures, and
- * leads every row with a verdict. Each is written on an element the panel made
- * and nowhere else, and the new ones divide sharply:
+ * it is twelve now, because the panel draws a thumbnail, holds disclosures,
+ * leads every row with a verdict, and leaves the closing click a way to reach
+ * it. Every one but the last is written on an element the panel made and
+ * nowhere else, and the new ones divide sharply:
  *
  * `alt`, `title` and `open` carry text and a boolean. None of them can name a
  * destination in any browser: an `alt` is read aloud, a `title` is a tooltip,
@@ -222,10 +231,22 @@ const CALLED = new Set([
  * is a claim about the assignment rather than about the property, and it is
  * checked as one.
  *
+ * `__imgwhy_teardown__` is the one entry that is not on an element at all. It
+ * is a property of the global of the isolated world the panel runs in, holding
+ * the one function that takes the panel off the page, and it is the only thing
+ * this package leaves anywhere that outlives a statement — which is why it
+ * reads like the storage the design rules out and is not. It keeps no page
+ * data: a function is not a fact about a page, nothing reads a field off it,
+ * and it is gone when the panel is. It is unreachable from a page for the
+ * reason `panel.ts` gives, and unreachable from the extension's next click for
+ * a plainer one — the world goes with the document, so a navigation leaves
+ * nothing behind to be found.
+ *
  * `innerHTML` is still refused, by absence here and by name in
  * `escaping.test.ts`.
  */
 const WRITTEN = new Set([
+  '__imgwhy_teardown__',
   'alt',
   'className',
   'currentSrc',
@@ -478,19 +499,19 @@ describe('the extension, checked against storing or sending anything', () => {
     expect(surfaceOf(modules['read.ts'] ?? '').globals).toContain('matchMedia');
   });
 
-  it('reaches eighteen names outside itself, and no others', () => {
+  it('reaches seventeen names outside itself, and no others', () => {
     const reached = new Set(Object.values(modules).flatMap((text) => surfaceOf(text).globals));
 
     expect([...reached].sort()).toEqual([...GLOBALS].sort());
   });
 
-  it('calls thirty-eight properties, and no others', () => {
+  it('calls forty properties, and no others', () => {
     const calls = new Set(Object.values(modules).flatMap((text) => surfaceOf(text).called));
 
     expect([...calls].sort()).toEqual([...CALLED].sort());
   });
 
-  it('writes eleven properties, and no others', () => {
+  it('writes twelve properties, and no others', () => {
     const writes = new Set(Object.values(modules).flatMap((text) => surfaceOf(text).written));
 
     expect([...writes].sort()).toEqual([...WRITTEN].sort());
