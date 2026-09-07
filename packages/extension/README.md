@@ -105,7 +105,8 @@ rewrite, which leaves the bare specifier in place. Build from the root.
 
 ## Confirming the dormancy by hand
 
-The tests are the real proof, and they run in CI:
+The tests are the real proof, and `.github/workflows/ci.yml` runs every one of
+them on every pull request to `main`:
 
 | Check | Where |
 | --- | --- |
