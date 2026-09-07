@@ -254,7 +254,11 @@ describe('capturePage', () => {
     // instruction reaching Chromium — the document's and each image's, on all
     // five profiles.
     expect(server.requests.length).toBeGreaterThanOrEqual(10);
-    expect(server.requests.every((r) => r.cacheControl === 'no-cache')).toBe(true);
+    // Filtered rather than `every`, which collapses to "expected false to be
+    // true" and names neither the request that went out cacheable nor what it
+    // carried instead. The failure has to say which one, because the answer
+    // decides whether the instruction missed a request the measurement reads.
+    expect(server.requests.filter((r) => r.cacheControl !== 'no-cache')).toEqual([]);
     expect(server.requests.filter((r) => r.path === '/densities.html')).toHaveLength(5);
   }, 60_000);
 
