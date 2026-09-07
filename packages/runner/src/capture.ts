@@ -1,5 +1,5 @@
 import type { Capture, CapturedImage, DeviceProfile, DeviceRun } from '@imgwhy/core';
-import { parseSrcset } from '@imgwhy/core';
+import { CAPTURE_SCHEMA, parseSrcset } from '@imgwhy/core';
 import { type Browser, type CDPSession, type Page, chromium } from 'playwright';
 import { alignImageIds } from './align.js';
 import { type RawImage, collectImages, countBackgroundImages } from './collect.js';
@@ -9,6 +9,17 @@ export type CaptureOptions = {
   url: string;
   /** Rendered in order, one browser context each. */
   profiles: DeviceProfile[];
+  /**
+   * The release of imgwhy the Capture records as having written it.
+   *
+   * Required, and supplied by the caller, because this package is a library
+   * and its own release is not a thing it can read: the version a user has is
+   * the command's, and `packages/cli/src/version.ts` reads it there. Required
+   * rather than defaulted, because every default that could be written here —
+   * an empty string, a `0.0.0`, the word unknown — is a number that would go
+   * into a file and be read back as a release later.
+   */
+  producedBy: string;
   /**
    * Test seam: how the browser starts. A test hands back a browser it holds,
    * so it can prove the browser closes on every exit path — and one that hands
@@ -27,6 +38,7 @@ export type CaptureOptions = {
 export async function capturePage({
   url,
   profiles,
+  producedBy,
   launch = () => chromium.launch(),
 }: CaptureOptions): Promise<Capture> {
   const browser = await startBrowser(launch);
@@ -121,6 +133,10 @@ export async function capturePage({
       // resolves against, so the requested URL would misplace them all.
       url: landedOn,
       capturedAt: new Date().toISOString(),
+      // The shape is core's constant, so the writer and every reader of a
+      // Capture key on one number. The release is the caller's, because this
+      // package cannot read its own.
+      version: { schema: CAPTURE_SCHEMA, producedBy },
       devices: profiles,
       // Assigned across the whole capture, because an id that holds only
       // inside one run cannot align the runs against each other.

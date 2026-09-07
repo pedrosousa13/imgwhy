@@ -112,6 +112,22 @@ export type DeviceRun = {
 };
 
 /**
+ * The shape a Capture has as these types describe it, which is the number a
+ * reader keys forward-compatibility on.
+ *
+ * `packages/cli/src/in.ts` refuses a file carrying any other number, in either
+ * direction: a lower one is a shape that build no longer reads, and a higher
+ * one a shape it does not read yet. So this changes when the shape of a
+ * Capture changes and at no other time — a release that alters what the
+ * numbers say alters no field, and `version.producedBy` is what carries that.
+ *
+ * A literal rather than a figure read off a package: core names no import at
+ * all, which is what lets the same functions run in Node, in a page and in a
+ * service worker, and `test/no-globals.test.ts` holds that.
+ */
+export const CAPTURE_SCHEMA = 1;
+
+/**
  * The seam between the runner and the report. A Capture is JSON on disk: the
  * runner writes one, the report reads one, and neither knows about the other.
  */
@@ -122,6 +138,26 @@ export type Capture = {
    */
   url: string;
   capturedAt: string;
+  /**
+   * What wrote this file, on two numbers that move on different clocks.
+   *
+   * `schema` is the shape, and `CAPTURE_SCHEMA` above says what a reader does
+   * with it. `producedBy` is the release of `imgwhy` that wrote the file, and
+   * it is what a diff of two Captures needs: a change to core's arithmetic
+   * moves the figures in a Capture without moving one field of the shape, so a
+   * difference between two files written by two releases can be this tool's
+   * rather than the page's. `docs/adr/0002-capture-version-two-fields.md`
+   * records why the two are not one field.
+   *
+   * Nested under one key so that a Capture written before either existed is
+   * one check rather than two. Every Capture written before this field is that
+   * case, and `in.ts` refuses one.
+   *
+   * The runner cannot fill `producedBy` in, because a library does not know
+   * which release of the command shipped it: `CaptureOptions` requires it of
+   * the caller, and `packages/cli/src/version.ts` is where the command reads it.
+   */
+  version: { schema: number; producedBy: string };
   devices: DeviceProfile[];
   runs: DeviceRun[];
 };

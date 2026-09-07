@@ -1,4 +1,5 @@
 import type { Capture } from '@imgwhy/core';
+import { CAPTURE_SCHEMA } from '@imgwhy/core';
 import { describe, expect, it } from 'vitest';
 import { renderReport } from '../src/index.js';
 import { attributes, scripts, unread } from './document.js';
@@ -25,6 +26,7 @@ import { attributes, scripts, unread } from './document.js';
 const hostile = (): Capture => ({
   url: 'https://evil.example/"><script>alert(\'page url\')</script>',
   capturedAt: '2026-09-03T00:00:00.000Z"><script>alert(\'captured at\')</script>',
+  version: { schema: CAPTURE_SCHEMA, producedBy: '0.4.1"><script>alert(\'produced by\')</script>' },
   devices: [
     {
       id: 'desktop',

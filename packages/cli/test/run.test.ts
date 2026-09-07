@@ -1,8 +1,9 @@
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Capture, CapturedImage, DeviceRun } from '@imgwhy/core';
-import { parseSrcset } from '@imgwhy/core';
+import { CAPTURE_SCHEMA, parseSrcset } from '@imgwhy/core';
 import { renderReport } from '@imgwhy/report';
 import { DEFAULT_PROFILES } from '@imgwhy/runner';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -104,6 +105,7 @@ const gallery = (): Capture => {
   return {
     url: 'https://example.com/gallery',
     capturedAt: '2026-09-03T00:00:00.000Z',
+    version: { schema: CAPTURE_SCHEMA, producedBy: '0.4.1' },
     devices: DEFAULT_PROFILES,
     runs,
   };
@@ -559,6 +561,26 @@ describe('run', () => {
     await run(['https://example.com/gallery'], capture, cwd);
 
     expect(asked).toEqual(['iphone-se', 'iphone-15-pro', 'pixel-8', 'ipad', 'desktop']);
+  });
+
+  it('tells the runner which release is asking, read off imgwhy\'s own package.json', async () => {
+    // The runner is a library and cannot know which release shipped it, so
+    // the command supplies the string a Capture records. Read here off the
+    // manifest npm installs rather than written out, because a second copy of
+    // the number is the thing that can disagree with the first.
+    const manifest = JSON.parse(
+      readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
+    ) as { version: string };
+    let asked: string | null = null;
+    const capture: CaptureFn = (options) => {
+      asked = options.producedBy;
+      return Promise.resolve(gallery());
+    };
+
+    await run(['https://example.com/gallery'], capture, cwd);
+
+    expect(asked).toBe(manifest.version);
+    expect(asked).not.toBe('');
   });
 
   it('renders the set imgwhy.config.json names instead of the default one', async () => {

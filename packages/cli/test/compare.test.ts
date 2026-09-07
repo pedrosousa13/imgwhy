@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import type { Capture, CapturedImage, DeviceProfile } from '@imgwhy/core';
-import { parseSrcset } from '@imgwhy/core';
+import { CAPTURE_SCHEMA, parseSrcset } from '@imgwhy/core';
 import { describe, expect, it } from 'vitest';
 import { read, reaches } from '../../../test/source.js';
 import { compareCaptures, formatComparison } from '../src/compare.js';
@@ -56,13 +56,21 @@ const logo = (bytes: number | null): CapturedImage => ({
   loading: null,
 });
 
+/**
+ * The release every capture below records, unless a test is about crossing
+ * from one to another.
+ */
+const RELEASE = '0.4.1';
+
 /** A Capture of one page, written as what each device run saw. */
 const capture = (
   runs: Record<string, CapturedImage[]>,
   devices: DeviceProfile[] = DEVICES,
+  producedBy: string = RELEASE,
 ): Capture => ({
   url: 'https://example.com/',
   capturedAt: '2026-01-01T00:00:00.000Z',
+  version: { schema: CAPTURE_SCHEMA, producedBy },
   devices,
   runs: Object.entries(runs).map(([deviceId, images]) => ({
     deviceId,
@@ -327,9 +335,10 @@ describe('a diff of a capture that came off a hostile page', () => {
    * page wrote, and the row under it starts five characters early for every
    * control character above.
    */
-  const hostile = (phone: number, desk: number): Capture => ({
+  const hostile = (phone: number, desk: number, producedBy: string): Capture => ({
     url: carrying('https://example.com/'),
     capturedAt: carrying('2026-01-01T00:00:00.000Z'),
+    version: { schema: CAPTURE_SCHEMA, producedBy },
     devices: [
       {
         id: carrying('iphone-se'),
@@ -345,7 +354,8 @@ describe('a diff of a capture that came off a hostile page', () => {
     ],
   });
 
-  const output = (): string => diff(hostile(11573, 20000), hostile(6104, 20000));
+  const output = (): string =>
+    diff(hostile(11573, 20000, carrying(RELEASE)), hostile(6104, 20000, carrying(RELEASE)));
 
   it('writes every control character out, so a page cannot make a terminal act', () => {
     expect(output().split('\n').filter((line) => ACTED_ON.test(line))).toEqual([]);

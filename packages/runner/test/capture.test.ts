@@ -2,10 +2,11 @@ import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as after } from 'node:timers/promises';
-import type { DeviceProfile } from '@imgwhy/core';
+import type { Capture, DeviceProfile } from '@imgwhy/core';
+import { CAPTURE_SCHEMA } from '@imgwhy/core';
 import { type Browser, type Download, type Frame, type Page, chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DEFAULT_PROFILES, capturePage } from '../src/index.js';
+import { type CaptureOptions, DEFAULT_PROFILES, capturePage } from '../src/index.js';
 import { type FixtureServer, startFixtureServer } from '../../../test/fixture-server.js';
 import { encodePng } from '../../../test/png.js';
 
@@ -244,11 +245,37 @@ function watchingDownloads(): {
   return { launch, files, announced, discard };
 }
 
+/**
+ * `capturePage` with a release for it to record, so a call site below shows
+ * only the thing it is about.
+ *
+ * `producedBy` is required of every caller, because the runner is a library
+ * and cannot know which release of the command shipped it. Which release that
+ * is has nothing to do with the questions this file asks — what a viewport
+ * selected, what a session did — so one string stands in for all of them, and
+ * the tests that are about the version pass their own.
+ */
+const capturing = (
+  options: Omit<CaptureOptions, 'producedBy'> & Partial<Pick<CaptureOptions, 'producedBy'>>,
+): Promise<Capture> => capturePage({ producedBy: 'test-release', ...options });
+
 describe('capturePage', () => {
+  it('records the shape it wrote and the release that asked for it', async () => {
+    const capture = await capturing({
+      url: `${server.url}/w-descriptors.html`,
+      profiles: [canonical],
+      producedBy: '1.2.3',
+    });
+
+    // The shape is core's constant, so a reader keys on the same number the
+    // writer wrote. The release is the caller's, whole and unaltered.
+    expect(capture.version).toEqual({ schema: CAPTURE_SCHEMA, producedBy: '1.2.3' });
+  });
+
   it('captures the candidate a 640px viewport at DPR 1.5 downloads', async () => {
     const url = `${server.url}/w-descriptors.html`;
 
-    const capture = await capturePage({ url, profiles: [canonical] });
+    const capture = await capturing({ url, profiles: [canonical] });
 
     expect(capture.url).toBe(url);
     expect(new Date(capture.capturedAt).toISOString()).toBe(capture.capturedAt);
@@ -277,7 +304,7 @@ describe('capturePage', () => {
   });
 
   it('captures every image, including ones no one can see, and reads loading', async () => {
-    const capture = await capturePage({
+    const capture = await capturing({
       url: `${server.url}/w-descriptors.html`,
       profiles: [canonical],
     });
@@ -299,7 +326,7 @@ describe('capturePage', () => {
   });
 
   it('runs every profile in its own context, each with its own deviceScaleFactor', async () => {
-    const capture = await capturePage({
+    const capture = await capturing({
       url: `${server.url}/densities.html`,
       profiles: DEFAULT_PROFILES,
     });
@@ -327,7 +354,7 @@ describe('capturePage', () => {
   it('renders every profile with the HTTP cache disabled', async () => {
     server.requests.length = 0;
 
-    await capturePage({ url: `${server.url}/densities.html`, profiles: DEFAULT_PROFILES });
+    await capturing({ url: `${server.url}/densities.html`, profiles: DEFAULT_PROFILES });
 
     // The fixture serves its images `immutable` for a year, so a browser left
     // to itself would hold them. Every request says otherwise, which is the
@@ -347,7 +374,7 @@ describe('capturePage', () => {
     const order: string[] = [];
     const outcomes: string[] = [];
 
-    await capturePage({
+    await capturing({
       url: `${server.url}/densities.html`,
       profiles: [canonical],
       launch: recording(order, fetchingAfterDetach('/img/9.png', outcomes)),
@@ -367,7 +394,7 @@ describe('capturePage', () => {
   });
 
   it('keeps an image id stable when a render reparents the image', async () => {
-    const capture = await capturePage({
+    const capture = await capturing({
       url: `${server.url}/reparent.html`,
       profiles: DEFAULT_PROFILES,
     });
@@ -394,7 +421,7 @@ describe('capturePage', () => {
   }, 60_000);
 
   it('lets DPR alone decide when the candidates carry x descriptors', async () => {
-    const capture = await capturePage({
+    const capture = await capturing({
       url: `${server.url}/x-descriptors.html`,
       profiles: [canonical],
     });
@@ -410,7 +437,7 @@ describe('capturePage', () => {
   });
 
   it('resolves a picture against the first source whose media matches', async () => {
-    const capture = await capturePage({
+    const capture = await capturing({
       url: `${server.url}/picture-sources.html`,
       profiles: [desktop],
     });
@@ -427,7 +454,7 @@ describe('capturePage', () => {
   });
 
   it('resolves a picture against a later source where the first does not match', async () => {
-    const capture = await capturePage({
+    const capture = await capturing({
       url: `${server.url}/picture-sources.html`,
       profiles: [tablet],
     });
@@ -439,7 +466,7 @@ describe('capturePage', () => {
   });
 
   it('falls through to the img where no source media matches', async () => {
-    const capture = await capturePage({
+    const capture = await capturing({
       url: `${server.url}/picture-sources.html`,
       profiles: [phone],
     });
@@ -454,7 +481,7 @@ describe('capturePage', () => {
   });
 
   it('leaves the sizes null where the matching source wrote none, and says source', async () => {
-    const capture = await capturePage({
+    const capture = await capturing({
       url: `${server.url}/picture-sources.html`,
       profiles: [desktop],
     });
@@ -473,7 +500,7 @@ describe('capturePage', () => {
   });
 
   it('reads the img sizes only where no source matched at all', async () => {
-    const capture = await capturePage({
+    const capture = await capturing({
       url: `${server.url}/picture-sources.html`,
       profiles: [phone],
     });
@@ -487,7 +514,7 @@ describe('capturePage', () => {
   });
 
   it('reads no source written after the img, because a browser stops at the tag', async () => {
-    const capture = await capturePage({
+    const capture = await capturing({
       url: `${server.url}/source-after-img.html`,
       profiles: [desktop],
     });
@@ -507,7 +534,7 @@ describe('capturePage', () => {
   });
 
   it('counts the elements a render painted a CSS background image on', async () => {
-    const capture = await capturePage({
+    const capture = await capturing({
       url: `${server.url}/backgrounds.html`,
       profiles: [tablet, desktop],
     });
@@ -519,7 +546,7 @@ describe('capturePage', () => {
   }, 60_000);
 
   it('counts a painted file and not a painted gradient, which is no file at all', async () => {
-    const capture = await capturePage({
+    const capture = await capturing({
       url: `${server.url}/backgrounds.html`,
       profiles: [tablet],
     });
@@ -530,7 +557,7 @@ describe('capturePage', () => {
   });
 
   it('counts nothing on a page whose CSS paints no file', async () => {
-    const capture = await capturePage({
+    const capture = await capturing({
       url: `${server.url}/gallery.html`,
       profiles: [desktop],
     });
@@ -539,7 +566,7 @@ describe('capturePage', () => {
   });
 
   it('records the URL the page ended on, not the one that was requested', async () => {
-    const capture = await capturePage({ url: `${server.url}/nested`, profiles: [desktop] });
+    const capture = await capturing({ url: `${server.url}/nested`, profiles: [desktop] });
 
     // A relative candidate resolves against this, so the requested URL would
     // send every one of them to the wrong directory.
@@ -549,7 +576,7 @@ describe('capturePage', () => {
   it('reports real bytes for a cross-origin response with no Timing-Allow-Origin', async () => {
     const url = `${server.url}/cross-origin.html?origin=${encodeURIComponent(elsewhere.url)}`;
 
-    const capture = await capturePage({ url, profiles: [desktop] });
+    const capture = await capturing({ url, profiles: [desktop] });
 
     const hero = capture.runs[0]?.images[0];
     expect(hero?.currentSrc).toBe(`${elsewhere.url}/img/1920.png`);
@@ -583,7 +610,7 @@ describe('capturePage', () => {
   it('gives every image that displays one response the bytes that response cost', async () => {
     server.requests.length = 0;
 
-    const capture = await capturePage({
+    const capture = await capturing({
       url: `${server.url}/shared-url.html`,
       profiles: [desktop],
     });
@@ -602,7 +629,7 @@ describe('capturePage', () => {
   });
 
   it('reports unknown where nothing crossed the wire, however many pixels arrived', async () => {
-    const capture = await capturePage({
+    const capture = await capturing({
       url: `${server.url}/unknown-bytes.html`,
       profiles: [desktop],
     });
@@ -622,7 +649,7 @@ describe('capturePage', () => {
     const watched = watchingDownloads();
 
     try {
-      await capturePage({
+      await capturing({
         url: `${server.url}/attachment.html`,
         profiles: [canonical],
         launch: watched.launch,
@@ -645,7 +672,7 @@ describe('capturePage', () => {
   it('detaches the CDP session of every profile before closing its context', async () => {
     const order: string[] = [];
 
-    await capturePage({
+    await capturing({
       url: `${server.url}/w-descriptors.html`,
       profiles: [canonical, desktop],
       launch: recording(order),
@@ -660,7 +687,7 @@ describe('capturePage', () => {
     // Named, not merely counted. A run that ends in some other error has not
     // reported the page that would not load, whatever it detached on the way.
     await expect(
-      capturePage({
+      capturing({
         url: 'http://127.0.0.1:1/nothing-listens-here',
         profiles: [canonical],
         launch: recording(order),
@@ -673,7 +700,7 @@ describe('capturePage', () => {
   it('reports the failure that came first when detaching fails on top of it', async () => {
     const order: string[] = [];
 
-    const failing = capturePage({
+    const failing = capturing({
       url: 'http://127.0.0.1:1/nothing-listens-here',
       profiles: [canonical],
       launch: recording(order, crashed),
@@ -694,7 +721,7 @@ describe('capturePage', () => {
     // prevent. Both have to happen, and the discard's failure is the one that
     // reaches the caller.
     await expect(
-      capturePage({
+      capturing({
         url: `${server.url}/densities.html`,
         profiles: [canonical],
         launch: refusingToBlank(order),
@@ -711,7 +738,7 @@ describe('capturePage', () => {
     // there is to report. Preferring the first failure is not the same as
     // having none.
     await expect(
-      capturePage({
+      capturing({
         url: `${server.url}/w-descriptors.html`,
         profiles: [canonical],
         launch: recording(order, crashed),
@@ -729,7 +756,7 @@ describe('capturePage', () => {
     };
 
     await expect(
-      capturePage({
+      capturing({
         url: 'http://127.0.0.1:1/nothing-listens-here',
         profiles: [canonical],
         launch,
@@ -751,7 +778,7 @@ describe('capturePage', () => {
     const impossible: DeviceProfile = { ...canonical, id: 'impossible', dpr: -1 };
 
     await expect(
-      capturePage({
+      capturing({
         url: `${server.url}/w-descriptors.html`,
         profiles: [desktop, impossible],
         launch,
@@ -768,7 +795,7 @@ describe('capturePage', () => {
       );
 
     await expect(
-      capturePage({ url: `${server.url}/w-descriptors.html`, profiles: [canonical], launch }),
+      capturing({ url: `${server.url}/w-descriptors.html`, profiles: [canonical], launch }),
     ).rejects.toThrow(/npx playwright install chromium/);
   });
 });

@@ -5,8 +5,18 @@ import { messageOf } from './message.js';
 import { serializeCapture, writeCapture, writeReport } from './out.js';
 import { formatCapture } from './trace.js';
 import { parsePageUrl } from './url.js';
+import { VERSION } from './version.js';
 
-export type CaptureFn = (options: { url: string; profiles: DeviceProfile[] }) => Promise<Capture>;
+export type CaptureFn = (options: {
+  url: string;
+  profiles: DeviceProfile[];
+  /**
+   * The release the Capture records as its own. The runner cannot know it —
+   * it is a library, and a library does not know which release of the command
+   * shipped it — so `version.ts` reads it and this hands it over.
+   */
+  producedBy: string;
+}) => Promise<Capture>;
 
 /** What the command writes and the status it leaves behind. */
 export type Outcome = { code: number; stdout: string; stderr: string };
@@ -86,7 +96,11 @@ export async function run(
 
   let captured: Capture;
   try {
-    captured = await capture({ url: target.url, profiles: rendering.profiles });
+    captured = await capture({
+      url: target.url,
+      profiles: rendering.profiles,
+      producedBy: VERSION,
+    });
   } catch (error) {
     return fail(messageOf(error));
   }

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import type { Candidate, Capture, CapturedImage, DeviceProfile, DeviceRun } from '@imgwhy/core';
+import { CAPTURE_SCHEMA } from '@imgwhy/core';
 import { messageOf } from './message.js';
 import { escape } from './say.js';
 
@@ -36,6 +37,13 @@ const isMeasureOrNull = (value: unknown): value is number | null =>
 
 /** A count of elements, which is whole or it counted something else. */
 const isCount = (value: unknown): value is number => isMeasure(value) && Number.isInteger(value);
+
+/**
+ * A schema number, which counts shapes: whole, and above 0 because no shape
+ * was ever written under a lower number. A fraction between two shapes is not
+ * a third one, and a Capture carrying one names a shape nothing wrote.
+ */
+const isSchema = (value: unknown): value is number => isSize(value) && Number.isInteger(value);
 
 const isTextOrNull = (value: unknown): value is string | null =>
   value === null || typeof value === 'string';
@@ -250,6 +258,34 @@ function readParsed(file: string, parsed: unknown): LoadedCapture {
   // refused for a field no answer depends on.
   if (!isName(parsed['capturedAt'])) return fail(': capturedAt must be a non-empty string');
 
+  // The version is read before the fields it describes, because it says what
+  // shape they are in. A Capture written before this field existed reaches
+  // here with every other field in order and nothing to say what it is, which
+  // is the case this refusal is for: the alternative is answering out of a
+  // shape that was guessed at. Migrating such a file is not attempted.
+  //
+  // A number is named in a message here and a string is not, which is
+  // `readParsed`'s rule rather than an exception to it. Both schema numbers
+  // have passed a check by the time they are written into a line — one of them
+  // is this module's own constant — so they carry no more than the indexes the
+  // other messages print. `producedBy` is a release string off a file somebody
+  // may have been sent, so nothing quotes it; `compare.ts` prints it through
+  // `say`, which escapes.
+  const version = parsed['version'];
+  if (!isObject(version)) {
+    return fail(' carries no version, so this tool cannot tell what shape it is');
+  }
+  if (!isSchema(version['schema'])) return fail(': version.schema must be a whole number above 0');
+  if (version['schema'] !== CAPTURE_SCHEMA) {
+    return fail(
+      `: version.schema is ${version['schema']}, and this build of imgwhy reads ` +
+        `${CAPTURE_SCHEMA}`,
+    );
+  }
+  if (!isName(version['producedBy'])) {
+    return fail(': version.producedBy must be a non-empty string');
+  }
+
   const devices = parsed['devices'];
   if (!Array.isArray(devices) || devices.length === 0) {
     return fail(' must carry a "devices" array holding at least one profile');
@@ -294,6 +330,7 @@ function readParsed(file: string, parsed: unknown): LoadedCapture {
     capture: {
       url: parsed['url'],
       capturedAt: parsed['capturedAt'],
+      version: { schema: version['schema'], producedBy: version['producedBy'] },
       devices: profiles,
       runs: rendered,
     },

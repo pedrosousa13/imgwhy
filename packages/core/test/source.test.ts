@@ -118,13 +118,24 @@ const CASES: [string, CapturedImage, DeviceProfile][] = [
 ];
 
 /**
- * The one name a core module declares that does not ship: the list itself.
+ * The two names a core module declares that do not ship.
  *
- * `source.ts` reads every module's `PARTS` to build the string, so the list is
- * how the shipping happens rather than a thing that is shipped. A page handed
- * one would hold an array naming modules it does not have.
+ * `PARTS` is the list itself: `source.ts` reads every module's to build the
+ * string, so the list is how the shipping happens rather than a thing that is
+ * shipped. A page handed one would hold an array naming modules it does not
+ * have.
+ *
+ * `CAPTURE_SCHEMA` is the shape number of a file on disk. What ships is the
+ * selection algorithm, and a report ships it to re-run the arithmetic over a
+ * Capture some reader has already accepted — so nothing shipped has a version
+ * to check, and `packages/cli/src/in.ts` is where the number is read.
+ *
+ * Both are exempted by name, which is a hole in the completeness check above
+ * and the reason for the test below: a shipped function reaching for either
+ * would be a `ReferenceError` in a page, so the shipped string is read for
+ * both names rather than only for what it declares.
  */
-const NOT_SHIPPED = 'PARTS';
+const NOT_SHIPPED = new Set(['PARTS', 'CAPTURE_SCHEMA']);
 
 /**
  * Every value one core module binds at its top level, by name.
@@ -175,7 +186,7 @@ function declaredIn(text: string): string[] {
   };
 
   walk(parse(text));
-  return names.filter((name) => name !== NOT_SHIPPED);
+  return names.filter((name) => !NOT_SHIPPED.has(name));
 }
 
 /**
@@ -206,6 +217,15 @@ describe('core, shipped as source', () => {
     // A helper reached only through one branch would otherwise go missing, and
     // the branch that needed it would throw in the page rather than here.
     expect(declaredBy(source).sort()).toEqual(declaredInCore().sort());
+  });
+
+  it('names neither unshipped binding, so no shipped function reaches for one', () => {
+    // The check above compares what the string declares against what core
+    // binds, and both of these are filtered out of that comparison. A mention
+    // is the failure it cannot see: the name would resolve to nothing in a
+    // page, and the function holding it would throw where a reader opened the
+    // report.
+    for (const name of NOT_SHIPPED) expect(source).not.toContain(name);
   });
 
   it('runs in a context with no globals at all, the way it runs in a page', () => {

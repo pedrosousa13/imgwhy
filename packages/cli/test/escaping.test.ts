@@ -1,4 +1,5 @@
 import type { Capture, CapturedImage, DeviceProfile } from '@imgwhy/core';
+import { CAPTURE_SCHEMA } from '@imgwhy/core';
 import { describe, expect, it } from 'vitest';
 import { serializeCapture } from '../src/out.js';
 import { formatCapture } from '../src/trace.js';
@@ -138,6 +139,7 @@ const logo = (): CapturedImage => ({
 const hostile = (): Capture => ({
   url: carrying('https://evil.example/page'),
   capturedAt: '2026-09-04T00:00:00.000Z',
+  version: { schema: CAPTURE_SCHEMA, producedBy: carrying('0.4.1') },
   devices: DEVICES,
   runs: [
     { deviceId: 'desktop', images: [logo(), hero(HERO)], backgroundImageCount: 2 },
@@ -185,6 +187,7 @@ const plain = (): CapturedImage => ({
 const page = (image: CapturedImage, devices: DeviceProfile[] = [DESKTOP]): Capture => ({
   url: 'https://example.test/page.html',
   capturedAt: '2026-09-04T00:00:00.000Z',
+  version: { schema: CAPTURE_SCHEMA, producedBy: '0.4.1' },
   devices,
   runs: devices.map((device) => ({
     deviceId: device.id,
