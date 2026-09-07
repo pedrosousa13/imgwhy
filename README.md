@@ -98,7 +98,7 @@ The status is 0 whenever both files read. A regression is a finding, and non-zer
 node packages/cli/dist/bin.js diff before.json after.json | grep -Eq '[1-9][0-9]* regressed' && exit 1
 ```
 
-A Capture handed to `diff` is a file somebody may have been sent, so every field of it is checked for its type and its range before anything reads it, and a file that fails a check is a message naming the field rather than a wrong answer. No message quotes what it read: every string in a Capture came off somebody's page. A shape this build does not read is refused in either direction, and so is a Capture carrying no version at all — every file written before there was one. Neither is migrated.
+A Capture handed to `diff` is a file somebody may have been sent, so every field of it is checked for its type and its range before anything reads it, and a file that fails a check is a message naming the field rather than a wrong answer. No refusal quotes a string it read: every string in a Capture came off somebody's page. A shape this build does not read is refused in either direction, and so is a Capture carrying no version at all — every file written before there was one. Neither is migrated.
 
 ### The URL is trusted input
 
