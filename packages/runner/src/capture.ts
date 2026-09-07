@@ -3,7 +3,18 @@ import { CAPTURE_SCHEMA, parseSrcset } from '@imgwhy/core';
 import { type Browser, type CDPSession, type Page, chromium } from 'playwright';
 import { alignImageIds } from './align.js';
 import { type RawImage, collectImages, countBackgroundImages } from './collect.js';
+import { refuseUnreachableBound, scrollThroughPage, waitForQuietNetwork } from './settle.js';
 import { type TransferLog, recordTransfers } from './transfers.js';
+
+/**
+ * How long one profile may spend waiting for its page to go quiet.
+ *
+ * Whole seconds, because it is a bound on a person's patience rather than a
+ * measurement of anything. Ten of them is far longer than a page that is going
+ * to settle takes, and short enough that a page which never will says so while
+ * whoever ran the command is still watching.
+ */
+const SETTLE_TIMEOUT = 10_000;
 
 export type CaptureOptions = {
   url: string;
@@ -33,6 +44,36 @@ export type CaptureOptions = {
    * in between, which nothing outside the run can otherwise observe.
    */
   launch?: () => Promise<Browser>;
+  /**
+   * How long one profile waits for its page's network to go quiet, in
+   * milliseconds.
+   *
+   * An option because the tests need it: a run that is meant to give up should
+   * cost the suite a couple of seconds rather than the full default. Nothing
+   * the command does reaches it — `run.ts` passes a URL, the profiles and a
+   * release, and there is no flag and no config key behind this — so it is a
+   * seam a library caller could use and today's command does not.
+   *
+   * There is a floor: the bound has to be longer than the quiet window a page
+   * is measured against, because a bound no longer than that window leaves no
+   * time in which the window could ever complete. `refuseUnreachableBound` in
+   * `settle.ts` is the whole of that rule and `capturePage` asks it before it
+   * opens a browser, so a bound under the floor costs nothing and says which
+   * end is at fault. At the time of writing the window is 250ms — repeated
+   * here so a caller need not open that file, and stale rather than wrong if
+   * `QUIET_WINDOW` ever moves, since the check reads the constant and this
+   * sentence does not. The floor is not a performance figure: anything in the
+   * seconds is well clear of it, and the suite's shortest is two of them.
+   *
+   * It bounds the wait and not the scroll pass that comes before it, and the
+   * two are worth adding up. The scroll pass carries its own bound — a cap on
+   * how many steps it takes, at a pause each, both in `settle.ts` — which is
+   * spent before this one starts counting, and which on the figures there works
+   * out in the tens of seconds. Only a page that keeps growing as it is read
+   * ever reaches it: one that settles takes a step per screenful and none of
+   * the rest.
+   */
+  settleTimeout?: number;
 };
 
 /**
@@ -46,7 +87,12 @@ export async function capturePage({
   profiles,
   producedBy,
   launch = () => chromium.launch(),
+  settleTimeout = SETTLE_TIMEOUT,
 }: CaptureOptions): Promise<Capture> {
+  // Before the browser, because a bound no page could satisfy is the caller's
+  // mistake and not the page's: asking here costs nothing, where asking at the
+  // wait costs a launch, a navigation and a scroll pass per profile first.
+  refuseUnreachableBound(settleTimeout);
   const browser = await startBrowser(launch);
   try {
     const runs: DeviceRun[] = [];
@@ -78,6 +124,14 @@ export async function capturePage({
           await disableCache(session);
           const transfers = recordTransfers(session);
           await page.goto(url, { waitUntil: 'load' });
+          // `load` is not the end of a page's loading; `settle.ts` says what
+          // reading it there would report. A page that never goes quiet throws
+          // out of this block, and the existing catch below takes the document
+          // away and detaches the session on the way past. The listeners that
+          // make the wait possible went on above, before the navigation, which
+          // is what makes a request that starts during the scroll visible.
+          await page.evaluate(scrollThroughPage);
+          await waitForQuietNetwork(transfers.pending, settleTimeout);
           const raw = await page.evaluate(collectImages);
           // A second call rather than one that answers both, so each function
           // sent into the page stays one that references nothing outside
@@ -139,6 +193,12 @@ export async function capturePage({
       // resolves against, so the requested URL would misplace them all.
       url: landedOn,
       capturedAt: new Date().toISOString(),
+      // A constant, and true of every reading this function takes: each run
+      // above scrolls the page through and waits for the network before
+      // `collectImages` reads a thing, so there is no path here that produces
+      // a Capture of a page that was only loaded. `settle.ts` says why the
+      // earlier reading is wrong rather than merely incomplete.
+      readAs: 'scrolled',
       // The shape is core's constant, so the writer and every reader of a
       // Capture key on one number. The release is the caller's, because this
       // package cannot read its own.

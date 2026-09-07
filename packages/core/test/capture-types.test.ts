@@ -28,6 +28,10 @@ const run: DeviceRun = { deviceId: 'desktop', images: [hero], backgroundImageCou
 const capture: Capture = {
   url: 'https://example.com',
   capturedAt: '2026-09-03T00:00:00.000Z',
+  // `capturedAt` is when, `readAs` is how. The one method there is names
+  // itself rather than reading as a flag, so a later reading taken some other
+  // way is a second name here and not a second boolean.
+  readAs: 'scrolled',
   version: { schema: CAPTURE_SCHEMA, producedBy: '0.0.0' },
   devices: [desktop],
   runs: [run],
@@ -53,7 +57,7 @@ describe('the Capture seam', () => {
     // change to the arithmetic here alters the numbers a Capture carries
     // without altering one field of it.
     expect(capture.version.schema).toBe(CAPTURE_SCHEMA);
-    expect(CAPTURE_SCHEMA).toBe(1);
+    expect(CAPTURE_SCHEMA).toBe(2);
     expect(typeof capture.version.producedBy).toBe('string');
   });
 

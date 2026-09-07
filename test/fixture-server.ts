@@ -39,6 +39,22 @@ const shell = (title: string, body: string): string =>
   .pixel { width: 1px; height: 1px }
   .hidden { display: none }
   .third { width: 33.33%; height: auto }
+  /*
+   * Enough page above an image that nothing loads it until the run scrolls.
+   * "Below the fold" is not the same as "off screen" to Chromium: it starts a
+   * lazy load while the image is still some way down, and how far down depends
+   * on the connection it thinks it has. 1250px where it has measured a fast
+   * one, 3000px where it has measured nothing at all — and those two are the
+   * only ones a suite that runs on loopback with no network emulation can get,
+   * so 5000 is clear of both with room to spare. A spacer under them would let
+   * the images load without being scrolled to, and every test on these pages
+   * would pass whether or not the run scrolls at all.
+   *
+   * Emulation is what this does not cover: the thresholds go to 4000px on 3G,
+   * 6000px on 2G and 8000px on slow-2G and offline, and a test that emulated
+   * one of those would need a taller spacer than this to mean anything.
+   */
+  .spacer { height: 5000px }
   /* Two elements a browser paints a file onto with no way to choose it. */
   .tile { width: 100px; height: 100px; background-image: url(/img/100.png) }
   /* A gradient is painted, and it is not a file, so nothing counts it. */
@@ -272,6 +288,103 @@ const PAGES: Record<string, string> = {
   src="/img/200.png" alt="badge"></main>`,
   ),
 
+  // Three lazily-loaded images a few screenfuls below the top, which is where
+  // most of a page's weight actually sits. Nothing here loads on the strength
+  // of `page.goto` alone — the spacer is what makes that so, and
+  // `packages/runner/src/settle.ts` says what a run that read the page anyway
+  // would report.
+  //
+  // No file appears in two of the candidate lists, for the reason
+  // `/picture-sources.html` gives at length: an element handed a copy out of
+  // Blink's per-render memory cache never selects at all, and a test written
+  // over that measures the cache rather than the markup.
+  //
+  // The middle one is `sizes="auto"`, which a browser reads only on an image
+  // marked lazy — so this is the one page where it is a legal thing to write.
+  // Its width is the page's layout and nothing else: `.half` is a stylesheet
+  // rule, so there is no `width` attribute and no inline length for anything
+  // to read a width off instead.
+  '/below-the-fold.html': shell(
+    'below the fold',
+    `<main><div class="spacer"></div>
+<img class="hero" loading="lazy" sizes="100vw"
+  srcset="/img/640.png 640w, /img/1080.png 1080w, /img/1920.png 1920w"
+  src="/img/640.png" alt="hero">
+<img class="half" loading="lazy" sizes="auto"
+  srcset="/img/300.png 300w, /img/800.png 800w, /img/1600.png 1600w"
+  src="/img/300.png" alt="auto">
+<img class="logo" loading="lazy" sizes="120px"
+  srcset="/img/160.png 160w, /img/480.png 480w"
+  src="/img/160.png" alt="badge"></main>`,
+  ),
+
+  // A page whose only image is one the server never finishes answering for.
+  // It is below the fold and lazy, so `page.goto` returns and the run is
+  // already reading the page by the time the request goes out — which is what
+  // makes this a test of the settle bound rather than of the navigation.
+  '/never-settles.html': shell(
+    'never settles',
+    `<main><div class="spacer"></div>
+<img class="hero" loading="lazy" src="/held-open.png" alt="held open"></main>`,
+  ),
+
+  // A page whose below-the-fold image is answered a second after it is asked
+  // for, so the request starts during the scroll and lands well after it. The
+  // second is what makes that true rather than likely: the scroll pass over a
+  // 5000px spacer is six steps and a restore, about half a second, and the
+  // request goes out partway through that — so a delay of a few hundred
+  // milliseconds would land inside the scroll on some threshold and machine
+  // combinations and outside it on others, and a test over it would pass
+  // against a run that never waited for anything.
+  '/delayed.html': shell(
+    'delayed',
+    `<main><div class="spacer"></div>
+<img class="hero" loading="lazy" sizes="100vw"
+  srcset="/slow/640.png 640w, /slow/1080.png 1080w, /slow/1920.png 1920w"
+  src="/slow/640.png" alt="hero"></main>`,
+  ),
+
+  // A page that puts itself somewhere other than the top, so a test can say
+  // that a run gives the scroll position back rather than merely ending at
+  // zero the way an untouched page already would. The spacer is far taller
+  // than the offset, so the position is not clamped and the image below it is
+  // still out of reach until the run scrolls.
+  '/scrolled-start.html': shell(
+    'scrolled start',
+    `<main><div class="spacer"></div>
+<img class="hero" loading="lazy" src="/img/1080.png" alt="hero"></main>
+<script>window.scrollTo(0, 1000)</script>`,
+  ),
+
+  // The same page again, asking the browser to animate every scroll of it.
+  // `scroll-behavior: smooth` is an ordinary line to write, and it is what the
+  // two-argument `window.scrollTo(x, y)` obeys — so a run that scrolls that
+  // way steps a fraction of a screen at a time and leaves the page wherever
+  // the last animation had reached.
+  //
+  // The second of those is what this page is shaped to catch, and the starting
+  // position is how: a run has to land back on it exactly, and an animated
+  // restore is still in flight when the pass stops waiting on it. The image is
+  // here so that the page is one a run genuinely scrolled through rather than
+  // a bare scroll position, and not as a second detector — over five thousand
+  // pixels an animated descent still reaches the bottom inside the step cap,
+  // slowly. `capture.test.ts` says why no height fixes that honestly.
+  //
+  // The property is set from script rather than written in the stylesheet, and
+  // set after the initial jump rather than before it, so that the one scroll
+  // this page performs for itself is not an animation the run could read a
+  // position out of the middle of. What the element ends up with is what the
+  // stylesheet would have given it.
+  '/smooth-scrolling.html': shell(
+    'smooth scrolling',
+    `<main><div class="spacer"></div>
+<img class="hero" loading="lazy" src="/img/1920.png" alt="hero"></main>
+<script>
+  window.scrollTo(0, 1000);
+  document.documentElement.style.scrollBehavior = 'smooth';
+</script>`,
+  ),
+
   // The one page here that carries no image, because what it asks a browser
   // for is not a render: a script clicks an `<a download>` at the response
   // below. `capture.ts` says why a context has to refuse it.
@@ -349,6 +462,31 @@ export async function startFixtureServer(): Promise<FixtureServer> {
         'content-disposition': 'attachment; filename="report.csv"',
       });
       res.end('date,bytes\n2026-01-01,1\n');
+      return;
+    }
+
+    // What `/never-settles.html` asks for. Nothing goes out at all: Node holds
+    // a response's head until something writes a body, and nothing here ever
+    // does, so the request stays open until something tears the socket down —
+    // `closeAllConnections()` in `close()` is what does.
+    if (path === '/held-open.png') {
+      res.writeHead(200, { 'content-type': 'image/png' });
+      return;
+    }
+
+    // The same images as below, a second later. What the delay is for is the
+    // gap between the scroll ending and the response arriving, and
+    // `/delayed.html` says why it is a whole second and not a fraction of one.
+    const delayed = /^\/slow\/(\d+)\.png$/.exec(path);
+    if (delayed) {
+      const body = encodePng(Number(delayed[1]), 2);
+      setTimeout(() => {
+        // The browser may have gone by now — a run that gave up takes its
+        // context with it — and writing to a socket nobody holds throws.
+        if (res.destroyed) return;
+        res.writeHead(200, { 'content-type': 'image/png', 'content-length': String(body.length) });
+        res.end(body);
+      }, 1_000);
       return;
     }
 

@@ -105,6 +105,7 @@ const gallery = (): Capture => {
   return {
     url: 'https://example.com/gallery',
     capturedAt: '2026-09-03T00:00:00.000Z',
+    readAs: 'scrolled',
     version: { schema: CAPTURE_SCHEMA, producedBy: '0.4.1' },
     devices: DEFAULT_PROFILES,
     runs,

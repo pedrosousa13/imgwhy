@@ -139,6 +139,7 @@ const logo = (): CapturedImage => ({
 const hostile = (): Capture => ({
   url: carrying('https://evil.example/page'),
   capturedAt: '2026-09-04T00:00:00.000Z',
+  readAs: 'scrolled',
   version: { schema: CAPTURE_SCHEMA, producedBy: carrying('0.4.1') },
   devices: DEVICES,
   runs: [
@@ -187,6 +188,7 @@ const plain = (): CapturedImage => ({
 const page = (image: CapturedImage, devices: DeviceProfile[] = [DESKTOP]): Capture => ({
   url: 'https://example.test/page.html',
   capturedAt: '2026-09-04T00:00:00.000Z',
+  readAs: 'scrolled',
   version: { schema: CAPTURE_SCHEMA, producedBy: '0.4.1' },
   devices,
   runs: devices.map((device) => ({

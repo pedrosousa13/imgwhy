@@ -125,7 +125,7 @@ export type DeviceRun = {
  * all, which is what lets the same functions run in Node, in a page and in a
  * service worker, and `test/no-globals.test.ts` holds that.
  */
-export const CAPTURE_SCHEMA = 1;
+export const CAPTURE_SCHEMA = 2;
 
 /**
  * The seam between the runner and the report. A Capture is JSON on disk: the
@@ -138,6 +138,38 @@ export type Capture = {
    */
   url: string;
   capturedAt: string;
+  /**
+   * How the reading was taken. `capturedAt` says when a Capture was taken;
+   * this says how, because the two are different evidence and a reader cannot
+   * tell them apart from the figures.
+   *
+   * `scrolled` is the one method there is. `packages/runner/src/settle.ts`
+   * steps the page down a screen at a time so the browser asks for the files a
+   * reader would only have reached by scrolling, puts the page back where it
+   * started, and holds the run until the network has gone quiet. So every
+   * figure in this file was read off a page that had been scrolled through and
+   * returned, rather than off a page that had merely loaded.
+   *
+   * A named method rather than `scrolled: true`, because #48 weighed three
+   * ways of taking the reading and this field records which of them was taken.
+   * A flag cannot: it can only ever be true here, so it would say that a scroll
+   * happened and never that a scroll is what the reading was. Another method
+   * arriving is another name beside this one.
+   *
+   * Whoever adds that second name has to add it to `isReadAs` in
+   * `packages/cli/src/in.ts` by hand. Widening this union leaves that predicate
+   * compiling — a declared type wider than what the comparison accepts is not
+   * an error — and the reader would refuse every Capture written under the new
+   * method.
+   *
+   * A Capture written before this field carries no `readAs`, and nothing here
+   * tells such a file apart from one whose field went missing. `CAPTURE_SCHEMA`
+   * above is what does: a required field is a shape change, so the number went
+   * to 2, and `packages/cli/src/in.ts` refuses any other in either direction —
+   * so a Capture with no `readAs` is refused for its shape before anything
+   * looks for the field.
+   */
+  readAs: 'scrolled';
   /**
    * What wrote this file, on two numbers that move on different clocks.
    *

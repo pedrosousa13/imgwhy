@@ -70,6 +70,7 @@ const capture = (
 ): Capture => ({
   url: 'https://example.com/',
   capturedAt: '2026-01-01T00:00:00.000Z',
+  readAs: 'scrolled',
   version: { schema: CAPTURE_SCHEMA, producedBy },
   devices,
   runs: Object.entries(runs).map(([deviceId, images]) => ({
@@ -391,6 +392,7 @@ describe('a diff of a capture that came off a hostile page', () => {
   const hostile = (phone: number, desk: number, producedBy: string): Capture => ({
     url: carrying('https://example.com/'),
     capturedAt: carrying('2026-01-01T00:00:00.000Z'),
+    readAs: 'scrolled',
     version: { schema: CAPTURE_SCHEMA, producedBy },
     devices: [
       {
