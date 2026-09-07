@@ -25,9 +25,9 @@ import { readFileSync } from 'node:fs';
  * and the version of a running process does not change under it.
  *
  * Nothing here defaults. A package with no readable `package.json` is a broken
- * install rather than a release with no number, and a throw at load says so
- * where a fallback string would put an untrue number in every Capture the
- * install went on to write.
+ * install rather than a release with no number, and a throw at load says so.
+ * `CaptureOptions.producedBy` refuses a default at the other end of the same
+ * string, and holds the argument against one.
  */
 export const VERSION: string = (
   JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {

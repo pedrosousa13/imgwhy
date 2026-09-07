@@ -18,6 +18,12 @@ export type CaptureOptions = {
    * rather than defaulted, because every default that could be written here —
    * an empty string, a `0.0.0`, the word unknown — is a number that would go
    * into a file and be read back as a release later.
+   *
+   * This is where that requirement is enforced, so it is where the argument is
+   * written out. `docs/adr/0002-capture-version-two-fields.md` records it too,
+   * with the shape it was chosen over: a runner reading its own
+   * `package.json`, which would record `@imgwhy/runner`'s version — a number
+   * nobody installs.
    */
   producedBy: string;
   /**

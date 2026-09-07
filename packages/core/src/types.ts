@@ -153,9 +153,10 @@ export type Capture = {
    * one check rather than two. Every Capture written before this field is that
    * case, and `in.ts` refuses one.
    *
-   * The runner cannot fill `producedBy` in, because a library does not know
-   * which release of the command shipped it: `CaptureOptions` requires it of
-   * the caller, and `packages/cli/src/version.ts` is where the command reads it.
+   * `producedBy` is handed to the writer rather than derived by it:
+   * `CaptureOptions.producedBy` in `packages/runner/src/capture.ts` requires it
+   * of the caller and says why, and `packages/cli/src/version.ts` is where the
+   * command reads the string it passes.
    */
   version: { schema: number; producedBy: string };
   devices: DeviceProfile[];

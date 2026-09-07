@@ -11,9 +11,10 @@ export type CaptureFn = (options: {
   url: string;
   profiles: DeviceProfile[];
   /**
-   * The release the Capture records as its own. The runner cannot know it —
-   * it is a library, and a library does not know which release of the command
-   * shipped it — so `version.ts` reads it and this hands it over.
+   * The release the Capture records as its own. `version.ts` reads it and this
+   * is the handover; the runner requires it of a caller rather than deriving
+   * it, and `CaptureOptions.producedBy` in `packages/runner/src/capture.ts`
+   * says why.
    */
   producedBy: string;
 }) => Promise<Capture>;
