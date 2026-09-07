@@ -121,21 +121,27 @@ const WAKES: Rules = [
  * event names rather than a ban on `addEventListener`, a ban the next slice
  * would have to loosen and might loosen carelessly.
  *
- * `scroll`, `resize` and `__imgwhy_closing__` are three of the panel's and none
- * of them is refused, for that reason and one more: not one can fire before a
- * click. A scroll and a resize need a page a reader is already looking at, the
- * third is fired by the extension's own closing click, and all three are
- * registered when a mark goes up rather than when the panel opens — so a
- * dormant worker has none of them and an open panel has them only while a box
- * is being drawn.
+ * `scroll` and `resize` are two of the panel's and neither is refused, for that
+ * reason and one more: neither can fire before a click. Both need a page a
+ * reader is already looking at, and both are registered when a mark goes up
+ * rather than when the panel opens — so a dormant worker has neither and an
+ * open panel has them only while a box is being drawn.
  *
- * `load` is the fourth, and it is the one this list has to say something about
+ * There used to be a third, `__imgwhy_closing__`, and it is not an event any
+ * more. The panel's teardown travelled as a plain `Event` on the page's own
+ * window, which is a channel a page can write to as easily as the extension
+ * can; it is a function on the isolated world's global now, and `panel.ts` says
+ * why. So this list has nothing to hold about it, which is the shape a channel
+ * with no event in it has — and one fewer name for a reader of this list to
+ * decide about.
+ *
+ * `load` is the third, and it is the one this list has to say something about
  * rather than pass over. A page load is exactly what `load` names, and a
  * listener for it in the worker or in a content script is a passive cost. The
  * panel's is neither: it goes on one `<img>` that the reading found no file
  * for, it is added by a panel that a click opened, it fires once when the
- * page's own lazy loading fetches the file, and the closing event takes every
- * one of them off again. So the refusal names the modules a page load can
+ * page's own lazy loading fetches the file, and the panel's teardown takes
+ * every one of them off again. So the refusal names the modules a page load can
  * reach rather than the word, and `panel.ts` is exempt from that one event and
  * from nothing else.
  */

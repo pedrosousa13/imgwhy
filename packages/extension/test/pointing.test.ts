@@ -22,13 +22,13 @@ import { image, reading } from './reading.js';
 const HOST_ID = '__imgwhy_host__';
 
 /**
- * The event the closing click fires on the window before it removes the host,
- * which is how the panel hears that it is going.
+ * The name the panel's teardown used to travel under, which the two cases below
+ * fire the way a page would.
  *
- * Written out here rather than imported, for the reason the two injected
- * functions declare it twice: neither of them can see a shared constant, so
- * the name is the contract and a test that spelled it differently would be a
- * test agreeing with itself.
+ * `panel.ts` says why it stopped being an event and what a page could do with
+ * one. What is left for a test is that firing it reaches nothing, and that
+ * needs the name written out rather than imported: a case that spelled it
+ * differently would be a case agreeing with itself.
  */
 const CLOSING = '__imgwhy_closing__';
 
@@ -647,9 +647,10 @@ describe('a mark, while it is up', () => {
   });
 
   it('listens on the window only while a mark is up, and takes those listeners down with it', () => {
-    // The listeners the tracking costs, and the whole of what it costs. Three
-    // go up together with the box and come down together with it: the two that
-    // say the box may have moved, and the one that says the panel is going.
+    // The listeners the tracking costs, and the whole of what it costs. Two,
+    // and both of them say the box may have moved: they go up with the box and
+    // come down with it, and a page that fires anything else on this window
+    // reaches nothing at all.
     const host = pageOf(boxes);
     const win = windowOf(host);
     render(host, rowsFor(host), win);
@@ -657,27 +658,70 @@ describe('a mark, while it is up', () => {
     expect([...win.listeners.keys()]).toEqual([]);
 
     dispatch(rows(host)[0], 'mouseenter');
-    expect([...win.listeners.keys()].sort()).toEqual([CLOSING, 'resize', 'scroll']);
+    expect([...win.listeners.keys()].sort()).toEqual(['resize', 'scroll']);
 
     dispatch(rows(host)[0], 'mouseleave');
     expect([...win.listeners.keys()]).toEqual([]);
   });
 
+  it('leaves its teardown on the window when the box goes up, and only then', () => {
+    // The third thing a mark puts on the window, which is not a listener. A
+    // panel nobody has pointed at has put nothing on the page, so there is
+    // nothing for a closing click to take off and no slot for it to read; the
+    // box is what makes that untrue.
+    //
+    // It stays through a `mouseleave`, and that is the difference from the two
+    // above. The mark's listeners are the mark's and come down with it; the
+    // teardown is the panel's, and the panel is still there.
+    const host = pageOf(boxes);
+    const win = windowOf(host);
+    render(host, rowsFor(host), win);
+
+    expect(win.__imgwhy_teardown__).toBeUndefined();
+
+    dispatch(rows(host)[0], 'mouseenter');
+    expect(win.__imgwhy_teardown__).toBeTypeOf('function');
+
+    dispatch(rows(host)[0], 'mouseleave');
+    expect(win.__imgwhy_teardown__).toBeTypeOf('function');
+  });
+
+  it('keeps its mark when the page fires the name the teardown used to travel under', () => {
+    // #56, on the half of it a reader would have felt: the box up, gone, up,
+    // gone. `panel.ts` says why a page could reach the panel this way and why
+    // it no longer can. What this pins is the panel's side of it — the box is
+    // still drawn afterwards, and the two listeners above are still the whole
+    // of what this window carries.
+    const host = pageOf(boxes);
+    const win = windowOf(host);
+    render(host, rowsFor(host), win);
+    dispatch(rows(host)[0], 'mouseenter');
+    const up = drawn(host);
+
+    win.dispatchEvent({ type: CLOSING });
+
+    expect(drawn(host)).toBe(up);
+    expect([...win.listeners.keys()].sort()).toEqual(['resize', 'scroll']);
+  });
+
   it('takes them down when the panel closes with a mark still up', () => {
-    // Which is why the closing click says so. A toolbar click does not move
-    // the pointer off the row, so the mark is up when the panel goes — and a
-    // window listener is the one thing in this panel that `remove()` on the
-    // host does not take with it.
+    // Which is why the closing click calls the teardown first. A toolbar click
+    // does not move the pointer off the row, so the mark is up when the panel
+    // goes — and a window listener is the one thing in this panel that
+    // `remove()` on the host does not take with it.
     const host = pageOf(boxes);
     const win = windowOf(host);
     render(host, rowsFor(host), win);
     dispatch(nameIn(rows(host)[0]), 'focusin');
-    expect([...win.listeners.keys()].sort()).toEqual([CLOSING, 'resize', 'scroll']);
+    expect([...win.listeners.keys()].sort()).toEqual(['resize', 'scroll']);
 
     close(host, win);
 
     expect(host.getElementById(HOST_ID)).toBeNull();
     expect([...win.listeners.keys()]).toEqual([]);
+    // And the slot with them, so the world holds no function for a panel that
+    // is no longer in the page.
+    expect(win.__imgwhy_teardown__).toBeUndefined();
   });
 });
 
@@ -1512,7 +1556,6 @@ describe('a row for an image the page has not fetched', () => {
         run();
         return 1;
       },
-      Event: Ev,
       chrome: {
         runtime: {
           sendMessage: (message: unknown): Promise<unknown> => {
@@ -1605,16 +1648,63 @@ describe('a row for an image the page has not fetched', () => {
     expect(sent).toHaveLength(1);
   });
 
+  it('keeps watching when the page fires the name the teardown used to travel under', async () => {
+    // The other half of #56, on the half a reader would have read rather than
+    // felt: a row stuck at `not loaded` about an image arriving behind the
+    // panel. `panel.ts` says what a page could do with the event and why it
+    // cannot now. What this pins is the watch — still on the page after the
+    // firing, and still asking the worker when the page fetches the file.
+    const { host, win, img, sent } = watching();
+
+    win.dispatchEvent({ type: CLOSING });
+
+    expect(listenersIn(host)).toEqual(['img: load']);
+
+    loads(img);
+    await Promise.resolve();
+
+    expect(sent).toHaveLength(1);
+  });
+
   it('takes its watch off the page when the panel closes', () => {
+    // The toolbar click, run as Chrome runs it: the reader finds the panel,
+    // reads the teardown off the world it shares with it, and calls that before
+    // it removes the host. A watch is on a page element, so `remove()` is
+    // exactly what does not reach it.
     const { host, win } = watching();
 
-    win.dispatchEvent({ type: '__imgwhy_closing__' });
+    close(host, win);
 
     expect(listenersIn(host)).toEqual([]);
+    expect(host.getElementById(HOST_ID)).toBeNull();
+    expect(win.__imgwhy_teardown__).toBeUndefined();
+  });
+
+  it('takes the mark and the watch off together when the panel closes', () => {
+    // Criterion 7 for a panel doing both at once, which is the case the two
+    // above have between them and neither has on its own — and it is the
+    // ordinary one: a reader with the pointer on the row they are reading,
+    // whose image is exactly the kind that has loaded nothing yet. One toolbar
+    // click has to reach the box's two listeners on the window and the watch on
+    // the page's `<img>`, and `remove()` on the host reaches neither.
+    const { host, win, img } = watching();
+
+    dispatch(rows(host)[0], 'mouseenter');
+    expect([...win.listeners.keys()].sort()).toEqual(['resize', 'scroll']);
+    expect(listenersIn(host)).toEqual(['img: load']);
+    // The box is up on the image the one row is about, so there is something
+    // for the mark's half of the teardown to take down rather than nothing.
+    expect(drawn(host)).toContain(`top: ${img.rect.top}px`);
+
+    close(host, win);
+
+    expect([...win.listeners.keys()]).toEqual([]);
+    expect(listenersIn(host)).toEqual([]);
+    expect(win.__imgwhy_teardown__).toBeUndefined();
   });
 
   it('takes its watch off the page when the close button is clicked', () => {
-    const { host } = watching();
+    const { host, win } = watching();
     const shut = of(host, 'button').find((node) => node.textContent === 'Close');
     if (shut === undefined) throw new Error('the panel has no close button');
 
@@ -1622,5 +1712,6 @@ describe('a row for an image the page has not fetched', () => {
 
     expect(listenersIn(host)).toEqual([]);
     expect(host.getElementById(HOST_ID)).toBeNull();
+    expect(win.__imgwhy_teardown__).toBeUndefined();
   });
 });

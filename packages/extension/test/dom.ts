@@ -30,18 +30,20 @@
  * someone's browser and nothing at all in a test that called it directly.
  *
  * `globals` below is the other half of the same argument. `matchMedia`,
- * `getComputedStyle`, `innerWidth`, `innerHeight`, `devicePixelRatio`,
- * `window` and `Event` are names the injected functions have because a page
- * has them, and a `vm` context holds nothing that is not put in it — so a
- * function reaching for a name that is not one of those eight fails here
- * rather than in somebody's browser.
+ * `getComputedStyle`, `innerWidth`, `innerHeight`, `devicePixelRatio` and
+ * `window` are names the injected functions have because a page has them, and
+ * a `vm` context holds nothing that is not put in it — so a function reaching
+ * for a name that is not one of those seven fails here rather than in
+ * somebody's browser.
  *
  * `windowOf` is the newest of them and the one with the most semantics in it:
- * a scroll offset that moves, every box on the page moving with it, and a
- * listener a second registration of the same function does not duplicate. All
- * three are what a mark that follows its image rests on, and a window that
- * only recorded the calls made to it would report a mark drawn once from a
- * stale rect as a mark that follows.
+ * a scroll offset that moves, every box on the page moving with it, a listener
+ * a second registration of the same function does not duplicate, and the slot
+ * an open panel leaves its teardown in. The first three are what a mark that
+ * follows its image rests on, and a window that only recorded the calls made to
+ * it would report a mark drawn once from a stale rect as a mark that follows.
+ * The fourth is how the two injections reach each other, which is a claim about
+ * one object being held by both.
  */
 
 /** What `attachShadow` is handed, which is one field of interest. */
@@ -93,9 +95,12 @@ export type ScrollToAsked = { top?: number; left?: number; behavior?: string };
 /**
  * An event, as much of one as a dispatch needs.
  *
- * Named `Ev` here and handed to the reader as `Event`, the way `El` is handed
- * over as an element: what the injected functions have is the page's globals,
- * and `readPage` reaches for that one to say the panel is closing.
+ * Named `Ev` rather than `Event` because it is the test's own and no longer the
+ * page's: neither injected function reaches for that global any more, since the
+ * panel's teardown is a function on the isolated world's global rather than an
+ * event on the window. What is dispatched here is `scroll`, `resize` and
+ * `load` — and, in `pointing.test.ts`, the name the teardown used to travel
+ * under, fired the way a hostile page would fire it.
  */
 export class Ev {
   constructor(readonly type: string) {}
@@ -631,6 +636,17 @@ export type Win = {
   removeEventListener(type: string, handler: () => void): void;
   scrollTo(asked: ScrollToAsked): void;
   dispatchEvent(event: { type: string }): void;
+  /**
+   * The function an open panel leaves for the closing click, or nothing.
+   *
+   * A property of the window because that is where the panel puts it, and
+   * `panel.ts` says why it is a property rather than an event. What matters
+   * here is that it is one object both injections hold: they run in separate
+   * `vm` contexts, because a stringified function is evaluated on its own and
+   * twice, and the window handed to both is what stands in for the one global
+   * an isolated world gives them in a browser.
+   */
+  __imgwhy_teardown__?: () => void;
 };
 
 /**
@@ -726,18 +742,19 @@ const matches = (query: string, width: number): boolean =>
 
 /**
  * The `vm` context an injected function runs in: a document, the five names a
- * page supplies that the reader reads, and the two more the panel's mark and
- * the closing click need — the window, and the event fired on it.
+ * page supplies that the reader reads, and the one more the panel's mark and
+ * the closing click need, which is the window.
  *
  * Nothing else is here, deliberately. The context is the claim — a function
- * that reaches for a ninth global is a function whose stringified copy would
+ * that reaches for an eighth global is a function whose stringified copy would
  * throw in a browser, and the only way to catch that is to hand it a world
- * with nothing in it that was not written down.
+ * with nothing in it that was not written down. `Event` was here while the
+ * teardown was one, and it left with it.
  *
  * `win` is a parameter rather than a fresh window every time because the panel
  * and the click that closes it are two injections into one page: a case that
- * asks whether the closing click took the panel's window listeners down has to
- * hand both halves the same window.
+ * asks whether the closing click found the panel's teardown and took its
+ * window listeners down has to hand both halves the same window.
  */
 export const globals = (
   host: Page,
@@ -754,5 +771,4 @@ export const globals = (
     aspectRatio: element.aspectRatio,
   }),
   window: win,
-  Event: Ev,
 });
