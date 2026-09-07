@@ -49,8 +49,8 @@
  * throughout, and its lazy images stay untriggered.
  *
  * That is a choice between two things the brief asks for, and it is worth being
- * plain about which one this is. The brief says "return to the top" three
- * times; it also says, in bold, to leave the page as found, "because the read
+ * plain about which one this is. The brief says three times to come back to
+ * the top; it also says, in bold, to leave the page as found, "because the read
  * that follows has to describe the same page a reader would see", and its
  * acceptance criterion is that the page is left at the scroll position it
  * started from. This follows the second. The two only differ on a page that

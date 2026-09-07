@@ -34,17 +34,18 @@ describe('the fixture server', () => {
     const server = await startFixtureServer();
     const url = server.url;
 
-    // `/held-open.png` writes its headers and never a body, which is the whole
-    // point of it: the settle-bound test needs a request that stays in flight.
+    // `/held-open.png` answers nothing at all, which is the whole point of it:
+    // the settle-bound test needs a request that stays in flight.
     // A connection like that is also the one thing that keeps `server.close()`
     // waiting — it resolves when the last connection ends, and this one never
     // does — so `closeAllConnections()` is what makes the close finish at all.
     // Nothing else here holds a socket open, so without this the claim above
     // is only ever tested against a server that had already gone quiet.
-    // `get` rather than `fetch`, and an outcome rather than a rejection: what
-    // this has to watch is a request that never gets an answer, and a promise
-    // that never settles is not something a test can assert on. Both endings
-    // resolve it, so the assertion below names the one that happened.
+    // `get` rather than `fetch`, and an outcome rather than a rejection. An
+    // awaited `fetch` does settle — undici rejects it the moment the socket is
+    // torn down — but it also leaves an unhandled socket error behind after the
+    // run, printed by vitest as an error beside a passing test. This resolves
+    // on either ending instead, so the assertion below names which happened.
     const held = new Promise<string>((resolve) => {
       const asking = get(`${url}/held-open.png`, () => resolve('the server answered'));
       asking.on('error', () => resolve('the connection was torn down'));

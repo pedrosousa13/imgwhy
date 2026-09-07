@@ -465,9 +465,10 @@ export async function startFixtureServer(): Promise<FixtureServer> {
       return;
     }
 
-    // What `/never-settles.html` asks for. The headers go out and the body
-    // never does, so the request stays open until something tears the socket
-    // down — `closeAllConnections()` in `close()` is what does.
+    // What `/never-settles.html` asks for. Nothing goes out at all: Node holds
+    // a response's head until something writes a body, and nothing here ever
+    // does, so the request stays open until something tears the socket down —
+    // `closeAllConnections()` in `close()` is what does.
     if (path === '/held-open.png') {
       res.writeHead(200, { 'content-type': 'image/png' });
       return;
