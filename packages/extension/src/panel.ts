@@ -64,8 +64,7 @@ import type { Reading } from './read.js';
  * type is erased before `tsc` emits anything, so `dist/panel.js` is still one
  * function and `read.ts` needs no import to have this. The *name* is a
  * different matter and is written out at every site in both files, for the
- * reason both files write out `HOST_ID`: an injected function arrives with
- * nothing of its module around it.
+ * reason `HOST_ID` below is — the comment on it says why.
  */
 declare global {
   interface Window {
@@ -854,13 +853,11 @@ export function renderPanel(panel: Panel, reading: Reading): 'opened' {
    * browser, so moving from row to row costs nothing and there is nothing to
    * count.
    *
-   * The third line is neither a listener nor about geometry. Removing the host
-   * takes every listener on a node with it and takes nothing off the window, so
-   * a panel closed with the pointer still on a row would leave those two
-   * holding a shadow tree that is in no document — and `teardown` below is what
-   * the closing click calls to take them off. This is where a mark leaves it,
-   * and the window is touched on this line only because the two above it
-   * already do.
+   * The third line is neither a listener nor about geometry. It leaves
+   * `teardown` below where the closing click can find it, because these two are
+   * one of the two things `teardown` exists to take off and it says why. A mark
+   * is one of the two sites that arm the slot, and this is the mark's; the
+   * window is touched on this line only because the two above it already do.
    */
   const mark = (row: Row, named: Element): void => {
     const draw = (): void => place(row, named);
@@ -936,9 +933,8 @@ export function renderPanel(panel: Panel, reading: Reading): 'opened' {
    *
    * A reader who has read the panel should not have to remember which icon
    * opened it. The click does what the icon's second click does and in the same
-   * order: `teardown`, then the host. Two steps rather than one because
-   * `teardown` reaches the two window listeners a mark keeps and the watches on
-   * the page's own images, and removing the host reaches neither of those.
+   * order: `teardown`, then the host. Two steps rather than one for the reason
+   * `teardown` gives.
    *
    * Called rather than read back off the slot, because this half is the panel
    * and the function is already in scope. `read.ts` is the half that has to go
@@ -1343,11 +1339,10 @@ export function renderPanel(panel: Panel, reading: Reading): 'opened' {
   /**
    * Take every watch off the page.
    *
-   * These are the only listeners this panel puts on a page element, and that
-   * makes them the only ones the closing `remove()` cannot take: everything
-   * else hangs off the closed root and goes with it. So `teardown` takes them
-   * instead, the way it takes the mark's two window listeners, and a page whose
-   * panel has been shut carries nothing of this extension again.
+   * These are the only listeners this panel puts on a page element, which is
+   * what makes them the second of the two things `teardown` exists for. Called
+   * from there, and a page whose panel has been shut carries nothing of this
+   * extension again.
    */
   const release = (): void => {
     for (const drop of watching.splice(0)) drop();
@@ -1361,17 +1356,31 @@ export function renderPanel(panel: Panel, reading: Reading): 'opened' {
    * Take this panel off the page, which is the whole of what the closing click
    * asks for.
    *
-   * Both halves at once, because a panel goes as a whole: the box comes down
-   * with the two window listeners that were keeping it on its image, every
-   * watch comes off the images the rows were waiting on, and the slot goes with
+   * There is a teardown at all because of the two places this panel reaches
+   * that removing the host does not. Every node it made and every listener on
+   * one of them hangs off the closed root, so `remove()` is the whole of that
+   * cleanup — and the two exceptions are not nodes in the host. A mark keeps a
+   * `scroll` and a `resize` listener on the window; a row whose image has
+   * loaded nothing keeps a `load` listener on the page's own `<img>`. A panel
+   * closed with the pointer on a row would otherwise leave a handler redrawing
+   * a box from a shadow tree that is in no document, and the page would carry a
+   * watch for an image nobody is waiting on. Every other site here says which
+   * of the two it owns and refers back to this paragraph for why they survive.
+   *
+   * So both go at once, because a panel goes as a whole: `unmark` takes the box
+   * and its two listeners, `release` takes every watch, and the slot goes with
    * them so the world holds no teardown for a panel that is no longer there.
    *
-   * `mark` and `watch` are what leave it there, and neither does so until this
-   * panel has something on the page to take off. A page whose images have all
-   * loaded and whose rows nobody has pointed at gets a panel that never touches
-   * the window at all, which is what `panel.test.ts` builds one in. Nothing
-   * counts what is out there and nothing needs to: both sites write the same
-   * function, so writing it twice is writing it once.
+   * `mark` and `watch` are what leave it there, and neither touches the window
+   * until this panel has put something on the page — so a page whose images
+   * have all loaded and whose rows nobody has pointed at gets a panel that is a
+   * function of `document` alone, which is what `panel.test.ts` builds one in.
+   * Once either has armed it the slot stays armed for the rest of the panel's
+   * life, and that is not an oversight: a mark takes its own listeners down
+   * when the pointer leaves, and the panel is still in the page after it. The
+   * one thing that would be wrong is a slot outliving the panel, and that is
+   * this function's last line. Two sites arm it and neither has to know about
+   * the other, because both write the same function.
    *
    * A declaration rather than a `const`, because `mark` is written above this
    * and arms the slot with it.
@@ -1406,11 +1415,17 @@ export function renderPanel(panel: Panel, reading: Reading): 'opened' {
       watching.push(() => {
         element.removeEventListener('load', loaded);
       });
-
-      // Something of this panel is on a page element now, so the closing click
-      // has a teardown to find.
-      window.__imgwhy_teardown__ = teardown;
     }
+
+    // One write after the loop rather than one per image, because the slot
+    // holds the same function whatever the loop found and the condition is
+    // about the panel rather than about any one image. `watching` is the
+    // condition: it is empty until a watch goes on a page element, `release`
+    // empties it again, and it holds every watch that is on one — so a
+    // non-empty list is exactly "this panel has something on the page for the
+    // closing click to take off", which is what `teardown` says the arming has
+    // to wait for.
+    if (watching.length > 0) window.__imgwhy_teardown__ = teardown;
   };
 
   /**

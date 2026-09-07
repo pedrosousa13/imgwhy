@@ -22,16 +22,13 @@ import { image, reading } from './reading.js';
 const HOST_ID = '__imgwhy_host__';
 
 /**
- * The name the panel's teardown used to travel under, kept because a page can
- * still fire it and the panel now has to be indifferent to that.
+ * The name the panel's teardown used to travel under, which the two cases below
+ * fire the way a page would.
  *
- * It was a plain `Event` on the page's own window, dispatched by the closing
- * click and listened for in the isolated world — and a DOM event on the window
- * is delivered across worlds, so the page could fire it too. `panel.ts` says
- * what that cost and what replaced it. What is left for a test to say is that
- * firing this reaches nothing, which needs the name written out: the panel
- * registers no listener for it, and a case that spelled it differently would be
- * a case agreeing with itself.
+ * `panel.ts` says why it stopped being an event and what a page could do with
+ * one. What is left for a test is that firing it reaches nothing, and that
+ * needs the name written out rather than imported: a case that spelled it
+ * differently would be a case agreeing with itself.
  */
 const CLOSING = '__imgwhy_closing__';
 
@@ -690,14 +687,11 @@ describe('a mark, while it is up', () => {
   });
 
   it('keeps its mark when the page fires the name the teardown used to travel under', () => {
-    // #56. The teardown used to be a plain `Event` on the page's own window,
-    // which is a channel the page can write to: a DOM event dispatched on the
-    // window is delivered to every world listening on it, so
-    // `setInterval(() => window.dispatchEvent(new Event(CLOSING)), 50)` in the
-    // page took the box down as fast as a pointer could put it up. The panel
-    // registers nothing for this name now, or for any other a page could
-    // guess — what it leaves is a property on the isolated world's own global,
-    // which no main-world script can read or write.
+    // #56, on the half of it a reader would have felt: the box up, gone, up,
+    // gone. `panel.ts` says why a page could reach the panel this way and why
+    // it no longer can. What this pins is the panel's side of it — the box is
+    // still drawn afterwards, and the two listeners above are still the whole
+    // of what this window carries.
     const host = pageOf(boxes);
     const win = windowOf(host);
     render(host, rowsFor(host), win);
@@ -1655,11 +1649,11 @@ describe('a row for an image the page has not fetched', () => {
   });
 
   it('keeps watching when the page fires the name the teardown used to travel under', async () => {
-    // The other half of #56, and the half a reader would have seen rather than
-    // felt: the forged event ran `release`, which took every `load` watch off
-    // the page and put the queue counter past every question in flight. Rows
-    // then said `not loaded` for as long as the panel stayed open, about images
-    // the reader could watch arrive behind it.
+    // The other half of #56, on the half a reader would have read rather than
+    // felt: a row stuck at `not loaded` about an image arriving behind the
+    // panel. `panel.ts` says what a page could do with the event and why it
+    // cannot now. What this pins is the watch — still on the page after the
+    // firing, and still asking the worker when the page fetches the file.
     const { host, win, img, sent } = watching();
 
     win.dispatchEvent({ type: CLOSING });
@@ -1669,8 +1663,6 @@ describe('a row for an image the page has not fetched', () => {
     loads(img);
     await Promise.resolve();
 
-    // The load still reaches the worker, which is what says the counter was
-    // left alone as well as the listener.
     expect(sent).toHaveLength(1);
   });
 
@@ -1685,6 +1677,29 @@ describe('a row for an image the page has not fetched', () => {
 
     expect(listenersIn(host)).toEqual([]);
     expect(host.getElementById(HOST_ID)).toBeNull();
+    expect(win.__imgwhy_teardown__).toBeUndefined();
+  });
+
+  it('takes the mark and the watch off together when the panel closes', () => {
+    // Criterion 7 for a panel doing both at once, which is the case the two
+    // above have between them and neither has on its own — and it is the
+    // ordinary one: a reader with the pointer on the row they are reading,
+    // whose image is exactly the kind that has loaded nothing yet. One toolbar
+    // click has to reach the box's two listeners on the window and the watch on
+    // the page's `<img>`, and `remove()` on the host reaches neither.
+    const { host, win, img } = watching();
+
+    dispatch(rows(host)[0], 'mouseenter');
+    expect([...win.listeners.keys()].sort()).toEqual(['resize', 'scroll']);
+    expect(listenersIn(host)).toEqual(['img: load']);
+    // The box is up on the image the one row is about, so there is something
+    // for the mark's half of the teardown to take down rather than nothing.
+    expect(drawn(host)).toContain(`top: ${img.rect.top}px`);
+
+    close(host, win);
+
+    expect([...win.listeners.keys()]).toEqual([]);
+    expect(listenersIn(host)).toEqual([]);
     expect(win.__imgwhy_teardown__).toBeUndefined();
   });
 

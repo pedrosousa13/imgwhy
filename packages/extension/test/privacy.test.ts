@@ -124,24 +124,27 @@ const GLOBALS = new Set([
  * `toUpperCase` capitalises the first letter of a sentence that otherwise
  * follows a dash.
  *
- * `addEventListener`, `removeEventListener`, `scrollTo` and
- * `__imgwhy_teardown__` are the pointing half, and they are the four entries
- * that read like a reach into the page. Not one of them is.
+ * `addEventListener`, `removeEventListener` and `scrollTo` are the pointing
+ * half, and they are the three entries that read like a reach into the page.
+ * Not one of them is.
  *
  * `addEventListener` is called on nodes the panel made inside its own closed
  * root — `pointing.test.ts` walks the page and finds none — and on the window,
  * where a mark keeps two listeners while it is up so the box can be redrawn
  * where the image now is. `removeEventListener` is what takes those two down:
- * when the mark comes down, and on the closing click.
- * `dormant.test.ts` refuses the event names that would fire without a click.
+ * when the mark comes down, and on the closing click. `dormant.test.ts` refuses
+ * the event names that would fire without a click.
  *
- * `__imgwhy_teardown__` is that closing click, and it is the extension calling
- * itself. `read.ts` reads it off the global of the world both injected halves
- * run in and calls whatever an open panel left there — a function this package
- * wrote, in a world a page cannot write to, which is the whole reason it is a
- * property and not the event it used to be. `panel.ts` owns that argument. The
- * name appears in `WRITTEN` below as well, because the panel is the half that
- * puts it there.
+ * `__imgwhy_teardown__` is the fourth entry that wants an argument, and it is
+ * not one of those three: it reads like neither a reach nor a call but like
+ * *state*, because a property holding a value between one statement and the
+ * next is what state is — and keeping something is the thing this package is
+ * not allowed to do. What it holds is the closing click, which is the extension
+ * calling itself. `read.ts` reads it off the global of the world both injected
+ * halves run in and calls whatever an open panel left there: a function this
+ * package wrote, in a world a page cannot write to. `panel.ts` owns the
+ * argument for the shape. What answers the storage question is in `WRITTEN`
+ * below, beside the write that puts it there.
  *
  * `scrollTo` is where `scrollIntoView` used to be, and the swap is this
  * slice's whole first fix rather than a detail. `scrollIntoView` reaches a
@@ -231,16 +234,15 @@ const CALLED = new Set([
  * is a claim about the assignment rather than about the property, and it is
  * checked as one.
  *
- * `__imgwhy_teardown__` is the one entry that is not on an element at all. It
- * is a property of the global of the isolated world the panel runs in, holding
- * the one function that takes the panel off the page, and it is the only thing
- * this package leaves anywhere that outlives a statement — which is why it
- * reads like the storage the design rules out and is not. It keeps no page
- * data: a function is not a fact about a page, nothing reads a field off it,
- * and it is gone when the panel is. It is unreachable from a page for the
- * reason `panel.ts` gives, and unreachable from the extension's next click for
- * a plainer one — the world goes with the document, so a navigation leaves
- * nothing behind to be found.
+ * `__imgwhy_teardown__` is the one entry that is not on an element at all, and
+ * the one this list has to answer the storage question for. It is a property of
+ * the global of the isolated world the panel runs in, holding the one function
+ * that takes the panel off the page, and it is the only thing this package
+ * leaves anywhere that outlives the statement that wrote it — which is what
+ * makes it read like the storage the design rules out. It keeps no page data:
+ * a function is not a fact about a page, nothing reads a field off it, and
+ * `panel.ts` is where its life begins and ends. Unreachable from a page for the
+ * reason `panel.ts` gives.
  *
  * `innerHTML` is still refused, by absence here and by name in
  * `escaping.test.ts`.
