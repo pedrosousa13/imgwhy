@@ -36,6 +36,7 @@ const hero = (sizes: string, bytes: number): CapturedImage => ({
 const capture = (sizes: string, bytes: number, producedBy = '0.4.1'): Capture => ({
   url: 'https://example.com/',
   capturedAt: '2026-01-01T00:00:00.000Z',
+  readAs: 'scrolled',
   version: { schema: CAPTURE_SCHEMA, producedBy },
   devices: [{ id: 'iphone-se', name: 'iPhone SE', viewport: { width: 375, height: 667 }, dpr: 2 }],
   runs: [{ deviceId: 'iphone-se', images: [hero(sizes, bytes)], backgroundImageCount: 0 }],

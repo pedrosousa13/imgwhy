@@ -41,7 +41,7 @@ So the same file now also reads the shipped string for both exempted names, and 
 
 One field is simpler, and simplicity here has a real claim: two numbers are two things to keep right, and a reader of a Capture has to know which of them answers the question they are asking.
 
-The case for one is strongest if a release number can serve as both. It cannot serve as a shape number, for the reason above. What it could do is let the shape number go and have `in.ts` refuse on shape alone, the way it does today — which is exactly what #69 records as insufficient: `in.ts` "can only ever reject on shape", and #48's new field makes an absent field and a `false` value the same bytes.
+The case for one is strongest if a release number can serve as both. It cannot serve as a shape number, for the reason above. What it could do is let the shape number go and have `in.ts` refuse on shape alone, the way it does today — which is exactly what #69 records as insufficient: `in.ts` "can only ever reject on shape", and #48's new field makes an absent field and a `false` value the same bytes. #48 landed `readAs: 'scrolled'` rather than a boolean, so an absent field and a written one are no longer the same bytes, but an absent one still says nothing at all — and it is `CAPTURE_SCHEMA` going to 2 that refuses a Capture written before the field.
 
 The other shape considered and rejected was deriving `producedBy` inside the runner from its own `package.json`. It is one fewer required option, and it would record `@imgwhy/runner`'s version rather than the version a user has — a number nobody installs, and one that says nothing about the command that wrote the file.
 

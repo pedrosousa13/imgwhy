@@ -55,6 +55,16 @@ const isLoading = (value: unknown): value is CapturedImage['loading'] =>
   value === null || value === 'lazy' || value === 'eager';
 
 /**
+ * How the reading was taken, which is one method today and is spelled one way.
+ *
+ * Written as a comparison against the names rather than a check that the value
+ * is a string, so a Capture naming a method this build does not know is
+ * refused rather than carried. `Capture.readAs` in core says why the field is
+ * a name and not a flag, and what a second name would be.
+ */
+const isReadAs = (value: unknown): value is Capture['readAs'] => value === 'scrolled';
+
+/**
  * One entry of a recorded `srcset`.
  *
  * `w` and `x` are checked against null as well as against a number, and a
@@ -286,6 +296,14 @@ function readParsed(file: string, parsed: unknown): LoadedCapture {
     return fail(': version.producedBy must be a non-empty string');
   }
 
+  // After the version, because the version is what says the field should be
+  // here at all: a Capture written before `readAs` existed carries the earlier
+  // schema number and is refused above, so anything reaching this line claims
+  // a shape that names the field. The message quotes the one method rather
+  // than the value it found, which is `readParsed`'s rule about what a message
+  // may carry — and the method is this module's own word, not the file's.
+  if (!isReadAs(parsed['readAs'])) return fail(': readAs must be "scrolled"');
+
   const devices = parsed['devices'];
   if (!Array.isArray(devices) || devices.length === 0) {
     return fail(' must carry a "devices" array holding at least one profile');
@@ -330,6 +348,7 @@ function readParsed(file: string, parsed: unknown): LoadedCapture {
     capture: {
       url: parsed['url'],
       capturedAt: parsed['capturedAt'],
+      readAs: parsed['readAs'],
       version: { schema: version['schema'], producedBy: version['producedBy'] },
       devices: profiles,
       runs: rendered,

@@ -21,6 +21,7 @@ import { writeCapture } from '../src/out.js';
 const CAPTURE: Capture = {
   url: 'https://example.com/',
   capturedAt: '2026-01-01T00:00:00.000Z',
+  readAs: 'scrolled',
   version: { schema: CAPTURE_SCHEMA, producedBy: '0.4.1' },
   devices: [
     { id: 'iphone-se', name: 'iPhone SE', viewport: { width: 375, height: 667 }, dpr: 2 },
@@ -108,6 +109,10 @@ const carrying = (text: string): string => `${text}${CONTROLS}`;
 const HOSTILE: Capture = {
   url: carrying('https://example.com/../../etc/passwd'),
   capturedAt: carrying('2026-01-01T00:00:00.000Z'),
+  // Spelled the one way it may be, for the reason the schema below is: a
+  // reader keys on it, so a file carrying anything else is refused before
+  // anything else in it is examined. Neither is a string off a page.
+  readAs: 'scrolled',
   // The schema is the one number in a Capture a reader keys on, so a hostile
   // file has to carry the one this build reads or it is refused before
   // anything else in it is examined. `producedBy` is a string like every
@@ -215,6 +220,10 @@ const FIELDS: [where: string, refused: unknown[], said: string][] = [
     ': version.schema must be a whole number above 0',
   ],
   ['version.producedBy', [42, '', null], ': version.producedBy must be a non-empty string'],
+  // The one method there is, so every other spelling of it is refused: a
+  // neighbouring word, a flag where a name belongs, and the string with a
+  // space on the end that a hand-edited file grows.
+  ['readAs', ['loaded', 'Scrolled', 'scrolled ', true, 42, '', null], ': readAs must be "scrolled"'],
   ['devices', [{}, [], 'iphone-se'], ' must carry a "devices" array holding at least one profile'],
   ['runs', [{}, 'iphone-se'], ' must carry a "runs" array'],
   ['devices.0', [5, 'iphone-se', []], ': devices[0] must be an object describing one device'],
@@ -366,12 +375,14 @@ describe('readCapture', () => {
 
   it('refuses a shape below the one it reads, which is the same check downward', () => {
     // The comparison is an inequality, so a number under this build's is
-    // refused as surely as one over it. With the schema at 1 the only numbers
-    // below it are 0 and the negatives, which the range check answers first —
-    // so this is the message the lower direction produces today, and the one
-    // above is what a 1 will produce once the schema is 2.
+    // refused as surely as one over it. With the schema at 2 there is a whole
+    // number below it for the first time, so the lower direction now reaches
+    // the same message the upper one does rather than being answered by the
+    // range check. A Capture carrying 1 is one written before `readAs`, and
+    // this is the refusal that stops a reader answering out of it.
     expect(refusing(holding('version.schema', CAPTURE_SCHEMA - 1))).toBe(
-      `${file}: version.schema must be a whole number above 0`,
+      `${file}: version.schema is ${CAPTURE_SCHEMA - 1}, and this build of imgwhy reads ` +
+        `${CAPTURE_SCHEMA}`,
     );
   });
 

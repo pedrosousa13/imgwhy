@@ -125,7 +125,7 @@ export type DeviceRun = {
  * all, which is what lets the same functions run in Node, in a page and in a
  * service worker, and `test/no-globals.test.ts` holds that.
  */
-export const CAPTURE_SCHEMA = 1;
+export const CAPTURE_SCHEMA = 2;
 
 /**
  * The seam between the runner and the report. A Capture is JSON on disk: the
@@ -138,6 +138,36 @@ export type Capture = {
    */
   url: string;
   capturedAt: string;
+  /**
+   * How the reading was taken. `capturedAt` says when a Capture was taken;
+   * this says how, because the two are different evidence and a reader cannot
+   * tell them apart from the figures.
+   *
+   * `scrolled` is the one method there is. `packages/runner/src/settle.ts`
+   * steps the page down a screen at a time so the browser asks for the files a
+   * reader would only have reached by scrolling, puts the page back where it
+   * started, and holds the run until the network has gone quiet. So every
+   * figure in this file was read off a page that had been scrolled through and
+   * returned, rather than off a page that had merely loaded.
+   *
+   * A named method rather than `scrolled: true`, because #48 put three
+   * readings and this field records which of them was taken. A flag can only
+   * ever be true here, and the two readings not chosen would each be a name
+   * beside this one rather than a second flag: reading the page as it opens
+   * and again once everything has arrived, and reporting both, which doubles a
+   * run and needs a decision about which reading a verdict is about; and
+   * provoking the loads without ever letting layout see a scroll, which
+   * depends on how each page implements laziness and cannot reach the
+   * browser's own.
+   *
+   * A Capture written before this field carries no `readAs`, and nothing here
+   * tells such a file apart from one whose field went missing. `CAPTURE_SCHEMA`
+   * above is what does: a required field is a shape change, so the number went
+   * to 2, and `packages/cli/src/in.ts` refuses any other in either direction —
+   * so a Capture with no `readAs` is refused for its shape before anything
+   * looks for the field.
+   */
+  readAs: 'scrolled';
   /**
    * What wrote this file, on two numbers that move on different clocks.
    *

@@ -867,6 +867,18 @@ describe('capturePage, on a page whose images sit below the fold', () => {
     for (const image of images) expect(image.transferBytes).toBeGreaterThan(0);
   }, 60_000);
 
+  it('says in the Capture that the reading was taken after a scroll', async () => {
+    const capture = await capturing({
+      url: `${server.url}/below-the-fold.html`,
+      profiles: [desktop],
+    });
+
+    // Every reading this writer takes is one, so this is a constant rather
+    // than a thing measured — and it is in the file so a consumer holding a
+    // Capture can tell what kind of reading produced the figures in it.
+    expect(capture.readAs).toBe('scrolled');
+  }, 60_000);
+
   it('measures a sizes=auto image at the width its layout gave it', async () => {
     const capture = await capturing({
       url: `${server.url}/below-the-fold.html`,

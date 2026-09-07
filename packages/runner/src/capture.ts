@@ -196,6 +196,12 @@ export async function capturePage({
       // resolves against, so the requested URL would misplace them all.
       url: landedOn,
       capturedAt: new Date().toISOString(),
+      // A constant, and true of every reading this function takes: each run
+      // above scrolls the page through and waits for the network before
+      // `collectImages` reads a thing, so there is no path here that produces
+      // a Capture of a page that was only loaded. `settle.ts` says why the
+      // earlier reading is wrong rather than merely incomplete.
+      readAs: 'scrolled',
       // The shape is core's constant, so the writer and every reader of a
       // Capture key on one number. The release is the caller's, because this
       // package cannot read its own.
