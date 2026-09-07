@@ -258,8 +258,6 @@ describe('capturePage', () => {
     // true" and names neither the request that went out cacheable nor what it
     // carried instead. The failure has to say which one, because the answer
     // decides whether the instruction missed a request the measurement reads.
-    // TEMPORARY DIAGNOSTIC - to be removed before this lands.
-    console.log('DIAG requests', JSON.stringify(server.requests));
     expect(server.requests.filter((r) => r.cacheControl !== 'no-cache')).toEqual([]);
     expect(server.requests.filter((r) => r.path === '/densities.html')).toHaveLength(5);
   }, 60_000);
