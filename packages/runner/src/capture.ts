@@ -3,7 +3,7 @@ import { CAPTURE_SCHEMA, parseSrcset } from '@imgwhy/core';
 import { type Browser, type CDPSession, type Page, chromium } from 'playwright';
 import { alignImageIds } from './align.js';
 import { type RawImage, collectImages, countBackgroundImages } from './collect.js';
-import { scrollThroughPage, waitForQuietNetwork } from './settle.js';
+import { refuseUnreachableBound, scrollThroughPage, waitForQuietNetwork } from './settle.js';
 import { type TransferLog, recordTransfers } from './transfers.js';
 
 /**
@@ -48,37 +48,30 @@ export type CaptureOptions = {
    * How long one profile waits for its page's network to go quiet, in
    * milliseconds.
    *
-   * An option rather than a constant for two reasons that pull the same way. A
-   * page that never settles must not hold a run open indefinitely, and what
-   * counts as too long is a property of the page and the network rather than
-   * of this code — a slow origin needs more than the default and a local
-   * fixture needs far less. The tests are the second reason: a run that is
-   * meant to give up should cost the suite a couple of seconds rather than the
-   * full default.
+   * An option because the tests need it: a run that is meant to give up should
+   * cost the suite a couple of seconds rather than the full default. Nothing
+   * the command does reaches it — `run.ts` passes a URL, the profiles and a
+   * release, and there is no flag and no config key behind this — so it is a
+   * seam a library caller could use and today's command does not.
    *
-   * There is a floor, and it is 250ms: the bound has to be longer than the
-   * quiet window a page is measured against, because a bound no longer than
-   * that window leaves no time in which the window could ever complete. That
-   * window is `QUIET_WINDOW` in `settle.ts`, which is where the number is
-   * decided and where the refusal lives, so the two cannot come apart; it is
-   * repeated here because a caller reading this line should not have to open
-   * that file to learn what they may not pass.
-   *
-   * A bound at or under it fails the run rather than being clamped up to
-   * something workable, and it fails partway through: the wait is what refuses
-   * it, and the wait comes after the navigation and the scroll pass, so a bound
-   * this small still costs a page load per profile before anything says so.
-   * That is the only figure treated this way — nothing else here is checked,
-   * because nothing else here has an answer that is wrong for every page. The
-   * floor is not a performance figure either: anything in the seconds is well
-   * clear of it, and the suite's shortest is two of them.
+   * There is a floor: the bound has to be longer than the quiet window a page
+   * is measured against, because a bound no longer than that window leaves no
+   * time in which the window could ever complete. `refuseUnreachableBound` in
+   * `settle.ts` is the whole of that rule and `capturePage` asks it before it
+   * opens a browser, so a bound under the floor costs nothing and says which
+   * end is at fault. At the time of writing the window is 250ms — repeated
+   * here so a caller need not open that file, and stale rather than wrong if
+   * `QUIET_WINDOW` ever moves, since the check reads the constant and this
+   * sentence does not. The floor is not a performance figure: anything in the
+   * seconds is well clear of it, and the suite's shortest is two of them.
    *
    * It bounds the wait and not the scroll pass that comes before it, and the
-   * two are worth adding up. The scroll pass carries its own bound —
-   * `MOST_STEPS` steps of about 66ms in `settle.ts`, so around thirteen
-   * seconds, and only ever that on a page that keeps growing as it is read —
-   * which is spent before this one starts counting. A page that settles takes
-   * a step per screenful and none of the rest.
+   * two are worth adding up. The scroll pass carries its own bound — a cap on
+   * how many steps it takes, at a pause each, both in `settle.ts` — which is
+   * spent before this one starts counting, and which on the figures there works
+   * out in the tens of seconds. Only a page that keeps growing as it is read
+   * ever reaches it: one that settles takes a step per screenful and none of
+   * the rest.
    */
   settleTimeout?: number;
 };
@@ -96,6 +89,10 @@ export async function capturePage({
   launch = () => chromium.launch(),
   settleTimeout = SETTLE_TIMEOUT,
 }: CaptureOptions): Promise<Capture> {
+  // Before the browser, because a bound no page could satisfy is the caller's
+  // mistake and not the page's: asking here costs nothing, where asking at the
+  // wait costs a launch, a navigation and a scroll pass per profile first.
+  refuseUnreachableBound(settleTimeout);
   const browser = await startBrowser(launch);
   try {
     const runs: DeviceRun[] = [];

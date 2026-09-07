@@ -150,15 +150,11 @@ export type Capture = {
    * figure in this file was read off a page that had been scrolled through and
    * returned, rather than off a page that had merely loaded.
    *
-   * A named method rather than `scrolled: true`, because #48 put three
-   * readings and this field records which of them was taken. A flag can only
-   * ever be true here, and the two readings not chosen would each be a name
-   * beside this one rather than a second flag: reading the page as it opens
-   * and again once everything has arrived, and reporting both, which doubles a
-   * run and needs a decision about which reading a verdict is about; and
-   * provoking the loads without ever letting layout see a scroll, which
-   * depends on how each page implements laziness and cannot reach the
-   * browser's own.
+   * A named method rather than `scrolled: true`, because #48 weighed three
+   * ways of taking the reading and this field records which of them was taken.
+   * A flag cannot: it can only ever be true here, so it would say that a scroll
+   * happened and never that a scroll is what the reading was. Another method
+   * arriving is another name beside this one.
    *
    * Whoever adds that second name has to add it to `isReadAs` in
    * `packages/cli/src/in.ts` by hand. Widening this union leaves that predicate

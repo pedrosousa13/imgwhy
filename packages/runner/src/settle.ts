@@ -46,9 +46,19 @@
  * **Reach anything above where the page started.** The pass descends and
  * returns, so a page that loads at a non-zero position — a fragment target, or
  * one that scrolls itself — keeps whatever is above that position out of view
- * throughout, and its lazy images stay untriggered. The brief asks for exactly
- * this shape, and the position it starts from is the one a reader would be at,
- * so the images it misses are the ones already behind that reader.
+ * throughout, and its lazy images stay untriggered.
+ *
+ * That is a choice between two things the brief asks for, and it is worth being
+ * plain about which one this is. The brief says "return to the top" three
+ * times; it also says, in bold, to leave the page as found, "because the read
+ * that follows has to describe the same page a reader would see", and its
+ * acceptance criterion is that the page is left at the scroll position it
+ * started from. This follows the second. The two only differ on a page that
+ * opens somewhere other than the top, and there the reader-sees rule governs: a
+ * reader who lands on `page.html#section` sees that page, not its top, so a run
+ * that ended at the top would be describing a page nobody was looking at. What
+ * it costs is the paragraph above — the images above the start stay untriggered
+ * — and those are the ones already behind that reader.
  */
 
 /**
@@ -148,12 +158,40 @@ export async function scrollThroughPage(): Promise<void> {
 }
 
 /**
+ * Refuse a settle bound no page could ever satisfy.
+ *
+ * `waitForQuietNetwork` cannot accumulate a window of quiet inside a bound no
+ * longer than the window, so every run under one fails — and the sentence it
+ * fails with is about the page, when the fault is in the bound. Saying so
+ * outright is the difference between a caller learning what they asked for and
+ * a caller reading a complaint about every page they point at.
+ *
+ * One function rather than a rule written twice, and asked in two places on
+ * purpose. `capturePage` asks it before it opens a browser, so a bound this
+ * small costs nothing; `waitForQuietNetwork` asks it too, because the rule is
+ * that function's and a caller reaching for it directly is owed the same
+ * answer. Both read `QUIET_WINDOW` from here, so neither can drift from it.
+ *
+ * `<=` and not `<`: at exactly the window the loop's two checks race inside one
+ * iteration, so whether it succeeded would come down to scheduling.
+ */
+export function refuseUnreachableBound(timeout: number): void {
+  if (timeout <= QUIET_WINDOW) {
+    throw new Error(
+      `A settle bound of ${timeout}ms is no longer than the ${QUIET_WINDOW}ms of quiet that ` +
+        `says a page has finished loading, so no page could ever satisfy it.`,
+    );
+  }
+}
+
+/**
  * Wait until nothing has been in flight for a while, or say what still is.
  *
  * Giving up is a failure and not a shrug, for the reason the module docblock
  * gives: falling through would put those images in the Capture as images that
- * chose no file. Throwing names them instead, and `packages/cli/src/message.ts`
- * puts that sentence on the command's stderr.
+ * chose no file. Throwing names them instead, and the command puts that
+ * sentence on its stderr: `run.ts` catches what `capturePage` threw and hands
+ * it to `fail(messageOf(error))`, whose `stderr` `bin.ts` writes out.
  *
  * `timeout` bounds confirming that the page settled, which is not the same as
  * bounding the page. Reaching it with nothing outstanding is its own failure
@@ -164,23 +202,16 @@ export async function scrollThroughPage(): Promise<void> {
  * request every hundred milliseconds is empty between any two of them, and a
  * bound that expires in one of those gaps has watched a gap, not an ending.
  *
- * Which is why a `timeout` at or below `QUIET_WINDOW` is refused outright
- * rather than run. No page can satisfy one — the loop cannot accumulate a
- * window of quiet inside a bound no longer than the window — so every run
- * under it would fail, and the sentence it failed with would be about the page
- * when the fault was in the bound. The refusal is here, where `QUIET_WINDOW`
- * is, so there is one statement of the rule rather than two that can drift.
+ * A bound this cannot work with is `refuseUnreachableBound`'s to say so about,
+ * and it is asked here as well as at the top of a run: this is the function the
+ * rule belongs to, and a direct caller gets the same answer as one that came
+ * through `capturePage`.
  */
 export async function waitForQuietNetwork(
   pending: () => string[],
   timeout: number,
 ): Promise<void> {
-  if (timeout <= QUIET_WINDOW) {
-    throw new Error(
-      `A settle bound of ${timeout}ms is no longer than the ${QUIET_WINDOW}ms of quiet that ` +
-        `says a page has finished loading, so no page could ever satisfy it.`,
-    );
-  }
+  refuseUnreachableBound(timeout);
 
   const giveUpAt = Date.now() + timeout;
   let quietSince: number | null = null;

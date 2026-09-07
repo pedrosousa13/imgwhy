@@ -961,6 +961,29 @@ describe('capturePage, on a page whose images sit below the fold', () => {
     expect(capture.runs[0]?.images[0]?.transferBytes).toBeGreaterThan(0);
   }, 60_000);
 
+  it('refuses a bound no page could satisfy before it opens a browser', async () => {
+    let opened = false;
+    const launch = async (): Promise<Browser> => {
+      opened = true;
+      return chromium.launch();
+    };
+
+    await expect(
+      capturing({
+        url: `${server.url}/below-the-fold.html`,
+        profiles: [desktop],
+        settleTimeout: 100,
+        launch,
+      }),
+    ).rejects.toThrow(/no page could ever satisfy/);
+
+    // Before the browser, which is the whole of what this adds over the same
+    // refusal read in `settle.test.ts`. Asked at the wait instead, this bound
+    // would have cost a launch, a navigation and a scroll pass per profile
+    // before anything said the bound was the problem.
+    expect(opened).toBe(false);
+  });
+
   it('fails, naming the file it never got, when the page will not settle', async () => {
     const failing = capturing({
       url: `${server.url}/never-settles.html`,

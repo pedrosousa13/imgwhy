@@ -1,6 +1,6 @@
 # 0002 — A Capture's version is two fields, and each has one source
 
-Accepted, 2026-09-07. Issue #69.
+Accepted, 2026-09-07. Issue #69. Amended 2026-09-07 for issue #48, which landed `readAs` and took `CAPTURE_SCHEMA` to 2: one sentence in "The argument against" below, and nothing else.
 
 ## The question as put
 
